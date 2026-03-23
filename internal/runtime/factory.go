@@ -33,7 +33,7 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	}
 
 	repo := &sqlite.SQLiteRepository{DB: db}
-	svc := service.New(repo)
+	svc := service.New(repo, cfg.Storage.DBPath)
 
 	cleanup := func() {
 		db.Close()

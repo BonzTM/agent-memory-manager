@@ -1,10 +1,13 @@
 package runtime
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // Config holds all runtime configuration for AMM.
@@ -70,8 +73,10 @@ func DefaultConfig() Config {
 	}
 }
 
-// LoadConfig reads a JSON config file and merges it with defaults.
+// LoadConfig reads a config file (JSON or TOML) and merges it with defaults.
 // If the file does not exist, defaults are returned without error.
+// JSON is detected by leading '{'; otherwise basic TOML (flat key = "value"
+// with [section] headers) is assumed.
 func LoadConfig(path string) (Config, error) {
 	cfg := DefaultConfig()
 
@@ -83,10 +88,86 @@ func LoadConfig(path string) (Config, error) {
 		return cfg, err
 	}
 
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		// JSON format.
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return DefaultConfig(), err
+		}
+		return cfg, nil
+	}
+
+	// Basic TOML parser: supports [section] headers and key = "value" pairs.
+	if err := parseFlatTOML(data, &cfg); err != nil {
 		return DefaultConfig(), err
 	}
 	return cfg, nil
+}
+
+// parseFlatTOML handles a simple subset of TOML sufficient for AMM config:
+// [section] headers and key = "value" / key = number / key = bool lines.
+func parseFlatTOML(data []byte, cfg *Config) error {
+	section := ""
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section = strings.ToLower(strings.Trim(line, "[]"))
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		// Strip surrounding quotes.
+		val = strings.Trim(val, "\"'")
+
+		fqKey := section + "." + key
+		switch fqKey {
+		case "storage.db_path":
+			cfg.Storage.DBPath = val
+		case "retrieval.default_limit":
+			if n, err := strconv.Atoi(val); err == nil {
+				cfg.Retrieval.DefaultLimit = n
+			}
+		case "retrieval.ambient_limit":
+			if n, err := strconv.Atoi(val); err == nil {
+				cfg.Retrieval.AmbientLimit = n
+			}
+		case "retrieval.enable_semantic":
+			if b, err := strconv.ParseBool(val); err == nil {
+				cfg.Retrieval.EnableSemantic = b
+			}
+		case "retrieval.enable_explain":
+			if b, err := strconv.ParseBool(val); err == nil {
+				cfg.Retrieval.EnableExplain = b
+			}
+		case "privacy.default_privacy":
+			cfg.Privacy.DefaultPrivacy = val
+		case "maintenance.auto_reflect":
+			if b, err := strconv.ParseBool(val); err == nil {
+				cfg.Maintenance.AutoReflect = b
+			}
+		case "maintenance.auto_compress":
+			if b, err := strconv.ParseBool(val); err == nil {
+				cfg.Maintenance.AutoCompress = b
+			}
+		case "maintenance.auto_consolidate":
+			if b, err := strconv.ParseBool(val); err == nil {
+				cfg.Maintenance.AutoConsolidate = b
+			}
+		case "maintenance.auto_detect_contradictions":
+			if b, err := strconv.ParseBool(val); err == nil {
+				cfg.Maintenance.AutoDetectContradictions = b
+			}
+		}
+	}
+	return scanner.Err()
 }
 
 // ConfigFromEnv overrides config fields with environment variables.
