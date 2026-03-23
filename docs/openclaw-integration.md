@@ -41,7 +41,7 @@ The repo example uses the confirmed OpenClaw v2026.3.22 config path:
         "config": {
           "mcpServers": {
             "amm": {
-              "command": "/home/you/.local/bin/amm-mcp",
+              "command": "/usr/local/bin/amm-mcp",
               "env": {
                 "AMM_DB_PATH": "/home/you/.amm/amm.db"
               }
@@ -122,9 +122,9 @@ AMM background jobs stay external. The repo example uses a split strategy:
 The jobs themselves do not change:
 
 ```bash
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm jobs run reflect
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm jobs run compress_history
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm jobs run consolidate_sessions
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run reflect
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run compress_history
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run consolidate_sessions
 ```
 
 For a shared baseline, reuse [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh).

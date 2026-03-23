@@ -6,7 +6,7 @@
         "config": {
           "mcpServers": {
             "amm": {
-              "command": "/home/you/.local/bin/amm-mcp",
+              "command": "/usr/local/bin/amm-mcp",
               "args": [],
               "env": {
                 "AMM_DB_PATH": "/home/you/.amm/amm.db"
@@ -29,7 +29,7 @@
         "amm-memory-capture": {
           "enabled": true,
           "env": {
-            "AMM_BIN": "/home/you/.local/bin/amm",
+              "AMM_BIN": "/usr/local/bin/amm",
             "AMM_DB_PATH": "/home/you/.amm/amm.db",
             "AMM_PROJECT_ID": "agent-memory-manager"
           }
@@ -37,7 +37,7 @@
         "amm-session-maintenance": {
           "enabled": true,
           "env": {
-            "AMM_BIN": "/home/you/.local/bin/amm",
+              "AMM_BIN": "/usr/local/bin/amm",
             "AMM_DB_PATH": "/home/you/.amm/amm.db",
             "AMM_PROJECT_ID": "agent-memory-manager"
           }

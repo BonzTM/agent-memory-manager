@@ -20,22 +20,28 @@ Use four pieces together:
 ## 1. Build and Initialize AMM
 
 ```bash
-CGO_ENABLED=1 go build -tags fts5 -o ~/.local/bin/amm ./cmd/amm
-CGO_ENABLED=1 go build -tags fts5 -o ~/.local/bin/amm-mcp ./cmd/amm-mcp
+mkdir -p /tmp/amm-build
 
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm init
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm status
+CGO_ENABLED=1 go build -tags fts5 -o /tmp/amm-build/amm ./cmd/amm
+CGO_ENABLED=1 go build -tags fts5 -o /tmp/amm-build/amm-mcp ./cmd/amm-mcp
+
+sudo install -m 755 /tmp/amm-build/amm /usr/local/bin/amm
+sudo install -m 755 /tmp/amm-build/amm-mcp /usr/local/bin/amm-mcp
+
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm init
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm status
 ```
 
 ## 2. Register AMM as an MCP Server
 
-Codex reads user-level configuration from `~/.codex/config.toml` and can also load project overrides from `.codex/config.toml`.
+Codex reads user-level configuration from `~/.codex/config.toml` and discovers a separate `~/.codex/hooks.json` file for hook handlers. Project overrides can live under `.codex/` in the repo, but the global/user setup is the cleanest place to start.
 
 ```toml
 [mcp_servers.amm]
-command = "/home/you/.local/bin/amm-mcp"
-env = { AMM_DB_PATH = "/home/you/.amm/amm.db" }
-required = false
+command = "/usr/local/bin/amm-mcp"
+
+[mcp_servers.amm.env]
+AMM_DB_PATH = "/home/you/.amm/amm.db"
 
 [features]
 codex_hooks = true
@@ -43,34 +49,54 @@ codex_hooks = true
 
 That gives Codex direct access to the AMM MCP tools while keeping the public AMM surface exactly the same as every other runtime: stdio MCP plus the CLI.
 
+The repo ships a matching example at [`examples/codex/config.toml`](../examples/codex/config.toml).
+
 ## 3. Add Hook-Based Capture
 
-Codex now exposes three especially useful hook points for AMM capture:
+Codex currently exposes three confirmed lifecycle hooks for AMM capture:
 
 | Hook | Best AMM use |
 |---|---|
 | `SessionStart` | Record session metadata and establish project/session identity |
 | `UserPromptSubmit` | Ingest the user prompt and return thin ambient recall hints |
-| `Stop` | Record closeout/transcript metadata and trigger maintenance jobs |
+| `Stop` | Backfill assistant/tool history from `transcript_path` when available, then record session closeout and trigger maintenance jobs |
 
 The example files in [`examples/codex/`](../examples/codex/) show one grounded pattern:
 
 - `session-start.py` logs a lightweight session-start event
 - `user-prompt-submit.py` ingests the user prompt and turns AMM recall results into Codex hook `additionalContext`
-- `session-stop.py` records transcript/session metadata and runs maintenance jobs
-- `hooks.json` wires those scripts into Codex
+- `session-stop.py` imports assistant/tool history from `transcript_path` when possible, falls back to `last_assistant_message` when not, then records concise session metadata and runs maintenance jobs
+- `config.toml` enables `codex_hooks` and registers `amm-mcp`
+- `hooks.json` is the separate Codex hook manifest that wires those scripts into Codex
 
-### Example `hooks.json`
+### Install the Hook Scripts
+
+The simplest global layout is to keep the executable hook scripts under `~/.amm/hooks/` alongside your Claude hook scripts:
+
+```bash
+mkdir -p ~/.amm/hooks
+
+cp examples/codex/session-start.py ~/.amm/hooks/codex-session-start.py
+cp examples/codex/user-prompt-submit.py ~/.amm/hooks/codex-user-prompt-submit.py
+cp examples/codex/session-stop.py ~/.amm/hooks/codex-stop.py
+
+chmod +x ~/.amm/hooks/codex-session-start.py
+chmod +x ~/.amm/hooks/codex-user-prompt-submit.py
+chmod +x ~/.amm/hooks/codex-stop.py
+```
+
+### Example `~/.codex/hooks.json`
 
 ```json
 {
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|resume|clear",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 examples/codex/session-start.py",
+            "command": "python3 /home/you/.amm/hooks/codex-session-start.py",
             "timeoutSec": 10,
             "statusMessage": "recording Codex session start in AMM"
           }
@@ -82,7 +108,7 @@ The example files in [`examples/codex/`](../examples/codex/) show one grounded p
         "hooks": [
           {
             "type": "command",
-            "command": "python3 examples/codex/user-prompt-submit.py",
+            "command": "python3 /home/you/.amm/hooks/codex-user-prompt-submit.py",
             "timeoutSec": 10,
             "statusMessage": "capturing prompt and loading AMM recall"
           }
@@ -94,7 +120,7 @@ The example files in [`examples/codex/`](../examples/codex/) show one grounded p
         "hooks": [
           {
             "type": "command",
-            "command": "python3 examples/codex/session-stop.py",
+            "command": "python3 /home/you/.amm/hooks/codex-stop.py",
             "timeoutSec": 20,
             "statusMessage": "closing out Codex session in AMM"
           }
@@ -104,6 +130,8 @@ The example files in [`examples/codex/`](../examples/codex/) show one grounded p
   }
 }
 ```
+
+Codex does **not** load hooks from `config.toml`; the hooks live in `hooks.json` next to the config file. The repo example manifest is at [`examples/codex/hooks.json`](../examples/codex/hooks.json).
 
 ## 4. Add an Agent Instructions Snippet
 
@@ -126,9 +154,9 @@ This is the important operational point: **the workers do not need to live insid
 Use cron, systemd, a wrapper script, or any other local scheduler to invoke the same AMM database out-of-band:
 
 ```bash
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm jobs run reflect
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm jobs run compress_history
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm jobs run consolidate_sessions
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run reflect
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run compress_history
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run consolidate_sessions
 ```
 
 The existing shared runner in [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) is already a truthful model for this.
@@ -149,15 +177,18 @@ Codex hook payloads expose `session_id` and optional `transcript_path`, and `Use
 
 - prompt capture happens immediately in `UserPromptSubmit`
 - session metadata is captured in `SessionStart`
-- session closeout and maintenance happen in `Stop`
+- `Stop` tries to import structured assistant/tool history from the transcript file before it emits a concise `session_stop`
+- if transcript import yields no assistant message, `Stop` falls back to `last_assistant_message`
 
-If you want full transcript archival, you can extend the stop hook to ingest the transcript contents or build a separate importer for the transcript format you use locally.
+This repo still does **not** claim that Codex exposes a public tool-result hook. The richer tool history comes from local stop-time transcript parsing, not from a documented Codex lifecycle hook.
 
 ## Verification Checklist
 
-- `amm-mcp` starts successfully with the configured `AMM_DB_PATH`
+- `/usr/local/bin/amm-mcp` starts successfully with the configured `AMM_DB_PATH`
 - Codex can see the `amm` MCP server
+- Codex loads `~/.codex/hooks.json` and the three hook handlers
 - `UserPromptSubmit` writes an event and returns recall hints when AMM has relevant data
+- `Stop` backfills assistant/tool history from `transcript_path` or falls back to `last_assistant_message`
 - `Stop` can run `amm jobs run reflect` and `amm jobs run compress_history`
 - Your external scheduler can run the heavier jobs against the same database
 
@@ -165,5 +196,6 @@ If you want full transcript archival, you can extend the stop hook to ingest the
 
 - a built-in AMM scheduler or daemon
 - a Codex-native AMM plugin package
+- a public Codex tool-result hook surface
 - automatic consumption of `maintenance.auto_*` flags by a running worker loop
 - a one-size-fits-all Codex transcript importer

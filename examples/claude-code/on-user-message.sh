@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-AMM="${AMM_BIN:-amm}"
+AMM="${AMM_BIN:-/usr/local/bin/amm}"
 DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
 
 PROMPT="${1:-}"

@@ -1,0 +1,8 @@
+[mcp_servers.amm]
+command = "/usr/local/bin/amm-mcp"
+
+[mcp_servers.amm.env]
+AMM_DB_PATH = "/home/you/.amm/amm.db"
+
+[features]
+codex_hooks = true

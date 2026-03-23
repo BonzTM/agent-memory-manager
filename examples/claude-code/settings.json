@@ -1,23 +1,43 @@
 {
-  "mcpServers": {
-    "amm": {
-      "command": "amm-mcp",
-      "env": {
-        "AMM_DB_PATH": "~/.amm/amm.db"
-      }
-    }
-  },
   "hooks": {
     "UserPromptSubmit": [
       {
-        "command": "~/.amm/hooks/on-user-message.sh \"$PROMPT\"",
-        "timeout": 5000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-user-message.sh \"$PROMPT\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-tool-use.sh success"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-tool-use.sh failure"
+          }
+        ]
       }
     ],
     "Stop": [
       {
-        "command": "~/.amm/hooks/on-session-end.sh",
-        "timeout": 10000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-session-end.sh"
+          }
+        ]
       }
     ]
   }

@@ -3,7 +3,7 @@
 # Suitable for cron: */30 * * * * /path/to/run-workers.sh
 set -euo pipefail
 
-AMM="${AMM_BIN:-amm}"
+AMM="${AMM_BIN:-/usr/local/bin/amm}"
 export AMM_DB_PATH="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
 
 # Skip if DB doesn't exist

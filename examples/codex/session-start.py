@@ -12,7 +12,7 @@ def now_rfc3339() -> str:
 
 
 def run_amm_ingest(event: dict) -> None:
-    amm_bin = os.environ.get("AMM_BIN", "amm")
+    amm_bin = os.environ.get("AMM_BIN", "/usr/local/bin/amm")
     db_path = os.environ.get("AMM_DB_PATH", os.path.expanduser("~/.amm/amm.db"))
     subprocess.run(
         [amm_bin, "ingest", "event", "--in", "-"],

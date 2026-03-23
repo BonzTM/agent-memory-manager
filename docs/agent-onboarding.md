@@ -7,6 +7,7 @@ This onboarding guide is **Claude Code-first**, because this repo ships the most
 - [Codex Integration](codex-integration.md)
 - [Hermes-Agent Integration](hermes-agent-integration.md)
 - [OpenClaw Integration](openclaw-integration.md)
+- [OpenCode Integration](opencode-integration.md)
 
 In every runtime, the worker model stays the same: AMM background jobs are external `amm jobs run <kind>` calls against the AMM database, not a built-in scheduler.
 
@@ -35,14 +36,20 @@ If `CGO_ENABLED` does not print `1`, the user needs a C compiler installed (e.g.
 ```bash
 cd /path/to/agent-memory-manager
 
+mkdir -p /tmp/amm-build
+
 # Build the CLI binary
-CGO_ENABLED=1 go build -tags fts5 -o ~/.local/bin/amm ./cmd/amm
+CGO_ENABLED=1 go build -tags fts5 -o /tmp/amm-build/amm ./cmd/amm
 
 # Build the MCP server binary
-CGO_ENABLED=1 go build -tags fts5 -o ~/.local/bin/amm-mcp ./cmd/amm-mcp
+CGO_ENABLED=1 go build -tags fts5 -o /tmp/amm-build/amm-mcp ./cmd/amm-mcp
+
+# Install both binaries globally
+sudo install -m 755 /tmp/amm-build/amm /usr/local/bin/amm
+sudo install -m 755 /tmp/amm-build/amm-mcp /usr/local/bin/amm-mcp
 
 # Verify both binaries exist
-ls -la ~/.local/bin/amm ~/.local/bin/amm-mcp
+ls -la /usr/local/bin/amm /usr/local/bin/amm-mcp
 ```
 
 The `-tags fts5` flag enables SQLite full-text search, which AMM requires for retrieval.
@@ -53,10 +60,10 @@ The `-tags fts5` flag enables SQLite full-text search, which AMM requires for re
 
 ```bash
 # Create the database directory and run migrations
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm init
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm init
 
 # Verify initialization
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm status
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm status
 ```
 
 Expected output from `status` should show `initialized: true` with all counts at 0.
@@ -67,13 +74,13 @@ Expected output from `status` should show `initialized: true` with all counts at
 
 ### 3a: Register the MCP Server
 
-Add the following to `.claude/settings.json` (in the project root or `~/.claude/settings.json` for global config):
+Add the following to `~/.claude.json` for global config:
 
 ```json
 {
   "mcpServers": {
     "amm": {
-      "command": "$HOME/.local/bin/amm-mcp",
+      "command": "/usr/local/bin/amm-mcp",
       "env": {
         "AMM_DB_PATH": "$HOME/.amm/amm.db"
       }
@@ -87,13 +94,13 @@ This gives the agent access to all AMM tools (`amm_recall`, `amm_remember`, `amm
 ### 3b: Verify MCP Server
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm-mcp
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm-mcp
 ```
 
 Expected: a JSON response containing `protocolVersion`, `serverInfo.name: "amm-mcp"`, and `capabilities.tools`.
 
 ```bash
-echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm-mcp
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm-mcp
 ```
 
 Expected: a JSON response listing all available tools (amm_recall, amm_remember, amm_ingest_event, etc.).
@@ -102,19 +109,49 @@ Expected: a JSON response listing all available tools (amm_recall, amm_remember,
 
 ## Step 4: Set Up Automatic Capture Hooks
 
-For fully transparent memory capture, add hooks to `.claude/settings.json`. These run alongside the MCP server -- hooks capture interactions automatically, while MCP tools let the agent act deliberately.
+For fuller transparent memory capture, add hooks to `~/.claude/settings.json`. These run alongside the MCP server -- hooks capture interactions automatically, while MCP tools let the agent act deliberately.
 
 ```json
 {
   "hooks": {
     "UserPromptSubmit": [
       {
-        "command": "$HOME/.local/bin/amm-hooks/hook-user-prompt.sh"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-user-message.sh \"$PROMPT\""
+          }
+        ]
       }
     ],
-    "AssistantResponse": [
+    "PostToolUse": [
       {
-        "command": "$HOME/.local/bin/amm-hooks/hook-assistant-response.sh"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-tool-use.sh success"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-tool-use.sh failure"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-session-end.sh"
+          }
+        ]
       }
     ]
   }
@@ -124,14 +161,14 @@ For fully transparent memory capture, add hooks to `.claude/settings.json`. Thes
 Create the hook scripts directory and scripts:
 
 ```bash
-mkdir -p ~/.local/bin/amm-hooks
+mkdir -p ~/.amm/hooks
 ```
 
-**hook-user-prompt.sh:**
+**on-user-message.sh:**
 
 ```bash
 #!/bin/bash
-AMM="${AMM_BIN:-$HOME/.local/bin/amm}"
+AMM="${AMM_BIN:-/usr/local/bin/amm}"
 DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
 
 PROMPT=$(cat)
@@ -151,32 +188,82 @@ if [ -n "$RECALL" ]; then
 fi
 ```
 
-**hook-assistant-response.sh:**
+**on-session-end.sh:**
 
 ```bash
 #!/bin/bash
-AMM="${AMM_BIN:-$HOME/.local/bin/amm}"
+AMM="${AMM_BIN:-/usr/local/bin/amm}"
 DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
 
-RESPONSE=$(cat)
+PAYLOAD=$(cat)
 
-echo "{
-  \"kind\": \"message_assistant\",
-  \"source_system\": \"claude-code\",
-  \"content\": $(printf '%s' "$RESPONSE" | jq -Rs .),
-  \"session_id\": \"${SESSION_ID}\",
-  \"project_id\": \"${PROJECT_ID}\"
-}" | AMM_DB_PATH="$DB" "$AMM" ingest event --in -
+EVENT=$(printf '%s' "$PAYLOAD" | python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+last_assistant_message = payload.get("last_assistant_message") or ""
+if last_assistant_message:
+    print(json.dumps({
+        "kind": "message_assistant",
+        "source_system": "claude-code",
+        "content": last_assistant_message,
+        "metadata": {"hook_event": "Stop"},
+    }))
+else:
+    print("")
+')
+
+[ -n "$EVENT" ] && printf '%s' "$EVENT" | AMM_DB_PATH="$DB" "$AMM" ingest event --in - >/dev/null 2>&1 || true
+printf '%s' '{"kind":"session_stop","source_system":"claude-code","content":"Claude stop hook executed.","metadata":{"hook_event":"Stop"}}' | AMM_DB_PATH="$DB" "$AMM" ingest event --in - >/dev/null 2>&1 || true
+
+AMM_DB_PATH="$DB" "$AMM" jobs run reflect >/dev/null 2>&1 || true
+AMM_DB_PATH="$DB" "$AMM" jobs run compress_history >/dev/null 2>&1 || true
+AMM_DB_PATH="$DB" "$AMM" jobs run consolidate_sessions >/dev/null 2>&1 || true
+AMM_DB_PATH="$DB" "$AMM" jobs run extract_claims >/dev/null 2>&1 || true
+AMM_DB_PATH="$DB" "$AMM" jobs run form_episodes >/dev/null 2>&1 || true
+```
+
+**on-tool-use.sh:**
+
+```bash
+#!/bin/bash
+AMM="${AMM_BIN:-/usr/local/bin/amm}"
+DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
+STATUS="${1:-success}"
+PAYLOAD=$(cat)
+
+EVENT=$(printf '%s' "$PAYLOAD" | STATUS="$STATUS" python3 -c '
+import json, os, sys
+payload = json.load(sys.stdin)
+tool_result = payload.get("tool_result") or payload.get("toolResult")
+tool_name = payload.get("tool_name") or payload.get("toolName") or "unknown_tool"
+tool_input = payload.get("tool_input") or payload.get("toolInput")
+content = tool_result if isinstance(tool_result, str) else json.dumps(tool_result)
+print(json.dumps({
+    "kind": "tool_result",
+    "source_system": "claude-code",
+    "content": content,
+    "metadata": {
+        "hook_event": "PostToolUse" if os.environ["STATUS"] == "success" else "PostToolUseFailure",
+        "tool_name": tool_name,
+        "tool_input": tool_input if isinstance(tool_input, str) or tool_input is None else json.dumps(tool_input),
+    },
+}))
+')
+
+printf '%s' "$EVENT" | AMM_DB_PATH="$DB" "$AMM" ingest event --in - >/dev/null 2>&1
 ```
 
 Make them executable:
 
 ```bash
-chmod +x ~/.local/bin/amm-hooks/hook-user-prompt.sh
-chmod +x ~/.local/bin/amm-hooks/hook-assistant-response.sh
+chmod +x ~/.amm/hooks/on-user-message.sh
+chmod +x ~/.amm/hooks/on-session-end.sh
+chmod +x ~/.amm/hooks/on-tool-use.sh
 ```
 
 See `docs/integration.md` for more detail on the hook-based capture loop.
+
+This still does not give Claude a public per-turn assistant-response hook. The stronger setup captures tool results immediately, but the assistant text itself is still captured at `Stop` via `last_assistant_message`.
 
 ---
 
@@ -186,17 +273,17 @@ Run these commands to confirm everything works end-to-end:
 
 ```bash
 # Test remember: commit a memory
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm remember \
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm remember \
   --type fact \
   --scope global \
   --body "AMM is now configured and ready to use" \
   --tight "AMM configured"
 
 # Test recall: retrieve the memory just created
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm recall --mode ambient "AMM configured"
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm recall --mode ambient "AMM configured"
 
 # Test status: confirm counts updated
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm status
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm status
 ```
 
 Expected: `status` should now show `memory_count: 1`.
@@ -258,19 +345,19 @@ Background workers extract structure from raw events. Without them, AMM only sto
 ```bash
 # Add to crontab (crontab -e)
 # Run reflect and compress every 30 minutes
-*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db $HOME/.local/bin/amm jobs run reflect >/dev/null 2>&1
-*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db $HOME/.local/bin/amm jobs run compress_history >/dev/null 2>&1
+*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run reflect >/dev/null 2>&1
+*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run compress_history >/dev/null 2>&1
 
 # Run heavier jobs once per hour
-0 * * * * AMM_DB_PATH=$HOME/.amm/amm.db $HOME/.local/bin/amm jobs run consolidate_sessions >/dev/null 2>&1
-0 * * * * AMM_DB_PATH=$HOME/.amm/amm.db $HOME/.local/bin/amm jobs run extract_claims >/dev/null 2>&1
-0 * * * * AMM_DB_PATH=$HOME/.amm/amm.db $HOME/.local/bin/amm jobs run form_episodes >/dev/null 2>&1
+0 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run consolidate_sessions >/dev/null 2>&1
+0 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run extract_claims >/dev/null 2>&1
+0 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run form_episodes >/dev/null 2>&1
 
 # Run maintenance jobs once per day at 3am
-0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db $HOME/.local/bin/amm jobs run detect_contradictions >/dev/null 2>&1
-0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db $HOME/.local/bin/amm jobs run decay_stale_memory >/dev/null 2>&1
-0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db $HOME/.local/bin/amm jobs run merge_duplicates >/dev/null 2>&1
-0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db $HOME/.local/bin/amm jobs run cleanup_recall_history >/dev/null 2>&1
+0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run detect_contradictions >/dev/null 2>&1
+0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run decay_stale_memory >/dev/null 2>&1
+0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run merge_duplicates >/dev/null 2>&1
+0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run cleanup_recall_history >/dev/null 2>&1
 ```
 
 ### Option B: systemd Timer (Linux)
@@ -284,11 +371,11 @@ Description=AMM background maintenance
 [Service]
 Type=oneshot
 Environment=AMM_DB_PATH=%h/.amm/amm.db
-ExecStart=%h/.local/bin/amm jobs run reflect
-ExecStart=%h/.local/bin/amm jobs run compress_history
-ExecStart=%h/.local/bin/amm jobs run consolidate_sessions
-ExecStart=%h/.local/bin/amm jobs run extract_claims
-ExecStart=%h/.local/bin/amm jobs run form_episodes
+ExecStart=/usr/local/bin/amm jobs run reflect
+ExecStart=/usr/local/bin/amm jobs run compress_history
+ExecStart=/usr/local/bin/amm jobs run consolidate_sessions
+ExecStart=/usr/local/bin/amm jobs run extract_claims
+ExecStart=/usr/local/bin/amm jobs run form_episodes
 ```
 
 Create `~/.config/systemd/user/amm-maintenance.timer`:

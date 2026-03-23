@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AMM="${AMM_BIN:-amm}"
+AMM="${AMM_BIN:-/usr/local/bin/amm}"
 DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
 
 AMM_DB_PATH="$DB" "$AMM" jobs run reflect >/dev/null 2>&1 || true

@@ -20,6 +20,7 @@ Use this page for the shared model, then jump to the runtime-specific companion 
 | Codex | MCP + hooks + repo instructions | [Codex Integration](codex-integration.md) |
 | Hermes-agent | MCP + hook handlers + scheduled workers | [Hermes-Agent Integration](hermes-agent-integration.md) |
 | OpenClaw | MCP sidecar + native hooks + explicit recall (`examples/openclaw/`) | [OpenClaw Integration](openclaw-integration.md) |
+| OpenCode | MCP + local plugin glue + explicit recall (`examples/opencode/`) | [OpenCode Integration](opencode-integration.md) |
 | Claude Code | Complete reference implementation shipped in this repo | This page + `examples/claude-code/` |
 
 ---
@@ -40,20 +41,19 @@ This loop runs on every turn of conversation, building a growing knowledge base 
 
 ## Hook-Based Integration (Claude Code Reference Implementation)
 
-Claude Code supports lifecycle hooks that fire at defined points in the interaction cycle. AMM leverages three:
+Claude Code supports lifecycle hooks that fire at defined points in the interaction cycle. The shipped AMM reference example uses four of them:
 
 - **`UserPromptSubmit`** -- fires when the user submits a prompt. Use this to ingest the user message and request ambient recall.
-- **`AssistantResponse`** -- fires after the assistant finishes responding. Use this to ingest the assistant's response.
-- **`Stop`** -- fires when the session ends. Use this to create a session summary.
+- **`PostToolUse`** -- fires after a successful tool run. Use this to capture tool results into AMM.
+- **`PostToolUseFailure`** -- fires after a failed tool run. Use this to capture errorful tool results into AMM.
+- **`Stop`** -- fires when the session ends. Use this to capture the final assistant message and trigger warm-path maintenance jobs.
 
 ### Hook Script Pattern
 
 ```bash
 #!/bin/bash
-# hook-user-prompt.sh
-# Fires on UserPromptSubmit: captures the user message, returns ambient hints.
 
-AMM="${AMM_BIN:-$HOME/.local/bin/amm}"
+AMM="${AMM_BIN:-/usr/local/bin/amm}"
 DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
 
 # Read the prompt from stdin (Claude Code pipes it in).
@@ -79,43 +79,118 @@ fi
 
 ```bash
 #!/bin/bash
-# hook-assistant-response.sh
-# Fires on AssistantResponse: captures the assistant's output.
 
-AMM="${AMM_BIN:-$HOME/.local/bin/amm}"
+AMM="${AMM_BIN:-/usr/local/bin/amm}"
 DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
 
-RESPONSE=$(cat)
+PAYLOAD=$(cat)
 
-echo "{
-  \"kind\": \"message_assistant\",
-  \"source_system\": \"claude-code\",
-  \"content\": $(printf '%s' "$RESPONSE" | jq -Rs .),
-  \"session_id\": \"${SESSION_ID}\",
-  \"project_id\": \"${PROJECT_ID}\"
-}" | AMM_DB_PATH="$DB" "$AMM" ingest event --in -
+EVENT=$(printf '%s' "$PAYLOAD" | python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+last_assistant_message = payload.get("last_assistant_message") or ""
+if last_assistant_message:
+    print(json.dumps({
+        "kind": "message_assistant",
+        "source_system": "claude-code",
+        "content": last_assistant_message,
+        "metadata": {"hook_event": "Stop"},
+    }))
+else:
+    print("")
+')
+
+[ -n "$EVENT" ] && printf '%s' "$EVENT" | AMM_DB_PATH="$DB" "$AMM" ingest event --in - >/dev/null 2>&1 || true
+printf '%s' '{"kind":"session_stop","source_system":"claude-code","content":"Claude stop hook executed.","metadata":{"hook_event":"Stop"}}' | AMM_DB_PATH="$DB" "$AMM" ingest event --in - >/dev/null 2>&1 || true
+AMM_DB_PATH="$DB" "$AMM" jobs run reflect >/dev/null 2>&1 || true
+AMM_DB_PATH="$DB" "$AMM" jobs run compress_history >/dev/null 2>&1 || true
+AMM_DB_PATH="$DB" "$AMM" jobs run consolidate_sessions >/dev/null 2>&1 || true
+AMM_DB_PATH="$DB" "$AMM" jobs run extract_claims >/dev/null 2>&1 || true
+AMM_DB_PATH="$DB" "$AMM" jobs run form_episodes >/dev/null 2>&1 || true
+```
+
+```bash
+#!/bin/bash
+
+AMM="${AMM_BIN:-/usr/local/bin/amm}"
+DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
+STATUS="${1:-success}"
+PAYLOAD=$(cat)
+
+EVENT=$(printf '%s' "$PAYLOAD" | STATUS="$STATUS" python3 -c '
+import json, os, sys
+payload = json.load(sys.stdin)
+tool_result = payload.get("tool_result") or payload.get("toolResult")
+tool_name = payload.get("tool_name") or payload.get("toolName") or "unknown_tool"
+tool_input = payload.get("tool_input") or payload.get("toolInput")
+content = tool_result if isinstance(tool_result, str) else json.dumps(tool_result)
+print(json.dumps({
+    "kind": "tool_result",
+    "source_system": "claude-code",
+    "content": content,
+    "metadata": {
+        "hook_event": "PostToolUse" if os.environ["STATUS"] == "success" else "PostToolUseFailure",
+        "tool_name": tool_name,
+        "tool_input": tool_input if isinstance(tool_input, str) or tool_input is None else json.dumps(tool_input),
+    },
+}))
+')
+
+printf '%s' "$EVENT" | AMM_DB_PATH="$DB" "$AMM" ingest event --in - >/dev/null 2>&1
 ```
 
 ### Configuring Hooks in Claude Code
 
-Add these to your `.claude/settings.json`:
+Add these to your `~/.claude/settings.json`:
 
 ```json
 {
   "hooks": {
     "UserPromptSubmit": [
       {
-        "command": "$HOME/.local/bin/amm-hooks/hook-user-prompt.sh"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-user-message.sh \"$PROMPT\""
+          }
+        ]
       }
     ],
-    "AssistantResponse": [
+    "PostToolUse": [
       {
-        "command": "$HOME/.local/bin/amm-hooks/hook-assistant-response.sh"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-tool-use.sh success"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-tool-use.sh failure"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-session-end.sh"
+          }
+        ]
       }
     ]
   }
 }
 ```
+
+This is stronger than the earlier two-hook setup, but it still has one real limit: Claude's public hook surface does not provide a separate per-turn assistant-output hook, so the shipped example captures the final assistant message at `Stop` instead of after every reply.
 
 ---
 
@@ -125,13 +200,13 @@ For runtimes that support the Model Context Protocol, AMM runs as an MCP server 
 
 ### Setup
 
-Configure the MCP server in your runtime's settings. For Claude Code, add to `.claude/settings.json`:
+Configure the MCP server in your runtime's settings. For Claude Code, add to `~/.claude.json`:
 
 ```json
 {
   "mcpServers": {
     "amm": {
-      "command": "$HOME/.local/bin/amm-mcp",
+      "command": "/usr/local/bin/amm-mcp",
       "env": {
         "AMM_DB_PATH": "$HOME/.amm/amm.db"
       }
@@ -277,8 +352,8 @@ amm jobs run reflect
 amm jobs run compress_history
 
 # Cron (every 30 minutes)
-*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db $HOME/.local/bin/amm jobs run reflect
-*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db $HOME/.local/bin/amm jobs run compress_history
+*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run reflect
+*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run compress_history
 
 # Full maintenance pass
 for job in reflect compress_history consolidate_sessions extract_claims form_episodes detect_contradictions decay_stale_memory merge_duplicates; do

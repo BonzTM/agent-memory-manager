@@ -27,7 +27,7 @@ Hermes supports MCP, so the lowest-friction explicit integration is to register 
 mcp:
   servers:
     amm:
-      command: /home/you/.local/bin/amm-mcp
+      command: /usr/local/bin/amm-mcp
       env:
         AMM_DB_PATH: /home/you/.amm/amm.db
 ```
@@ -73,9 +73,9 @@ That keeps the AMM scripts reusable even if your Hermes hook wiring changes over
 AMM does not currently ship an internal scheduler loop. The repo documents worker execution as external CLI calls:
 
 ```bash
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm jobs run reflect
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm jobs run compress_history
-AMM_DB_PATH=~/.amm/amm.db ~/.local/bin/amm jobs run consolidate_sessions
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run reflect
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run compress_history
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run consolidate_sessions
 ```
 
 For a full maintenance pass, the shared runner in [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) is the clearest starting point.

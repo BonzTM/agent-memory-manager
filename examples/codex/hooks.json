@@ -2,10 +2,11 @@
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|resume|clear",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 examples/codex/session-start.py",
+            "command": "python3 /home/you/.amm/hooks/codex-session-start.py",
             "timeoutSec": 10,
             "statusMessage": "recording Codex session start in AMM"
           }
@@ -17,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 examples/codex/user-prompt-submit.py",
+            "command": "python3 /home/you/.amm/hooks/codex-user-prompt-submit.py",
             "timeoutSec": 10,
             "statusMessage": "capturing prompt and loading AMM recall"
           }
@@ -29,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 examples/codex/session-stop.py",
+            "command": "python3 /home/you/.amm/hooks/codex-stop.py",
             "timeoutSec": 20,
             "statusMessage": "closing out Codex session in AMM"
           }

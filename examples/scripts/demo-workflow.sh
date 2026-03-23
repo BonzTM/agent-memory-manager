@@ -3,7 +3,7 @@
 # Usage: ./demo-workflow.sh
 set -euo pipefail
 
-AMM="${AMM_BIN:-amm}"
+AMM="${AMM_BIN:-/usr/local/bin/amm}"
 DB=$(mktemp -d)/demo.db
 export AMM_DB_PATH="$DB"
 

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "amm": {
+      "command": "/usr/local/bin/amm-mcp",
+      "env": {
+        "AMM_DB_PATH": "/home/you/.amm/amm.db"
+      }
+    }
+  }
+}

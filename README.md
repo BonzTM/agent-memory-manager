@@ -1,4 +1,4 @@
-# AMM -- Agent Memory Manager
+# amm — Agent Memory Manager
 
 A persistent, typed, temporal memory substrate for agents.
 
@@ -141,6 +141,7 @@ CGO_ENABLED=1 go test -tags fts5 ./...
 - [Codex Integration](docs/codex-integration.md) -- MCP + hooks + AGENTS snippet for Codex workflows
 - [Hermes-Agent Integration](docs/hermes-agent-integration.md) -- Sidecar model, MCP wiring, and AMM-side helper scripts for Hermes
 - [OpenClaw Integration](docs/openclaw-integration.md) -- Real OpenClaw example, native hooks, and AMM worker strategy
+- [OpenCode Integration](docs/opencode-integration.md) -- MCP + local plugin glue for OpenCode dogfooding and user setup
 - [Configuration](docs/configuration.md) -- Config file format and environment variables
 - [Agent Onboarding](docs/agent-onboarding.md) -- Guide for agents using AMM as their memory substrate
 

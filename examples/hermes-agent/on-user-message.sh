@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AMM="${AMM_BIN:-amm}"
+AMM="${AMM_BIN:-/usr/local/bin/amm}"
 DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
 SESSION_ID="${AMM_SESSION_ID:-$(date +%Y%m%d)}"
 PROJECT_ID="${AMM_PROJECT_ID:-}"
