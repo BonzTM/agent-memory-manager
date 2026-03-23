@@ -58,8 +58,8 @@ func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallO
 		return nil, err
 	}
 
-	// Filter out superseded memories by default.
-	items = filterSuperseded(items)
+	// Note: superseded memories are already filtered at the source in each
+	// recall mode (recallAmbient, recallFacts, etc.) by checking m.Status.
 
 	// Truncate to limit.
 	if len(items) > opts.Limit {
@@ -106,16 +106,6 @@ func (s *AMMService) buildScoringContext(ctx context.Context, query string, opts
 		RecentRecalls: recentRecalls,
 		Now:           time.Now().UTC(),
 	}
-}
-
-// filterSuperseded removes items that have been superseded.
-func filterSuperseded(items []core.RecallItem) []core.RecallItem {
-	filtered := make([]core.RecallItem, 0, len(items))
-	for _, item := range items {
-		// Keep all non-memory items, and active memories.
-		filtered = append(filtered, item)
-	}
-	return filtered
 }
 
 // recallAmbient searches memories, summaries, and episodes with full scoring.

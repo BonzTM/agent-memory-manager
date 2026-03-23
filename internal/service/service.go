@@ -13,6 +13,8 @@ import (
 )
 
 // generateID creates a random ID with the given prefix (e.g. "evt_", "mem_").
+// Panics if crypto/rand fails, which only happens when the OS entropy source
+// is broken — an unrecoverable condition where continuing would be unsafe.
 func generateID(prefix string) string {
 	b := make([]byte, 12)
 	if _, err := rand.Read(b); err != nil {
@@ -31,8 +33,8 @@ type AMMService struct {
 var _ core.Service = (*AMMService)(nil)
 
 // New creates a new AMMService backed by the given repository.
-func New(repo core.Repository) *AMMService {
-	return &AMMService{repo: repo}
+func New(repo core.Repository, dbPath string) *AMMService {
+	return &AMMService{repo: repo, dbPath: dbPath}
 }
 
 // Init initializes the database: creates the parent directory, opens the DB,
@@ -55,7 +57,7 @@ func (s *AMMService) Init(ctx context.Context, dbPath string) error {
 // IngestEvent appends a raw event to history, respecting ingestion policies.
 func (s *AMMService) IngestEvent(ctx context.Context, event *core.Event) (*core.Event, error) {
 	// Check ingestion policy.
-	shouldIngest, _, err := s.ShouldIngest(ctx, event)
+	shouldIngest, createMemory, err := s.ShouldIngest(ctx, event)
 	if err != nil {
 		return nil, fmt.Errorf("check ingestion policy: %w", err)
 	}
@@ -70,6 +72,15 @@ func (s *AMMService) IngestEvent(ctx context.Context, event *core.Event) (*core.
 	if event.OccurredAt.IsZero() {
 		event.OccurredAt = event.IngestedAt
 	}
+
+	// Tag read-only events so Reflect skips them.
+	if !createMemory {
+		if event.Metadata == nil {
+			event.Metadata = make(map[string]string)
+		}
+		event.Metadata["ingestion_mode"] = "read_only"
+	}
+
 	if err := s.repo.InsertEvent(ctx, event); err != nil {
 		return nil, fmt.Errorf("insert event: %w", err)
 	}
@@ -503,13 +514,31 @@ func (s *AMMService) ExplainRecall(ctx context.Context, query string, itemID str
 
 // Status returns system status information.
 func (s *AMMService) Status(ctx context.Context) (*core.StatusResult, error) {
-	initialized, _ := s.repo.IsInitialized(ctx)
+	initialized, err := s.repo.IsInitialized(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("check initialized: %w", err)
+	}
 
-	evtCount, _ := s.repo.CountEvents(ctx)
-	memCount, _ := s.repo.CountMemories(ctx)
-	sumCount, _ := s.repo.CountSummaries(ctx)
-	epCount, _ := s.repo.CountEpisodes(ctx)
-	entCount, _ := s.repo.CountEntities(ctx)
+	evtCount, err := s.repo.CountEvents(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("count events: %w", err)
+	}
+	memCount, err := s.repo.CountMemories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("count memories: %w", err)
+	}
+	sumCount, err := s.repo.CountSummaries(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("count summaries: %w", err)
+	}
+	epCount, err := s.repo.CountEpisodes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("count episodes: %w", err)
+	}
+	entCount, err := s.repo.CountEntities(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("count entities: %w", err)
+	}
 
 	return &core.StatusResult{
 		DBPath:       s.dbPath,
