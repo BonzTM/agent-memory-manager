@@ -58,11 +58,16 @@ var (
 	}
 
 	validJobKinds = map[string]bool{
-		"reflect":               true,
-		"compress":              true,
-		"consolidate":           true,
-		"detect_contradictions": true,
-		"rebuild_indexes":       true,
+		"reflect":                true,
+		"compress_history":       true,
+		"consolidate_sessions":   true,
+		"rebuild_indexes":        true,
+		"extract_claims":         true,
+		"form_episodes":          true,
+		"detect_contradictions":  true,
+		"decay_stale_memory":     true,
+		"merge_duplicates":       true,
+		"cleanup_recall_history": true,
 	}
 )
 
