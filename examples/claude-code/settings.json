@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "amm": {
+      "command": "amm-mcp",
+      "env": {
+        "AMM_DB_PATH": "~/.amm/amm.db"
+      }
+    }
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "command": "~/.amm/hooks/on-user-message.sh \"$PROMPT\"",
+        "timeout": 5000
+      }
+    ],
+    "Stop": [
+      {
+        "command": "~/.amm/hooks/on-session-end.sh",
+        "timeout": 10000
+      }
+    ]
+  }
+}

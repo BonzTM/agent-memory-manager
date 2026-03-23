@@ -68,6 +68,9 @@ func (s *AMMService) IngestEvent(ctx context.Context, event *core.Event) (*core.
 	if event.ID == "" {
 		event.ID = generateID("evt_")
 	}
+	if event.PrivacyLevel == "" {
+		event.PrivacyLevel = core.PrivacyPrivate
+	}
 	event.IngestedAt = time.Now().UTC()
 	if event.OccurredAt.IsZero() {
 		event.OccurredAt = event.IngestedAt
