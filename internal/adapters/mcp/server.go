@@ -54,6 +54,8 @@ func tools() []Tool {
 		{Name: "amm_explain_recall", Description: "Explain why an item surfaced", InputSchema: explainSchema()},
 		{Name: "amm_repair", Description: "Run integrity checks and repairs", InputSchema: repairSchema()},
 		{Name: "amm_status", Description: "Get system status", InputSchema: emptySchema()},
+		{Name: "amm_ingest_transcript", Description: "Bulk ingest a sequence of events", InputSchema: transcriptSchema()},
+		{Name: "amm_update_memory", Description: "Update an existing memory", InputSchema: updateMemorySchema()},
 	}
 }
 
@@ -150,12 +152,25 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 
 	case "amm_ingest_event":
 		var evt core.Event
-		json.Unmarshal(params.Arguments, &evt)
+		if err := json.Unmarshal(params.Arguments, &evt); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
 		result, callErr = svc.IngestEvent(ctx, &evt)
+
+	case "amm_ingest_transcript":
+		var args struct {
+			Events []*core.Event `json:"events"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
+		result, callErr = svc.IngestTranscript(ctx, args.Events)
 
 	case "amm_remember":
 		var mem core.Memory
-		json.Unmarshal(params.Arguments, &mem)
+		if err := json.Unmarshal(params.Arguments, &mem); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
 		result, callErr = svc.Remember(ctx, &mem)
 
 	case "amm_recall":
@@ -163,14 +178,18 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			Query string             `json:"query"`
 			Opts  core.RecallOptions `json:"opts"`
 		}
-		json.Unmarshal(params.Arguments, &args)
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
 		result, callErr = svc.Recall(ctx, args.Query, args.Opts)
 
 	case "amm_describe":
 		var args struct {
 			IDs []string `json:"ids"`
 		}
-		json.Unmarshal(params.Arguments, &args)
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
 		result, callErr = svc.Describe(ctx, args.IDs)
 
 	case "amm_expand":
@@ -178,7 +197,9 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			ID   string `json:"id"`
 			Kind string `json:"kind"`
 		}
-		json.Unmarshal(params.Arguments, &args)
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
 		result, callErr = svc.Expand(ctx, args.ID, args.Kind)
 
 	case "amm_history":
@@ -186,21 +207,34 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			Query string              `json:"query"`
 			Opts  core.HistoryOptions `json:"opts"`
 		}
-		json.Unmarshal(params.Arguments, &args)
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
 		result, callErr = svc.History(ctx, args.Query, args.Opts)
 
 	case "amm_get_memory":
 		var args struct {
 			ID string `json:"id"`
 		}
-		json.Unmarshal(params.Arguments, &args)
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
 		result, callErr = svc.GetMemory(ctx, args.ID)
+
+	case "amm_update_memory":
+		var mem core.Memory
+		if err := json.Unmarshal(params.Arguments, &mem); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
+		result, callErr = svc.UpdateMemory(ctx, &mem)
 
 	case "amm_jobs_run":
 		var args struct {
 			Kind string `json:"kind"`
 		}
-		json.Unmarshal(params.Arguments, &args)
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
 		result, callErr = svc.RunJob(ctx, args.Kind)
 
 	case "amm_explain_recall":
@@ -208,7 +242,9 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			Query  string `json:"query"`
 			ItemID string `json:"item_id"`
 		}
-		json.Unmarshal(params.Arguments, &args)
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
 		result, callErr = svc.ExplainRecall(ctx, args.Query, args.ItemID)
 
 	case "amm_repair":
@@ -216,18 +252,16 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			Check bool   `json:"check"`
 			Fix   string `json:"fix"`
 		}
-		json.Unmarshal(params.Arguments, &args)
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
 		result, callErr = svc.Repair(ctx, args.Check, args.Fix)
 
 	case "amm_status":
 		result, callErr = svc.Status(ctx)
 
 	default:
-		return jsonrpcResponse{
-			JSONRPC: "2.0",
-			ID:      req.ID,
-			Error:   &rpcError{Code: -32602, Message: fmt.Sprintf("unknown tool: %s", params.Name)},
-		}
+		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
 	}
 
 	if callErr != nil {
@@ -248,6 +282,14 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 		Result: map[string]interface{}{
 			"content": []map[string]string{{"type": "text", "text": string(resultJSON)}},
 		},
+	}
+}
+
+func errorResponse(id interface{}, code int, message string) jsonrpcResponse {
+	return jsonrpcResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error:   &rpcError{Code: code, Message: message},
 	}
 }
 
@@ -387,6 +429,33 @@ func repairSchema() map[string]interface{} {
 			"check": map[string]string{"type": "boolean"},
 			"fix":   map[string]string{"type": "string", "description": "What to fix: indexes, links, recall_history"},
 		},
+	}
+}
+
+func transcriptSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"events": map[string]interface{}{
+				"type":        "array",
+				"description": "List of events to ingest",
+				"items":       eventSchema(),
+			},
+		},
+		"required": []string{"events"},
+	}
+}
+
+func updateMemorySchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"id":                map[string]string{"type": "string", "description": "Memory ID to update"},
+			"body":              map[string]string{"type": "string", "description": "Updated memory body"},
+			"tight_description": map[string]string{"type": "string", "description": "Updated one-line summary"},
+			"status":            map[string]string{"type": "string", "description": "Memory status: active, superseded, archived, retracted"},
+		},
+		"required": []string{"id"},
 	}
 }
 
