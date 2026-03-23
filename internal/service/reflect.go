@@ -96,6 +96,11 @@ func (s *AMMService) Reflect(ctx context.Context) (int, error) {
 			continue
 		}
 
+		// Skip events tagged as read_only or ignore by ingestion policy.
+		if mode, ok := evt.Metadata["ingestion_mode"]; ok && (mode == "read_only" || mode == "ignore") {
+			continue
+		}
+
 		contentLower := strings.ToLower(evt.Content)
 
 		// Find the first matching cue type.
