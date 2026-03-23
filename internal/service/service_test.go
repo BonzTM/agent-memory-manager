@@ -27,7 +27,7 @@ func testService(t *testing.T) core.Service {
 		t.Fatal(err)
 	}
 	repo := &sqlite.SQLiteRepository{DB: db}
-	svc := service.New(repo)
+	svc := service.New(repo, dbPath)
 	t.Cleanup(func() { db.Close() })
 	return svc
 }
@@ -37,7 +37,7 @@ func TestInit(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "init_test.db")
 
 	repo := sqlite.NewSQLiteRepository()
-	svc := service.New(repo)
+	svc := service.New(repo, dbPath)
 
 	ctx := context.Background()
 	if err := svc.Init(ctx, dbPath); err != nil {

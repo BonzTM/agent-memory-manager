@@ -30,7 +30,7 @@ func testServiceAndRepo(t *testing.T) (*AMMService, *sqlite.SQLiteRepository) {
 		t.Fatal(err)
 	}
 	repo := &sqlite.SQLiteRepository{DB: db}
-	svc := New(repo)
+	svc := New(repo, dbPath)
 	t.Cleanup(func() { db.Close() })
 	return svc, repo
 }
