@@ -14,6 +14,8 @@ import (
 )
 
 // generateID creates a prefixed random hex ID (e.g., "evt_" + 12 random hex chars).
+// Panics if crypto/rand fails, which only happens when the OS entropy source
+// is broken — an unrecoverable condition where continuing would be unsafe.
 func generateID(prefix string) string {
 	b := make([]byte, 6)
 	if _, err := rand.Read(b); err != nil {
@@ -129,6 +131,9 @@ func ptrTimeToStr(t *time.Time) sql.NullString {
 	return sql.NullString{String: t.Format(time.RFC3339), Valid: true}
 }
 
+// strToTime parses an RFC3339 string to time.Time.
+// Returns zero time if parsing fails; callers must tolerate zero values for
+// data that predates strict format enforcement.
 func strToTime(s string) time.Time {
 	t, _ := time.Parse(time.RFC3339, s)
 	return t

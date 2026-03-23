@@ -342,6 +342,117 @@ CREATE INDEX IF NOT EXISTS idx_recall_history_session_item ON recall_history(ses
 CREATE INDEX IF NOT EXISTS idx_recall_history_shown_at ON recall_history(shown_at);
 `,
 	},
+	{
+		Version:     2,
+		Description: "add CHECK constraint triggers for enum columns",
+		SQL: `
+-- Validate scope values on memories
+CREATE TRIGGER IF NOT EXISTS check_memories_scope_insert
+BEFORE INSERT ON memories
+BEGIN
+  SELECT RAISE(ABORT, 'invalid scope: must be global, project, or session')
+  WHERE NEW.scope NOT IN ('global', 'project', 'session');
+END;
+
+CREATE TRIGGER IF NOT EXISTS check_memories_scope_update
+BEFORE UPDATE ON memories
+BEGIN
+  SELECT RAISE(ABORT, 'invalid scope: must be global, project, or session')
+  WHERE NEW.scope NOT IN ('global', 'project', 'session');
+END;
+
+-- Validate privacy_level values on memories
+CREATE TRIGGER IF NOT EXISTS check_memories_privacy_insert
+BEFORE INSERT ON memories
+BEGIN
+  SELECT RAISE(ABORT, 'invalid privacy_level: must be private, shared, or public_safe')
+  WHERE NEW.privacy_level NOT IN ('private', 'shared', 'public_safe');
+END;
+
+CREATE TRIGGER IF NOT EXISTS check_memories_privacy_update
+BEFORE UPDATE ON memories
+BEGIN
+  SELECT RAISE(ABORT, 'invalid privacy_level: must be private, shared, or public_safe')
+  WHERE NEW.privacy_level NOT IN ('private', 'shared', 'public_safe');
+END;
+
+-- Validate memory status
+CREATE TRIGGER IF NOT EXISTS check_memories_status_insert
+BEFORE INSERT ON memories
+BEGIN
+  SELECT RAISE(ABORT, 'invalid status: must be active, superseded, archived, or retracted')
+  WHERE NEW.status NOT IN ('active', 'superseded', 'archived', 'retracted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS check_memories_status_update
+BEFORE UPDATE ON memories
+BEGIN
+  SELECT RAISE(ABORT, 'invalid status: must be active, superseded, archived, or retracted')
+  WHERE NEW.status NOT IN ('active', 'superseded', 'archived', 'retracted');
+END;
+
+-- Validate events privacy_level
+CREATE TRIGGER IF NOT EXISTS check_events_privacy_insert
+BEFORE INSERT ON events
+BEGIN
+  SELECT RAISE(ABORT, 'invalid privacy_level')
+  WHERE NEW.privacy_level NOT IN ('private', 'shared', 'public_safe');
+END;
+
+-- Validate summaries scope and privacy
+CREATE TRIGGER IF NOT EXISTS check_summaries_scope_insert
+BEFORE INSERT ON summaries
+BEGIN
+  SELECT RAISE(ABORT, 'invalid scope')
+  WHERE NEW.scope NOT IN ('global', 'project', 'session');
+END;
+
+CREATE TRIGGER IF NOT EXISTS check_summaries_privacy_insert
+BEFORE INSERT ON summaries
+BEGIN
+  SELECT RAISE(ABORT, 'invalid privacy_level')
+  WHERE NEW.privacy_level NOT IN ('private', 'shared', 'public_safe');
+END;
+
+-- Validate episodes scope and privacy
+CREATE TRIGGER IF NOT EXISTS check_episodes_scope_insert
+BEFORE INSERT ON episodes
+BEGIN
+  SELECT RAISE(ABORT, 'invalid scope')
+  WHERE NEW.scope NOT IN ('global', 'project', 'session');
+END;
+
+CREATE TRIGGER IF NOT EXISTS check_episodes_privacy_insert
+BEFORE INSERT ON episodes
+BEGIN
+  SELECT RAISE(ABORT, 'invalid privacy_level')
+  WHERE NEW.privacy_level NOT IN ('private', 'shared', 'public_safe');
+END;
+
+-- Validate ingestion_policies mode
+CREATE TRIGGER IF NOT EXISTS check_policies_mode_insert
+BEFORE INSERT ON ingestion_policies
+BEGIN
+  SELECT RAISE(ABORT, 'invalid mode: must be full, read_only, or ignore')
+  WHERE NEW.mode NOT IN ('full', 'read_only', 'ignore');
+END;
+
+-- Validate jobs status
+CREATE TRIGGER IF NOT EXISTS check_jobs_status_insert
+BEFORE INSERT ON jobs
+BEGIN
+  SELECT RAISE(ABORT, 'invalid status')
+  WHERE NEW.status NOT IN ('pending', 'running', 'completed', 'failed');
+END;
+
+CREATE TRIGGER IF NOT EXISTS check_jobs_status_update
+BEFORE UPDATE ON jobs
+BEGIN
+  SELECT RAISE(ABORT, 'invalid status')
+  WHERE NEW.status NOT IN ('pending', 'running', 'completed', 'failed');
+END;
+`,
+	},
 }
 
 // Migrate runs all pending migrations.
