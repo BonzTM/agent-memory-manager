@@ -2,11 +2,11 @@
 
 A persistent, typed, temporal memory substrate for agents.
 
-## What is AMM?
+## What is amm?
 
-AMM is a database-backed memory system that gives agents durable, structured, scoped memory that persists beyond context windows and across sessions and projects. It ingests raw interaction history, compresses it into expandable summaries, extracts typed durable memories (facts, preferences, decisions, episodes, and more), and serves low-latency ambient recall packets so agents always have a relevant halo of context.
+amm is a database-backed memory system that gives agents durable, structured, scoped memory that persists beyond context windows and across sessions and projects. It ingests raw interaction history, compresses it into expandable summaries, extracts typed durable memories (facts, preferences, decisions, episodes, and more), and serves low-latency ambient recall packets so agents always have a relevant halo of context.
 
-AMM is **not** a chat runtime, a task workflow engine, a vector DB wrapper dressed up as cognition, a markdown convention, or a pure transcript archive. It handles memory -- nothing more, nothing less.
+amm is **not** a chat runtime, a task workflow engine, a vector DB wrapper dressed up as cognition, a markdown convention, or a pure transcript archive. It handles memory -- nothing more, nothing less.
 
 ### Key Capabilities
 
@@ -56,7 +56,7 @@ echo '{"kind":"message_user","source_system":"claude-code","content":"Hello worl
 
 ## Architecture
 
-AMM is a Go binary with a clean layered architecture. All business logic flows through a single `Service` interface -- CLI, MCP, and HTTP adapters are thin wrappers that call into it.
+amm is a Go binary with a clean layered architecture. All business logic flows through a single `Service` interface -- CLI, MCP, and HTTP adapters are thin wrappers that call into it.
 
 ```
 cmd/amm/         CLI entrypoint
@@ -76,7 +76,7 @@ See [docs/architecture.md](docs/architecture.md) for the full architecture refer
 
 ## Memory Model
 
-AMM organizes information into five layers, from ephemeral to durable:
+amm organizes information into five layers, from ephemeral to durable:
 
 | Layer | Name | Purpose |
 |-------|------|---------|
@@ -139,11 +139,11 @@ CGO_ENABLED=1 go test -tags fts5 ./...
 - [MCP Reference](docs/mcp-reference.md) -- MCP tool definitions for JSON-RPC integration
 - [Integration Guide](docs/integration.md) -- Shared integration model, hooks, MCP, workers, and runtime guide index
 - [Codex Integration](docs/codex-integration.md) -- MCP + hooks + AGENTS snippet for Codex workflows
-- [Hermes-Agent Integration](docs/hermes-agent-integration.md) -- Sidecar model, MCP wiring, and AMM-side helper scripts for Hermes
-- [OpenClaw Integration](docs/openclaw-integration.md) -- Real OpenClaw example, native hooks, and AMM worker strategy
+- [Hermes-Agent Integration](docs/hermes-agent-integration.md) -- Sidecar model, MCP wiring, and amm-side helper scripts for Hermes
+- [OpenClaw Integration](docs/openclaw-integration.md) -- Real OpenClaw example, native hooks, and amm worker strategy
 - [OpenCode Integration](docs/opencode-integration.md) -- MCP + local plugin glue for OpenCode dogfooding and user setup
 - [Configuration](docs/configuration.md) -- Config file format and environment variables
-- [Agent Onboarding](docs/agent-onboarding.md) -- Guide for agents using AMM as their memory substrate
+- [Agent Onboarding](docs/agent-onboarding.md) -- Guide for agents using amm as their memory substrate
 
 ## License
 

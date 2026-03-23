@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// Config holds all runtime configuration for AMM.
+// Config holds all runtime configuration for amm.
 // Matches blueprint section 15.
 type Config struct {
 	Storage     StorageConfig     `json:"storage"`
@@ -19,7 +19,7 @@ type Config struct {
 	Maintenance MaintenanceConfig `json:"maintenance"`
 }
 
-// StorageConfig controls where AMM persists data.
+// StorageConfig controls where amm persists data.
 type StorageConfig struct {
 	DBPath string `json:"db_path"`
 }
@@ -104,7 +104,7 @@ func LoadConfig(path string) (Config, error) {
 	return cfg, nil
 }
 
-// parseFlatTOML handles a simple subset of TOML sufficient for AMM config:
+// parseFlatTOML handles a simple subset of TOML sufficient for amm config:
 // [section] headers and key = "value" / key = number / key = bool lines.
 func parseFlatTOML(data []byte, cfg *Config) error {
 	section := ""

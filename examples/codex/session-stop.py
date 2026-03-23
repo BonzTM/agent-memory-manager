@@ -217,7 +217,7 @@ def main() -> int:
     for job in ["reflect", "compress_history", "consolidate_sessions"]:
         run_amm(["jobs", "run", job])
 
-    print(json.dumps({"systemMessage": "AMM recorded Codex session stop and ran maintenance jobs."}))
+    print(json.dumps({"systemMessage": "amm recorded Codex session stop and ran maintenance jobs."}))
     return 0
 
 

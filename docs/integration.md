@@ -2,14 +2,14 @@
 
 ## Overview
 
-AMM (Agent Memory Manager) integrates with agent runtimes through two mechanisms:
+amm (Agent Memory Manager) integrates with agent runtimes through two mechanisms:
 
 1. **Hooks** -- automatic capture of every interaction (events in, ambient recall out).
 2. **MCP tools** -- explicit agent-initiated recall, remember, and management.
 
 Both mechanisms ultimately call the same service layer (`internal/service/service.go`), so they produce identical behavior. Choose hooks for transparent capture with no agent awareness, MCP tools when the agent should actively manage its own memory, or combine both for full coverage.
 
-AMM's maintenance jobs stay outside the runtime boundary. In practice, that means background work is triggered by external `amm jobs run <kind>` calls against the same SQLite database -- from cron, systemd, a runtime hook, or a runtime-owned background process -- rather than by an internal AMM scheduler.
+amm's maintenance jobs stay outside the runtime boundary. In practice, that means background work is triggered by external `amm jobs run <kind>` calls against the same SQLite database -- from cron, systemd, a runtime hook, or a runtime-owned background process -- rather than by an internal amm scheduler.
 
 ## Runtime Guides
 
@@ -29,10 +29,10 @@ Use this page for the shared model, then jump to the runtime-specific companion 
 
 The ideal integration flow (per the spec, section 33.1):
 
-1. User sends a message. A hook fires. AMM ingests the message as an event (`kind: message_user`).
-2. The hook requests ambient recall. AMM returns 3-7 thin hints scored by the multi-signal retrieval engine.
+1. User sends a message. A hook fires. amm ingests the message as an event (`kind: message_user`).
+2. The hook requests ambient recall. amm returns 3-7 thin hints scored by the multi-signal retrieval engine.
 3. Hints are injected into the agent's context window.
-4. The agent responds. A hook fires. AMM ingests the response as an event (`kind: message_assistant`).
+4. The agent responds. A hook fires. amm ingests the response as an event (`kind: message_assistant`).
 5. In the background, workers (`reflect`, `compress_history`, `form_episodes`, etc.) process new events into durable memories.
 
 This loop runs on every turn of conversation, building a growing knowledge base without any explicit agent action.
@@ -41,11 +41,11 @@ This loop runs on every turn of conversation, building a growing knowledge base 
 
 ## Hook-Based Integration (Claude Code Reference Implementation)
 
-Claude Code supports lifecycle hooks that fire at defined points in the interaction cycle. The shipped AMM reference example uses four of them:
+Claude Code supports lifecycle hooks that fire at defined points in the interaction cycle. The shipped amm reference example uses four of them:
 
 - **`UserPromptSubmit`** -- fires when the user submits a prompt. Use this to ingest the user message and request ambient recall.
-- **`PostToolUse`** -- fires after a successful tool run. Use this to capture tool results into AMM.
-- **`PostToolUseFailure`** -- fires after a failed tool run. Use this to capture errorful tool results into AMM.
+- **`PostToolUse`** -- fires after a successful tool run. Use this to capture tool results into amm.
+- **`PostToolUseFailure`** -- fires after a failed tool run. Use this to capture errorful tool results into amm.
 - **`Stop`** -- fires when the session ends. Use this to capture the final assistant message and trigger warm-path maintenance jobs.
 
 ### Hook Script Pattern
@@ -196,7 +196,7 @@ This is stronger than the earlier two-hook setup, but it still has one real limi
 
 ## MCP-Based Integration
 
-For runtimes that support the Model Context Protocol, AMM runs as an MCP server over stdin/stdout using JSON-RPC 2.0.
+For runtimes that support the Model Context Protocol, amm runs as an MCP server over stdin/stdout using JSON-RPC 2.0.
 
 ### Setup
 
@@ -232,7 +232,7 @@ Configure the MCP server in your runtime's settings. For Claude Code, add to `~/
 | `amm_jobs_run` | Run a maintenance job (reflect, compress_history, etc.) |
 | `amm_repair` | Run integrity checks and repairs |
 | `amm_status` | Get system status (counts, initialization state) |
-| `amm_init` | Initialize the AMM database |
+| `amm_init` | Initialize the amm database |
 
 ### Example: MCP Recall Request
 
@@ -301,13 +301,13 @@ The agent can expand any item for full detail using `amm_expand` (MCP) or `amm e
 
 ### Repetition Suppression
 
-AMM tracks which items have been shown in the current session. Previously shown items receive a repetition penalty (weight: 0.10) that pushes them down the ranking, ensuring the agent sees fresh information on each turn. The penalty is session-scoped and resets when the session changes.
+amm tracks which items have been shown in the current session. Previously shown items receive a repetition penalty (weight: 0.10) that pushes them down the ranking, ensuring the agent sees fresh information on each turn. The penalty is session-scoped and resets when the session changes.
 
 ---
 
 ## Recall Modes
 
-AMM supports nine recall modes, selectable via the `--mode` flag (CLI) or `opts.mode` (MCP):
+amm supports nine recall modes, selectable via the `--mode` flag (CLI) or `opts.mode` (MCP):
 
 | Mode | Default Limit | Searches | Use Case |
 |------|---------------|----------|----------|
@@ -361,7 +361,7 @@ for job in reflect compress_history consolidate_sessions extract_claims form_epi
 done
 ```
 
-The `maintenance.auto_*` configuration flags are runtime configuration values, not proof of an internal AMM worker daemon. Use an external trigger unless your runtime explicitly shells out to `amm jobs run ...` for you.
+The `maintenance.auto_*` configuration flags are runtime configuration values, not proof of an internal amm worker daemon. Use an external trigger unless your runtime explicitly shells out to `amm jobs run ...` for you.
 
 ---
 

@@ -32,7 +32,7 @@ try:
     data = json.load(sys.stdin)
     items = data.get("result", {}).get("items", [])
     if items:
-        print("AMM ambient recall:")
+        print("amm ambient recall:")
         for item in items[:5]:
             kind = item.get("kind", "")
             desc = item.get("tight_description", "")

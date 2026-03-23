@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Claude companion for AMM (Agent Memory Manager). Primary contract is `AGENTS.md`.
+Claude companion for amm (Agent Memory Manager). Primary contract is `AGENTS.md`.
 
 ## Source Of Truth
 
@@ -22,9 +22,9 @@ If the task changes rules, tags, tests, workflows, or tool-surface behavior, run
 If you need historical discovery after compaction, use direct CLI `acm history` then `acm fetch`.
 If you need runtime or setup diagnostics, use direct CLI `acm status`.
 
-## AMM-Specific Notes
+## amm-Specific Notes
 
-- AMM is Go, API-first, CLI/MCP-driven. All business logic flows through `internal/core/service.go`.
+- amm is Go, API-first, CLI/MCP-driven. All business logic flows through `internal/core/service.go`.
 - `refined-spec.md` and `technical-blueprint.md` are the design authority. Flag divergence.
 - Canonical tables are truth; derived tables (FTS5, embeddings) are rebuildable.
 - Schema changes go through `internal/adapters/sqlite/migrations.go` — no ad-hoc DDL.

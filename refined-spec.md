@@ -1,13 +1,13 @@
 Correct. That was bleed-over from the design conversation.
 
-If **AMM is its own project**, the spec should not lean on ACM at all.
-At most, other systems can be mentioned generically as possible integrators, not as part of AMM’s identity.
+If **amm is its own project**, the spec should not lean on ACM at all.
+At most, other systems can be mentioned generically as possible integrators, not as part of amm’s identity.
 
 Here’s the revised version, cleaned accordingly.
 
 ---
 
-# AMM Specification Draft
+# amm Specification Draft
 ## Agent Memory Manager
 ### A persistent, typed, temporal memory substrate for agents
 
@@ -15,13 +15,13 @@ Here’s the revised version, cleaned accordingly.
 Draft v0.4
 
 ## Revision note
-This revision removes ACM-specific framing so AMM stands fully on its own as an independent project.
+This revision removes ACM-specific framing so amm stands fully on its own as an independent project.
 
 Key changes in this revision:
 - removed ACM references from product framing
 - removed ACM-specific integration/boundary language
 - generalized external integrations to “workflow systems,” “agent runtimes,” and “control planes”
-- kept AMM focused on its own architecture and responsibilities
+- kept amm focused on its own architecture and responsibilities
 
 ---
 
@@ -50,7 +50,7 @@ A serious memory system for agents should:
 - be inspectable and repairable
 
 ## Product
-**AMM (Agent Memory Manager)** is a database-backed memory substrate for agents.
+**amm (Agent Memory Manager)** is a database-backed memory substrate for agents.
 
 It is:
 - persistent
@@ -113,7 +113,7 @@ It is not:
 # 3. Core design principles
 
 ## 3.1 Store broadly, retrieve narrowly
-AMM should store far more than it injects.
+amm should store far more than it injects.
 
 ## 3.2 Log synchronously, think asynchronously
 Writes should be cheap.
@@ -161,7 +161,7 @@ Do more work off the hot path so runtime recall stays cheap.
 
 # 4. System boundaries
 
-## 4.1 What AMM owns
+## 4.1 What amm owns
 - raw history/event ingestion
 - transcript preservation
 - summary compression over history
@@ -180,7 +180,7 @@ Do more work off the hot path so runtime recall stays cheap.
 - maintenance/repair jobs
 - recall explainability
 
-## 4.2 What AMM does not own
+## 4.2 What amm does not own
 - task/plan workflows
 - verification/review gates
 - chat transport
@@ -194,37 +194,37 @@ Do more work off the hot path so runtime recall stays cheap.
 # 5. Relationship to adjacent systems
 
 ## 5.1 Agent runtimes and control planes
-AMM is designed to integrate with conversational/control-plane systems that:
+amm is designed to integrate with conversational/control-plane systems that:
 - receive user input
 - run tools
 - manage sessions
 - render final responses
 
-AMM should act as a memory substrate for those systems:
+amm should act as a memory substrate for those systems:
 - ingest interaction history
 - return ambient recall packets
 - serve deep recall and expansion when needed
 
 ### Boundary
 - the runtime/control plane handles interaction
-- AMM handles memory
+- amm handles memory
 
 ## 5.2 Workflow and task systems
-AMM may integrate with external workflow systems that emit:
+amm may integrate with external workflow systems that emit:
 - task updates
 - decisions
 - incidents
 - reviews
 - outcomes
 
-AMM may store those as history or canonical memories, but does not become the workflow engine itself.
+amm may store those as history or canonical memories, but does not become the workflow engine itself.
 
 ## 5.3 Transcript/context engines
 Transcript-preserving context systems solve an adjacent problem:
 - preserving long conversation history
 - compressing it without discarding source detail
 
-AMM should learn from them, but remain broader:
+amm should learn from them, but remain broader:
 - transcript retention is only one layer
 - expandable summaries are useful
 - durable typed memory is still required
@@ -271,7 +271,7 @@ AMM should learn from them, but remain broader:
 # 7. Scope model
 
 ## 7.1 Rationale
-AMM must support:
+amm must support:
 - broad continuity across everything
 - project-scoped memory
 - private memory
@@ -374,7 +374,7 @@ Not every session or source should write equally into memory.
 - may optionally skip history persistence
 
 ### `ignore`
-- excluded entirely from AMM ingestion and recall influence
+- excluded entirely from amm ingestion and recall influence
 
 ## 8.3 Policy matching
 Policies may match on:
@@ -445,7 +445,7 @@ History is:
 Support compact, lossless-ish navigation over large histories.
 
 ## 11.2 Compression objects
-AMM may store:
+amm may store:
 - leaf summaries over raw event spans
 - higher-level summaries over lower-level summaries
 - session summaries
@@ -461,7 +461,7 @@ Every summary/compression node must:
 - never become an orphan
 
 ## 11.4 Design note
-AMM does **not** need to make DAG summarization its core identity, but it should support:
+amm does **not** need to make DAG summarization its core identity, but it should support:
 - linked summary hierarchies
 - drill-down
 - source fidelity
@@ -542,7 +542,7 @@ Without temporal truth, memory gets stupid.
 - `superseded_at`
 
 ## 13.3 Required behaviors
-AMM should support:
+amm should support:
 - current truth
 - historical truth
 - stale but historically valid truth
@@ -643,7 +643,7 @@ A useful memory system tracks not only what it knows, but what remains unsettled
 # 18. Retrieval model
 
 ## 18.1 Principle
-AMM should not have one fuzzy “search.”
+amm should not have one fuzzy “search.”
 
 ## 18.2 Retrieval modes
 ### `ambient`
@@ -702,7 +702,7 @@ Fetch richer details for a chosen item:
 - related entities
 
 ### Principle
-**Find -> Describe -> Expand** is the standard AMM retrieval flow.
+**Find -> Describe -> Expand** is the standard amm retrieval flow.
 
 ---
 
@@ -735,7 +735,7 @@ Each item:
 # 21. Retrieval ranking
 
 ## 21.1 Hybrid signals
-AMM should blend:
+amm should blend:
 - lexical/FTS
 - semantic similarity
 - entity overlap
@@ -759,7 +759,7 @@ Common/high-degree entities or generic memories should not dominate.
 Recall without explanation becomes spooky nonsense.
 
 ## 22.2 Explain-recall capability
-AMM should be able to explain:
+amm should be able to explain:
 - why an item surfaced
 - what signals contributed
 - whether it came from canonical memory, summary layer, or raw history
@@ -788,7 +788,7 @@ Rebuildable:
 - salience caches
 
 ## 23.3 Principle
-If derived storage is destroyed, AMM should be able to rebuild from canonical stores.
+If derived storage is destroyed, amm should be able to rebuild from canonical stores.
 
 ---
 
@@ -862,7 +862,7 @@ Memory needs housekeeping.
 Persistent systems rot without repair tools.
 
 ## 27.2 Repair/integrity requirements
-AMM should be able to validate:
+amm should be able to validate:
 - summary -> source links
 - memory -> source links
 - supersession chains
@@ -974,7 +974,7 @@ Derived layer only, not product identity.
 Callers must pass enough context for safe retrieval.
 
 ## 32.3 Poisoning and corruption
-AMM should eventually support:
+amm should eventually support:
 - source trust weighting
 - user-controlled forgetting
 - contradiction resolution
@@ -989,7 +989,7 @@ AMM should eventually support:
 ### Per inbound message
 1. runtime logs raw event
 2. runtime requests ambient recall
-3. AMM returns thin hints from memory/history/summary layers
+3. amm returns thin hints from memory/history/summary layers
 4. runtime injects compact hints
 5. agent replies
 6. reply logged
@@ -1009,14 +1009,14 @@ External systems may emit:
 - summaries
 - artifacts
 
-AMM may store them as history or canonical memory, depending on policy.
+amm may store them as history or canonical memory, depending on policy.
 
 ---
 
 # 34. Product positioning
 
 ## 34.1 Positioning line
-**AMM is a framework-agnostic, typed, temporal, explainable memory substrate for agents — built for ambient recall, expandable summaries, and durable continuity beyond the context window.**
+**amm is a framework-agnostic, typed, temporal, explainable memory substrate for agents — built for ambient recall, expandable summaries, and durable continuity beyond the context window.**
 
 ## 34.2 What it is not
 - not a transcript DB alone
@@ -1064,7 +1064,7 @@ AMM may store them as history or canonical memory, depending on policy.
 
 1. A single `MEMORY.md` is not enough.
 2. Database-backed memory is the right direction.
-3. AMM should stand as its own project.
+3. amm should stand as its own project.
 4. `project_id` scoping should exist but not be required.
 5. Without `project_id`, memory should support broad continuity.
 6. Hooks are intake valves, not the whole brain.

@@ -1,8 +1,8 @@
-Good. Here’s the cleaned **technical blueprint**, with the same correction applied: **AMM stands on its own**.
+Good. Here’s the cleaned **technical blueprint**, with the same correction applied: **amm stands on its own**.
 
 ---
 
-# AMM v0 Technical Blueprint
+# amm v0 Technical Blueprint
 ## Agent Memory Manager
 ### Buildable first implementation plan
 
@@ -10,7 +10,7 @@ Good. Here’s the cleaned **technical blueprint**, with the same correction app
 Draft v0.4 blueprint
 
 ## Purpose
-Turn the AMM product/spec into something buildable:
+Turn the amm product/spec into something buildable:
 - storage model
 - command contract
 - API surface
@@ -21,9 +21,9 @@ Turn the AMM product/spec into something buildable:
 
 This blueprint assumes:
 
-- **AMM is its own project**
-- AMM is **not** defined relative to ACM
-- AMM may integrate with many runtimes and systems, but none of them define its identity
+- **amm is its own project**
+- amm is **not** defined relative to ACM
+- amm may integrate with many runtimes and systems, but none of them define its identity
 
 ---
 
@@ -620,9 +620,9 @@ WHERE shown_at < DATETIME('now', '-7 days');
 "scope": "global",
 "project_id": null,
 "session_id": "session_123",
-"title": "AMM architecture discussion",
+"title": "amm architecture discussion",
 "body": "Discussion covered persistent agent memory, ambient recall, typed memory, summaries, and integrations.",
-"tight_description": "Recent discussion focused on AMM architecture and ambient recall.",
+"tight_description": "Recent discussion focused on amm architecture and ambient recall.",
 "source_span": {
 "event_ids": ["evt_1", "evt_2", "evt_3"]
 }
@@ -637,9 +637,9 @@ WHERE shown_at < DATETIME('now', '-7 days');
 "type": "decision",
 "scope": "global",
 "project_id": null,
-"subject": "AMM",
-"body": "AMM should stand as its own project and not be framed around other systems.",
-"tight_description": "AMM should stand as its own project.",
+"subject": "amm",
+"body": "amm should stand as its own project and not be framed around other systems.",
+"tight_description": "amm should stand as its own project.",
 "confidence": 0.95,
 "importance": 0.9,
 "privacy_level": "private",
@@ -670,7 +670,7 @@ WHERE shown_at < DATETIME('now', '-7 days');
 "type": "session_summary",
 "scope": "global",
 "score": 0.78,
-"tight_description": "Recent discussion focused on AMM architecture and retrieval design."
+"tight_description": "Recent discussion focused on amm architecture and retrieval design."
 }
 ],
 "meta": {
@@ -720,9 +720,9 @@ Explicit durable memory commit.
 amm remember \
 --type decision \
 --scope global \
---subject AMM \
---body "AMM should stand as its own project." \
---tight "AMM should stand as its own project."
+--subject amm \
+--body "amm should stand as its own project." \
+--tight "amm should stand as its own project."
 ```
 
 ---
@@ -1028,7 +1028,7 @@ Delete recall_history rows older than `recall_history_ttl` (default: 7 days).
 
 ## 14.1 Agent runtime integration
 On inbound message:
-1. runtime sends raw event to AMM
+1. runtime sends raw event to amm
 2. runtime asks for ambient recall
 3. runtime injects compact hints
 4. model responds
@@ -1043,7 +1043,7 @@ External systems may emit:
 - artifacts
 - summaries
 
-AMM stores them as history and/or canonical memory per policy.
+amm stores them as history and/or canonical memory per policy.
 
 ---
 
@@ -1119,7 +1119,7 @@ model = "local-minilm"
 
 # 17. v0 success criteria
 
-AMM v0 is successful if it can reliably:
+amm v0 is successful if it can reliably:
 
 1. Store every interaction/event cheaply
 2. Persist high-value typed memories cleanly

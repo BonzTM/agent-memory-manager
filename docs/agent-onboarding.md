@@ -1,15 +1,15 @@
 # Agent Onboarding Guide
 
-This is a step-by-step guide designed to be handed to an AI agent so it can set up AMM for its user with minimal human intervention.
+This is a step-by-step guide designed to be handed to an AI agent so it can set up amm for its user with minimal human intervention.
 
-This onboarding guide is **Claude Code-first**, because this repo ships the most complete end-to-end reference hooks there. If you are wiring AMM into another runtime, use the runtime-specific companions alongside this guide:
+This onboarding guide is **Claude Code-first**, because this repo ships the most complete end-to-end reference hooks there. If you are wiring amm into another runtime, use the runtime-specific companions alongside this guide:
 
 - [Codex Integration](codex-integration.md)
 - [Hermes-Agent Integration](hermes-agent-integration.md)
 - [OpenClaw Integration](openclaw-integration.md)
 - [OpenCode Integration](opencode-integration.md)
 
-In every runtime, the worker model stays the same: AMM background jobs are external `amm jobs run <kind>` calls against the AMM database, not a built-in scheduler.
+In every runtime, the worker model stays the same: amm background jobs are external `amm jobs run <kind>` calls against the amm database, not a built-in scheduler.
 
 ---
 
@@ -31,7 +31,7 @@ If `CGO_ENABLED` does not print `1`, the user needs a C compiler installed (e.g.
 
 ---
 
-## Step 1: Build AMM
+## Step 1: Build amm
 
 ```bash
 cd /path/to/agent-memory-manager
@@ -52,7 +52,7 @@ sudo install -m 755 /tmp/amm-build/amm-mcp /usr/local/bin/amm-mcp
 ls -la /usr/local/bin/amm /usr/local/bin/amm-mcp
 ```
 
-The `-tags fts5` flag enables SQLite full-text search, which AMM requires for retrieval.
+The `-tags fts5` flag enables SQLite full-text search, which amm requires for retrieval.
 
 ---
 
@@ -89,7 +89,7 @@ Add the following to `~/.claude.json` for global config:
 }
 ```
 
-This gives the agent access to all AMM tools (`amm_recall`, `amm_remember`, `amm_ingest_event`, etc.) via MCP.
+This gives the agent access to all amm tools (`amm_recall`, `amm_remember`, `amm_ingest_event`, etc.) via MCP.
 
 ### 3b: Verify MCP Server
 
@@ -276,11 +276,11 @@ Run these commands to confirm everything works end-to-end:
 AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm remember \
   --type fact \
   --scope global \
-  --body "AMM is now configured and ready to use" \
-  --tight "AMM configured"
+  --body "amm is now configured and ready to use" \
+  --tight "amm configured"
 
 # Test recall: retrieve the memory just created
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm recall --mode ambient "AMM configured"
+AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm recall --mode ambient "amm configured"
 
 # Test status: confirm counts updated
 AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm status
@@ -338,7 +338,7 @@ amm remember --type constraint --scope project --project "my-project" \
 
 ## Step 7: Schedule Background Workers
 
-Background workers extract structure from raw events. Without them, AMM only stores what you explicitly `remember`. With them, AMM automatically discovers memories from conversation history.
+Background workers extract structure from raw events. Without them, amm only stores what you explicitly `remember`. With them, amm automatically discovers memories from conversation history.
 
 ### Option A: Cron (simplest)
 
@@ -366,7 +366,7 @@ Create `~/.config/systemd/user/amm-maintenance.service`:
 
 ```ini
 [Unit]
-Description=AMM background maintenance
+Description=amm background maintenance
 
 [Service]
 Type=oneshot
@@ -382,7 +382,7 @@ Create `~/.config/systemd/user/amm-maintenance.timer`:
 
 ```ini
 [Unit]
-Description=Run AMM maintenance every 30 minutes
+Description=Run amm maintenance every 30 minutes
 
 [Timer]
 OnCalendar=*:0/30

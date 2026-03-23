@@ -1,11 +1,11 @@
 # AGENTS.md
 
-Operating contract for **AMM (Agent Memory Manager)** — a Go, API-first, CLI/MCP-driven persistent memory substrate for agents.
+Operating contract for **amm (Agent Memory Manager)** — a Go, API-first, CLI/MCP-driven persistent memory substrate for agents.
 
 ## Source Of Truth
 
 - Follow this file first.
-- Design intent lives in `refined-spec.md` (what AMM is) and `technical-blueprint.md` (how to build it).
+- Design intent lives in `refined-spec.md` (what amm is) and `technical-blueprint.md` (how to build it).
 - Keep canonical rules in `.acm/acm-rules.yaml`.
 - Keep canonical tags in `.acm/acm-tags.yaml` and executable checks in `.acm/acm-tests.yaml`.
 - Keep canonical completion workflow gates in `.acm/acm-workflows.yaml`.
@@ -13,7 +13,7 @@ Operating contract for **AMM (Agent Memory Manager)** — a Go, API-first, CLI/M
 
 ## Project Architecture
 
-AMM is:
+amm is:
 - **Go** — single binary, minimal dependencies, standard library where possible
 - **API-first** — core service interface in `internal/core/service.go` is the single entry point for all logic
 - **CLI/MCP-driven** — `cmd/amm` (convenience CLI), `cmd/amm-mcp` (MCP adapter), both call the service

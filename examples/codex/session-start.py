@@ -53,7 +53,7 @@ def main() -> int:
     }
     run_amm_ingest(event)
 
-    print(json.dumps({"systemMessage": "AMM recorded Codex session start."}))
+    print(json.dumps({"systemMessage": "amm recorded Codex session start."}))
     return 0
 
 

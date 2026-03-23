@@ -1,6 +1,6 @@
 # acm-rules.yaml
-# Governance rules for agent-memory-manager (AMM).
-# Starter rules + AMM-specific rules for a Go, API-first, CLI/MCP-driven project.
+# Governance rules for agent-memory-manager (amm).
+# Starter rules + amm-specific rules for a Go, API-first, CLI/MCP-driven project.
 
 version: acm.rules.v1
 rules:
@@ -54,12 +54,12 @@ rules:
     enforcement: hard
     tags: [escalation, safety]
 
-  # --- AMM-specific rules ---
+  # --- amm-specific rules ---
 
   - id: rule_go_api_first
     summary: All functionality must flow through the service interface.
     content: >-
-      AMM is API-first. The core service interface in `internal/core/service.go`
+      amm is API-first. The core service interface in `internal/core/service.go`
       is the single entry point for all business logic. CLI commands, MCP tools,
       and HTTP handlers are adapters that call the service — they must not contain
       business logic, direct SQL, or direct database access. If you need new
@@ -109,7 +109,7 @@ rules:
   - id: rule_spec_blueprint_alignment
     summary: Implementation must stay aligned with the spec and blueprint.
     content: >-
-      `refined-spec.md` and `technical-blueprint.md` define AMM's design intent.
+      `refined-spec.md` and `technical-blueprint.md` define amm's design intent.
       When implementation diverges from these documents (new types, changed
       schema, altered retrieval modes), update the spec/blueprint in the same
       change or flag the divergence explicitly. Do not silently drift.

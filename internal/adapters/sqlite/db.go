@@ -9,7 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// DB wraps a SQLite connection with AMM-specific configuration.
+// DB wraps a SQLite connection with amm-specific configuration.
 type DB struct {
 	db   *sql.DB
 	path string

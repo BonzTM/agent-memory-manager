@@ -2,7 +2,7 @@ package core
 
 import "context"
 
-// Service is the single entry point for all AMM business logic.
+// Service is the single entry point for all amm business logic.
 // CLI, MCP, and HTTP are adapters that call through this interface.
 type Service interface {
 	// Init initializes the database and runs migrations.

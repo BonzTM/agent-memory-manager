@@ -1,6 +1,6 @@
 # MCP Reference
 
-AMM exposes all its functionality as MCP (Model Context Protocol) tools over a stdio JSON-RPC 2.0 transport. One JSON message per line, newline-delimited.
+amm exposes all its functionality as MCP (Model Context Protocol) tools over a stdio JSON-RPC 2.0 transport. One JSON message per line, newline-delimited.
 
 ## Starting the Server
 
@@ -87,7 +87,7 @@ On tool-level errors (as opposed to protocol errors), the response still uses th
 
 ### amm_init
 
-Initialize the AMM database.
+Initialize the amm database.
 
 **Input schema:**
 

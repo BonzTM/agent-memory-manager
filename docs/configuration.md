@@ -2,14 +2,14 @@
 
 ## Config File Locations
 
-AMM loads configuration from the following sources, in order. Later sources override earlier ones:
+amm loads configuration from the following sources, in order. Later sources override earlier ones:
 
 1. **Defaults** -- hardcoded in `internal/runtime/config.go` via `DefaultConfig()`.
 2. **User config file** -- `~/.amm/config.json` or `~/.amm/config.toml`.
 3. **Project config file** -- `.amm/config.json` or `.amm/config.toml` (relative to the project root).
 4. **Environment variables** -- override any file-based values.
 
-If a config file does not exist, AMM silently uses defaults. JSON is auto-detected by a leading `{` character; otherwise the file is parsed as TOML.
+If a config file does not exist, amm silently uses defaults. JSON is auto-detected by a leading `{` character; otherwise the file is parsed as TOML.
 
 ---
 
@@ -81,7 +81,7 @@ auto_consolidate = true
 auto_detect_contradictions = true
 ```
 
-AMM supports a flat subset of TOML: `[section]` headers and `key = value` pairs. Nested tables and arrays are not supported. Values can be quoted strings, bare integers, or bare booleans.
+amm supports a flat subset of TOML: `[section]` headers and `key = value` pairs. Nested tables and arrays are not supported. Values can be quoted strings, bare integers, or bare booleans.
 
 ---
 
@@ -121,7 +121,7 @@ AMM supports a flat subset of TOML: `[section]` headers and `key = value` pairs.
 
 ## Scoring Weights
 
-AMM uses a multi-signal scoring formula to rank recall results. Each candidate item is evaluated against 9 signals, weighted and summed to produce a final score between 0.0 and 1.0.
+amm uses a multi-signal scoring formula to rank recall results. Each candidate item is evaluated against 9 signals, weighted and summed to produce a final score between 0.0 and 1.0.
 
 ### Signal Weights (v0, semantic disabled)
 

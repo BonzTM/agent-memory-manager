@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AMM Demo: Full workflow from ingest to recall
+# amm Demo: Full workflow from ingest to recall
 # Usage: ./demo-workflow.sh
 set -euo pipefail
 
@@ -12,7 +12,7 @@ parse_field() {
   python3 -c "import sys,json; d=json.load(sys.stdin); print($1)"
 }
 
-echo "=== AMM Demo Workflow ==="
+echo "=== amm Demo Workflow ==="
 echo "Database: $DB"
 echo ""
 
@@ -39,7 +39,7 @@ $AMM remember --type preference --scope global --subject "Developer" \
   --tight "Prefers Go for backends" \
   | parse_field '"  Remembered:", d["result"]["id"], "("+d["result"]["type"]+")"'
 
-$AMM remember --type decision --scope global --subject "AMM" \
+$AMM remember --type decision --scope global --subject "amm" \
   --body "Using SQLite as the primary data store for local-first deployment" \
   --tight "SQLite for local storage" \
   | parse_field '"  Remembered:", d["result"]["id"], "("+d["result"]["type"]+")"'

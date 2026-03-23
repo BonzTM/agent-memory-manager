@@ -6,6 +6,6 @@ package sqlite
 // It produces a compile-time error to enforce the tag.
 
 func init() {
-	// AMM requires FTS5 support. Build with: CGO_ENABLED=1 go build -tags fts5 ./...
+	// amm requires FTS5 support. Build with: CGO_ENABLED=1 go build -tags fts5 ./...
 	var _ = _AMM_REQUIRES_FTS5_BUILD_TAG_
 }

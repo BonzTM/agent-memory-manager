@@ -1,12 +1,12 @@
 # OpenCode Integration Guide
 
-OpenCode fits AMM well as an MCP-first runtime with a small plugin layer.
+OpenCode fits amm well as an MCP-first runtime with a small plugin layer.
 
 The safest truthful support boundary today is:
 
-- **`amm-mcp` in `opencode.json`** for explicit AMM tools
+- **`amm-mcp` in `opencode.json`** for explicit amm tools
 - **a local OpenCode plugin** for stable runtime glue (`shell.env`, `tool.execute.after`, session lifecycle markers)
-- **external AMM workers** for heavier maintenance jobs
+- **external amm workers** for heavier maintenance jobs
 
 This repo does **not** currently claim full OpenCode transcript capture or a stable message-hook-based memory loop.
 
@@ -40,7 +40,7 @@ Add the documented MCP block to your global `~/.config/opencode/opencode.json` o
 }
 ```
 
-That exposes AMM explicitly through OpenCode's documented MCP surface.
+That exposes amm explicitly through OpenCode's documented MCP surface.
 
 ## 2. Add a local plugin for runtime glue
 
@@ -51,15 +51,15 @@ OpenCode automatically loads local plugins from:
 
 The shipped `amm.js` plugin stays on the stable documented boundary:
 
-- `shell.env` injects AMM-related env vars into shell/tool execution
-- `tool.execute.after` records durable `tool_result` events in AMM
+- `shell.env` injects amm-related env vars into shell/tool execution
+- `tool.execute.after` records durable `tool_result` events in amm
 - `event` handles only coarse session lifecycle markers such as `session.created` and `session.idle`
 
 That gives you useful operational memory without promising transcript fidelity from undocumented hook behavior.
 
 ## 3. Keep workers external
 
-OpenCode plugins can trigger light AMM jobs, but the heavy maintenance loop still belongs outside the runtime:
+OpenCode plugins can trigger light amm jobs, but the heavy maintenance loop still belongs outside the runtime:
 
 ```bash
 AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run reflect
@@ -71,8 +71,8 @@ Use host cron/systemd or the shared [`examples/scripts/run-workers.sh`](../examp
 
 ## Suggested usage pattern
 
-- **Explicit memory**: OpenCode uses AMM through MCP (`amm_recall`, `amm_expand`, `amm_remember`, `amm_jobs_run`)
-- **Plugin glue**: OpenCode injects AMM env vars and records tool/lifecycle markers
+- **Explicit memory**: OpenCode uses amm through MCP (`amm_recall`, `amm_expand`, `amm_remember`, `amm_jobs_run`)
+- **Plugin glue**: OpenCode injects amm env vars and records tool/lifecycle markers
 - **Background processing**: external worker invocations turn that event stream into summaries and memories
 
 ## What this repo ships today
@@ -85,6 +85,6 @@ Use host cron/systemd or the shared [`examples/scripts/run-workers.sh`](../examp
 
 - stable full-message capture from OpenCode conversations
 - transcript reconstruction from `message.updated` / `message.part.updated`
-- a native OpenCode AMM npm package published independently of this repo
+- a native OpenCode amm npm package published independently of this repo
 
 If OpenCode later documents richer message hooks as stable, this integration can expand. For now, MCP plus stable plugin glue is the supportable boundary.

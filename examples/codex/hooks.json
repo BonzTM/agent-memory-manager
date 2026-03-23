@@ -8,7 +8,7 @@
             "type": "command",
             "command": "python3 /home/you/.amm/hooks/codex-session-start.py",
             "timeoutSec": 10,
-            "statusMessage": "recording Codex session start in AMM"
+            "statusMessage": "recording Codex session start in amm"
           }
         ]
       }
@@ -20,7 +20,7 @@
             "type": "command",
             "command": "python3 /home/you/.amm/hooks/codex-user-prompt-submit.py",
             "timeoutSec": 10,
-            "statusMessage": "capturing prompt and loading AMM recall"
+            "statusMessage": "capturing prompt and loading amm recall"
           }
         ]
       }
@@ -32,7 +32,7 @@
             "type": "command",
             "command": "python3 /home/you/.amm/hooks/codex-stop.py",
             "timeoutSec": 20,
-            "statusMessage": "closing out Codex session in AMM"
+            "statusMessage": "closing out Codex session in amm"
           }
         ]
       }

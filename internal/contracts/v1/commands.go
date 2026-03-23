@@ -1,6 +1,6 @@
 package v1
 
-// Command name constants for all v0 AMM commands.
+// Command name constants for all v0 amm commands.
 const (
 	CmdIngestEvent      = "ingest_event"
 	CmdIngestTranscript = "ingest_transcript"
@@ -17,7 +17,7 @@ const (
 	CmdStatus           = "status"
 )
 
-// CommandInfo describes a single AMM command.
+// CommandInfo describes a single amm command.
 type CommandInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`

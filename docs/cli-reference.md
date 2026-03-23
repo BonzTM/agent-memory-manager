@@ -45,7 +45,7 @@ CGO_ENABLED=1 go build -tags fts5 -o amm ./cmd/amm
 
 ### init
 
-Initialize the AMM database. Creates the file and runs all migrations.
+Initialize the amm database. Creates the file and runs all migrations.
 
 ```
 amm init [--db <path>]

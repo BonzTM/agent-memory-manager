@@ -1,19 +1,19 @@
 # Hermes-Agent Integration Guide
 
-Hermes and AMM fit together cleanly as a sidecar pattern:
+Hermes and amm fit together cleanly as a sidecar pattern:
 
 - **Hermes-agent** owns the runtime, hooks, scheduling, and agent behavior.
-- **AMM** owns durable history, recall, summaries, and maintenance jobs.
+- **amm** owns durable history, recall, summaries, and maintenance jobs.
 
 That means the integration contract stays simple:
 
-- register `amm-mcp` if you want explicit AMM tools inside Hermes
-- use Hermes hooks or hook handlers to call AMM-side helper scripts for capture/recall
+- register `amm-mcp` if you want explicit amm tools inside Hermes
+- use Hermes hooks or hook handlers to call amm-side helper scripts for capture/recall
 - keep maintenance jobs as external `amm jobs run <kind>` calls against the same database
 
 ## Recommended Shape
 
-Use Hermes and AMM in three layers:
+Use Hermes and amm in three layers:
 
 1. **MCP** for explicit agent-controlled memory access
 2. **Hooks** for transparent event capture and ambient recall on the hot path
@@ -39,11 +39,11 @@ Once that is in place, Hermes can call tools such as:
 - `amm_remember`
 - `amm_jobs_run`
 
-Keep the mental model the same as every other runtime: Hermes asks for memory, but AMM remains an external service boundary exposed through stdio MCP and the CLI.
+Keep the mental model the same as every other runtime: Hermes asks for memory, but amm remains an external service boundary exposed through stdio MCP and the CLI.
 
-## 2. Use Hook Handlers to Bridge Hermes Into AMM
+## 2. Use Hook Handlers to Bridge Hermes Into amm
 
-Hermes has its own hook registration model. This repo does **not** ship a Hermes-native plugin package or a full Hermes config tree. Instead, it ships AMM-side helper scripts that a Hermes hook handler can call.
+Hermes has its own hook registration model. This repo does **not** ship a Hermes-native plugin package or a full Hermes config tree. Instead, it ships amm-side helper scripts that a Hermes hook handler can call.
 
 The helper pattern is intentionally small:
 
@@ -56,7 +56,7 @@ The helper pattern is intentionally small:
 - [`examples/hermes-agent/on-user-message.sh`](../examples/hermes-agent/on-user-message.sh)
 - [`examples/hermes-agent/on-session-end.sh`](../examples/hermes-agent/on-session-end.sh)
 
-These helpers are **AMM-side scripts**, not Hermes runtime code. Your Hermes hook handler is responsible for deciding when to call them and what environment variables or stdin payloads to pass.
+These helpers are **amm-side scripts**, not Hermes runtime code. Your Hermes hook handler is responsible for deciding when to call them and what environment variables or stdin payloads to pass.
 
 ## Suggested Environment Contract
 
@@ -66,11 +66,11 @@ To keep the helper scripts runtime-neutral, pass the following values from your 
 - `AMM_PROJECT_ID` — a stable project identifier for scoped recall
 - stdin — the user message text for the message-entry helper
 
-That keeps the AMM scripts reusable even if your Hermes hook wiring changes over time.
+That keeps the amm scripts reusable even if your Hermes hook wiring changes over time.
 
 ## 3. Keep Background Workers External
 
-AMM does not currently ship an internal scheduler loop. The repo documents worker execution as external CLI calls:
+amm does not currently ship an internal scheduler loop. The repo documents worker execution as external CLI calls:
 
 ```bash
 AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run reflect
@@ -101,13 +101,13 @@ That gives you immediate context injection without forcing the heavy jobs into t
 If you want a Hermes-oriented instruction block, use something like this:
 
 ```md
-## AMM memory usage
+## amm memory usage
 
-- Treat AMM as the durable memory substrate for this project.
+- Treat amm as the durable memory substrate for this project.
 - Use `amm_recall` or `amm recall --mode ambient` when resuming work, switching projects, or when important context may exist outside the immediate conversation.
 - Use `amm_expand` only when a thin recall item needs to be opened in full.
 - Use `amm_remember` for stable, high-confidence memories such as preferences, decisions, and durable constraints.
-- Do not assume AMM runs its own worker loop. Maintenance happens through external `amm jobs run <kind>` calls.
+- Do not assume amm runs its own worker loop. Maintenance happens through external `amm jobs run <kind>` calls.
 ```
 
 ## Verification Checklist
@@ -115,13 +115,13 @@ If you want a Hermes-oriented instruction block, use something like this:
 - `amm-mcp` starts successfully with the configured `AMM_DB_PATH`
 - Hermes can see and call the `amm` MCP server
 - your Hermes hook handler can call `examples/hermes-agent/on-user-message.sh` with a sample prompt
-- AMM history shows the captured event after the helper runs
+- amm history shows the captured event after the helper runs
 - `examples/hermes-agent/on-session-end.sh` can run without shell errors
 - scheduled worker runs create summaries or memories as expected
 
 ## What This Repo Does Not Promise
 
-- a built-in AMM scheduler
+- a built-in amm scheduler
 - a Hermes-native plugin or SDK package in this repository
 - a one-size-fits-all Hermes hook registration schema
 - automatic execution of `maintenance.auto_*` flags without an external trigger

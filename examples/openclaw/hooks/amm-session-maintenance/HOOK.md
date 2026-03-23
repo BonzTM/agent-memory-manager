@@ -1,12 +1,12 @@
 ---
 name: amm-session-maintenance
-description: Run warm-path AMM maintenance when OpenClaw stops a session.
+description: Run warm-path amm maintenance when OpenClaw stops a session.
 metadata: { "openclaw": { "emoji": "♻️", "events": ["command:stop"] } }
 ---
 
-# AMM Session Maintenance
+# amm Session Maintenance
 
-This hook records a lightweight session-stop event and then runs the warm-path AMM jobs:
+This hook records a lightweight session-stop event and then runs the warm-path amm jobs:
 
 - `reflect`
 - `compress_history`
@@ -17,5 +17,5 @@ It does not run the heavier maintenance jobs. Keep those on the cold path throug
 ## Environment
 
 - `AMM_BIN` — optional absolute path to `amm` (defaults to `amm`)
-- `AMM_DB_PATH` — optional path to the AMM SQLite database (defaults to `~/.amm/amm.db`)
+- `AMM_DB_PATH` — optional path to the amm SQLite database (defaults to `~/.amm/amm.db`)
 - `AMM_PROJECT_ID` — optional stable project identifier for scoped recall/history

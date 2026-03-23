@@ -11,7 +11,7 @@ import (
 	"github.com/joshd-04/agent-memory-manager/internal/service"
 )
 
-// NewService creates a fully initialized AMM service from the given config.
+// NewService creates a fully initialized amm service from the given config.
 // Returns the Service interface, a cleanup function, and any error.
 // The caller must invoke the cleanup function when done (typically via defer).
 func NewService(cfg Config) (core.Service, func(), error) {

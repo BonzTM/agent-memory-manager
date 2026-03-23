@@ -1,10 +1,10 @@
-# AMM Architecture
+# amm Architecture
 
 Detailed architecture reference for the Agent Memory Manager.
 
 ## System Overview
 
-AMM is a Go binary that provides persistent, typed, temporal memory for agents. It is:
+amm is a Go binary that provides persistent, typed, temporal memory for agents. It is:
 
 - **API-first**: a single `Service` interface defines all business logic; CLI, MCP, and HTTP are thin adapters
 - **SQLite-backed**: one local database file, no external services
@@ -15,7 +15,7 @@ The service layer (`internal/core/Service`) is the only entry point for business
 
 ## Memory Architecture Layers
 
-AMM organizes information into five layers, each with a distinct role.
+amm organizes information into five layers, each with a distinct role.
 
 ### Layer A: Working Memory
 
@@ -89,7 +89,7 @@ Supersession is explicit: a memory can record what it `supersedes` and what `sup
 
 ## Scope Model
 
-AMM uses two orthogonal axes to control where a memory belongs and who can see it.
+amm uses two orthogonal axes to control where a memory belongs and who can see it.
 
 ### Scope (structural)
 
@@ -119,7 +119,7 @@ These axes are independent. A memory can be `global` scope + `private` privacy (
 
 ## Processing Pipeline
 
-AMM processes information through four stages:
+amm processes information through four stages:
 
 ```
 Retain --> Reflect --> Compress --> Index
@@ -134,7 +134,7 @@ Retain --> Reflect --> Compress --> Index
 
 ### Find, Describe, Expand
 
-AMM retrieval follows a three-step flow:
+amm retrieval follows a three-step flow:
 
 1. **Find** (`recall`): Returns a thin list of scored `RecallItem` records -- just ID, kind, type, scope, score, and tight description. Low token cost.
 2. **Describe** (`describe`): Returns slightly richer metadata for one or more items without the full body.
@@ -166,8 +166,8 @@ When semantic similarity is disabled (the default in v0), weights are renormaliz
 
 Ambient recall is the primary retrieval mode. On every turn, the agent runtime:
 
-1. Sends the latest inbound message to AMM
-2. AMM extracts entities/topics (exact match, capitalized token heuristics, recent topic cache)
+1. Sends the latest inbound message to amm
+2. amm extracts entities/topics (exact match, capitalized token heuristics, recent topic cache)
 3. Queries across memories, summaries, episodes, and history
 4. Merges candidates, scores with the 10-signal formula, ranks
 5. Returns a thin packet of 3-7 `RecallItem` records

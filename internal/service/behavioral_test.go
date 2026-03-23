@@ -654,9 +654,9 @@ func TestExtractClaims(t *testing.T) {
 
 	_, err := svc.Remember(ctx, &core.Memory{
 		Type:             core.MemoryTypeFact,
-		Subject:          "AMM",
-		Body:             "AMM uses SQLite for storage",
-		TightDescription: "AMM uses SQLite",
+		Subject:          "amm",
+		Body:             "amm uses SQLite for storage",
+		TightDescription: "amm uses SQLite",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -702,9 +702,9 @@ func TestExtractClaims_SkipsExisting(t *testing.T) {
 
 	_, err := svc.Remember(ctx, &core.Memory{
 		Type:             core.MemoryTypeFact,
-		Subject:          "AMM",
-		Body:             "AMM uses SQLite for storage",
-		TightDescription: "AMM uses SQLite",
+		Subject:          "amm",
+		Body:             "amm uses SQLite for storage",
+		TightDescription: "amm uses SQLite",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -911,18 +911,18 @@ func TestDetectContradictions(t *testing.T) {
 	// Remember two conflicting memories.
 	_, err := svc.Remember(ctx, &core.Memory{
 		Type:             core.MemoryTypeFact,
-		Subject:          "AMM",
-		Body:             "AMM uses SQLite for persistence",
-		TightDescription: "AMM uses SQLite",
+		Subject:          "amm",
+		Body:             "amm uses SQLite for persistence",
+		TightDescription: "amm uses SQLite",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = svc.Remember(ctx, &core.Memory{
 		Type:             core.MemoryTypeFact,
-		Subject:          "AMM",
-		Body:             "AMM uses Postgres for persistence",
-		TightDescription: "AMM uses Postgres",
+		Subject:          "amm",
+		Body:             "amm uses Postgres for persistence",
+		TightDescription: "amm uses Postgres",
 	})
 	if err != nil {
 		t.Fatal(err)

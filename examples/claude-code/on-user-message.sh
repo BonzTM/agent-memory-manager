@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AMM hook: capture user message and return ambient recall hints
+# amm hook: capture user message and return ambient recall hints
 # Install: cp to ~/.amm/hooks/on-user-message.sh && chmod +x
 
 set -euo pipefail
@@ -35,7 +35,7 @@ try:
     data = json.load(sys.stdin)
     items = data.get("result", {}).get("items", [])
     if items:
-        print("AMM recall hints:")
+        print("amm recall hints:")
         for item in items[:5]:
             desc = item.get("tight_description", "")
             kind = item.get("kind", "")

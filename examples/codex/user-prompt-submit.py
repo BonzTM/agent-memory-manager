@@ -38,7 +38,7 @@ def render_additional_context(recall_result: dict) -> str | None:
     items = recall_result.get("result", {}).get("items", [])
     if not items:
         return None
-    lines = ["AMM ambient recall:"]
+    lines = ["amm ambient recall:"]
     for item in items[:5]:
         kind = item.get("kind", "item")
         desc = item.get("tight_description", "")
@@ -92,7 +92,7 @@ def main() -> int:
     additional_context = render_additional_context(recall)
 
     output: dict[str, object] = {
-        "systemMessage": "AMM captured the prompt and checked ambient recall."
+        "systemMessage": "amm captured the prompt and checked ambient recall."
     }
     if additional_context:
         output["hookSpecificOutput"] = {

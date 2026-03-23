@@ -1,8 +1,8 @@
 # OpenClaw Integration Guide
 
-OpenClaw is the runtime in this pairing; AMM is the memory substrate.
+OpenClaw is the runtime in this pairing; amm is the memory substrate.
 
-That distinction matters, because this repository only promises the AMM side of the boundary:
+That distinction matters, because this repository only promises the amm side of the boundary:
 
 - `amm` for ingestion, recall, expansion, and maintenance jobs
 - `amm-mcp` for stdio MCP access
@@ -17,7 +17,7 @@ The example in [`examples/openclaw/`](../examples/openclaw/) uses three pieces:
 
 1. **`openclaw.json`** — a real config example that wires `amm-mcp` through `plugins.entries.acpx.config.mcpServers`
 2. **Native hooks** — repo-local `HOOK.md` + `handler.ts` directories loaded through `hooks.internal.load.extraDirs`
-3. **External workers** — AMM maintenance stays outside the runtime as `amm jobs run <kind>` or the shared [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh)
+3. **External workers** — amm maintenance stays outside the runtime as `amm jobs run <kind>` or the shared [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh)
 
 This is the recommended shape for a truthful OpenClaw integration today.
 
@@ -80,7 +80,7 @@ This guide intentionally does **not** claim that OpenClaw message hooks are a su
 
 ## Responsibility Split
 
-| Concern | OpenClaw owns | AMM owns |
+| Concern | OpenClaw owns | amm owns |
 |---|---|---|
 | Runtime lifecycle | hooks, background processes, plugin loading, scheduling | none |
 | Memory storage | none | SQLite database and canonical memory/history records |
@@ -98,9 +98,9 @@ The repo-shipped flow looks like this:
 3. The agent can call `amm_recall` explicitly when memory context is needed.
 4. When OpenClaw sends a reply, `amm-memory-capture` records a `message_assistant` event.
 5. When `/stop` is issued, `amm-session-maintenance` records a stop event and runs the warm-path jobs.
-6. On a longer cadence, a host-level scheduler runs the cold-path jobs against the same AMM database.
+6. On a longer cadence, a host-level scheduler runs the cold-path jobs against the same amm database.
 
-That gives you a real OpenClaw integration without coupling AMM to undocumented hook mutation internals.
+That gives you a real OpenClaw integration without coupling amm to undocumented hook mutation internals.
 
 ## Example Files to Start From
 
@@ -114,7 +114,7 @@ That gives you a real OpenClaw integration without coupling AMM to undocumented 
 
 ## Worker Strategy
 
-AMM background jobs stay external. The repo example uses a split strategy:
+amm background jobs stay external. The repo example uses a split strategy:
 
 - **Warm path**: the `command:stop` hook runs `reflect`, `compress_history`, and `consolidate_sessions`
 - **Cold path**: host cron or systemd runs the heavier maintenance via `examples/scripts/run-workers.sh`
@@ -144,27 +144,27 @@ If you want the third option, start from [`examples/openclaw/cron.add.reflect.js
 If you want an OpenClaw-oriented instructions block, use something like this:
 
 ```md
-## AMM memory usage
+## amm memory usage
 
-- Treat AMM as the durable memory system for this project.
+- Treat amm as the durable memory system for this project.
 - Use `amm_recall` or `amm recall --mode ambient` when prior context may matter.
-- Expand only the AMM items you actually need before acting.
+- Expand only the amm items you actually need before acting.
 - Use `amm_remember` for stable, high-confidence information such as decisions, preferences, and constraints.
-- Do not assume AMM schedules its own maintenance. Worker jobs run through external `amm jobs run <kind>` calls.
+- Do not assume amm schedules its own maintenance. Worker jobs run through external `amm jobs run <kind>` calls.
 ```
 
 ## Verification Checklist
 
 - `amm-mcp` can be launched by OpenClaw as a subprocess
 - the OpenClaw runtime can call `amm_recall` successfully
-- the `amm-memory-capture` hook can ingest inbound and outbound message events into AMM history
+- the `amm-memory-capture` hook can ingest inbound and outbound message events into amm history
 - explicit `amm_recall` returns thin hints when the agent requests them
 - session-end or scheduled jobs can run `reflect` and `compress_history`
-- the same `AMM_DB_PATH` is visible to every OpenClaw-owned subprocess that calls AMM
+- the same `AMM_DB_PATH` is visible to every OpenClaw-owned subprocess that calls amm
 
 ## What This Repo Does Not Promise
 
-- a built-in AMM scheduler or daemon
+- a built-in amm scheduler or daemon
 - a repo-shipped native OpenClaw npm plugin package
 - a single mandatory OpenClaw configuration schema
 - automatic context mutation through undocumented OpenClaw hook internals

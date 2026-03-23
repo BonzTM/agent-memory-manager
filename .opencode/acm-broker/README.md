@@ -73,7 +73,7 @@ Use the same maintenance loop as any other primary ACM operator when rules, tags
 - `done` and runnable `review` already treat built-in governance files such as repo-root `AGENTS.md`, `CLAUDE.md`, and canonical `.acm/**` contract files as managed scope.
 - Use `verify` for repo checks and `review` for named workflow gates; `review` is not a second generic test runner.
 - For already isolated/containerized hosts, prefer workflow `run.argv` that uses `scripts/acm-cross-review.sh --yolo`; the shared high-trust shortcut avoids nested sandbox conflicts while relying on the outer container boundary.
-- These ACM companion docs remain documentation-only. AMM runtime examples for OpenCode now live separately under `docs/opencode-integration.md` and `examples/opencode/`; they do not change the ACM companion contract in this folder.
+- These ACM companion docs remain documentation-only. amm runtime examples for OpenCode now live separately under `docs/opencode-integration.md` and `examples/opencode/`; they do not change the ACM companion contract in this folder.
 
 ## AGENTS companion
 

@@ -1,24 +1,24 @@
 # OpenClaw Example
 
-This directory ships a **real OpenClaw v2026.3.22 example** for AMM.
+This directory ships a **real OpenClaw v2026.3.22 example** for amm.
 
 It is a repo-local integration bundle, not a native OpenClaw npm plugin package. The example stays inside confirmed OpenClaw surfaces:
 
 - `~/.openclaw/openclaw.json` configuration
 - `plugins.entries.acpx.config.mcpServers` for `amm-mcp`
 - native Gateway hooks with `HOOK.md` + `handler.ts`
-- external AMM workers via `amm jobs run <kind>` or the shared `examples/scripts/run-workers.sh`
+- external amm workers via `amm jobs run <kind>` or the shared `examples/scripts/run-workers.sh`
 
 ## Included Files
 
 - `openclaw.json` — example OpenClaw config fragment that wires `amm-mcp` and loads the hook directories in this folder
 - `cron.add.reflect.json` — optional `cron.add` payload for an OpenClaw-owned isolated maintenance turn that calls `amm_jobs_run`
-- `hooks/amm-memory-capture/` — native OpenClaw hook that captures inbound and outbound message events into AMM
-- `hooks/amm-session-maintenance/` — native OpenClaw hook that runs light AMM maintenance on `command:stop`
+- `hooks/amm-memory-capture/` — native OpenClaw hook that captures inbound and outbound message events into amm
+- `hooks/amm-session-maintenance/` — native OpenClaw hook that runs light amm maintenance on `command:stop`
 
 ## What This Example Does
 
-1. Exposes AMM to OpenClaw through MCP
+1. Exposes amm to OpenClaw through MCP
 2. Captures enriched inbound messages from `message:preprocessed`
 3. Captures outbound messages from `message:sent`
 4. Runs warm-path maintenance (`reflect`, `compress_history`, `consolidate_sessions`) when `/stop` is issued
@@ -73,4 +73,4 @@ Use this only if you specifically want OpenClaw to own the schedule. The host-le
 
 - Set `AMM_PROJECT_ID` to a stable project identifier if you want project-scoped recall.
 - Keep `AMM_DB_PATH` identical across `amm`, `amm-mcp`, hooks, and external worker invocations.
-- Use MCP for explicit AMM access (`amm_recall`, `amm_expand`, `amm_remember`, `amm_jobs_run`).
+- Use MCP for explicit amm access (`amm_recall`, `amm_expand`, `amm_remember`, `amm_jobs_run`).

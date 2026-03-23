@@ -1,12 +1,12 @@
 # OpenCode Example
 
-This directory ships the truthful OpenCode AMM pattern for this repo.
+This directory ships the truthful OpenCode amm pattern for this repo.
 
 The supported shape is:
 
-- **MCP first** for explicit AMM access through `/usr/local/bin/amm-mcp`
+- **MCP first** for explicit amm access through `/usr/local/bin/amm-mcp`
 - **A small local plugin** for environment injection, session lifecycle markers, and tool-result capture
-- **External AMM workers** for heavier maintenance jobs
+- **External amm workers** for heavier maintenance jobs
 
 It does **not** claim full transcript capture from OpenCode yet.
 
@@ -16,7 +16,7 @@ It does **not** claim full transcript capture from OpenCode yet.
 - `package.json` — marks the plugin directory as ESM so local `plugins/*.js` files can use `export`
 - `plugins/amm.js` — local OpenCode plugin that:
   - injects `AMM_BIN`, `AMM_DB_PATH`, `AMM_PROJECT_ID`, and `AMM_SESSION_ID`
-  - records `tool.execute.after` as AMM `tool_result`
+  - records `tool.execute.after` as amm `tool_result`
   - records `session.created` / `session.idle`
   - runs `reflect` and `compress_history` on `session.idle`
 
@@ -43,4 +43,4 @@ If you already have an existing `~/.config/opencode/opencode.json`, merge only t
 - full assistant-message capture
 - OpenCode transcript reconstruction
 
-Use AMM's MCP surface for explicit recall and remember operations while this plugin handles the stable glue.
+Use amm's MCP surface for explicit recall and remember operations while this plugin handles the stable glue.

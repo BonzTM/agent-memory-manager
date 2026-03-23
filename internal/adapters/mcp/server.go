@@ -39,10 +39,10 @@ type Tool struct {
 	InputSchema interface{} `json:"inputSchema"`
 }
 
-// tools returns the list of AMM MCP tools matching CLI commands.
+// tools returns the list of amm MCP tools matching CLI commands.
 func tools() []Tool {
 	return []Tool{
-		{Name: "amm_init", Description: "Initialize the AMM database", InputSchema: emptySchema()},
+		{Name: "amm_init", Description: "Initialize the amm database", InputSchema: emptySchema()},
 		{Name: "amm_ingest_event", Description: "Append a raw event to history", InputSchema: eventSchema()},
 		{Name: "amm_remember", Description: "Commit a durable memory", InputSchema: rememberSchema()},
 		{Name: "amm_recall", Description: "Retrieve memories using various modes", InputSchema: recallSchema()},
