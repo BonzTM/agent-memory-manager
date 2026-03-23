@@ -137,7 +137,10 @@ CGO_ENABLED=1 go test -tags fts5 ./...
 - [Architecture](docs/architecture.md) -- Memory layers, retrieval engine, schema, and key invariants
 - [CLI Reference](docs/cli-reference.md) -- All CLI commands and flags
 - [MCP Reference](docs/mcp-reference.md) -- MCP tool definitions for JSON-RPC integration
-- [Integration Guide](docs/integration.md) -- How to integrate AMM with agent runtimes
+- [Integration Guide](docs/integration.md) -- Shared integration model, hooks, MCP, workers, and runtime guide index
+- [Codex Integration](docs/codex-integration.md) -- MCP + hooks + AGENTS snippet for Codex workflows
+- [Hermes-Agent Integration](docs/hermes-agent-integration.md) -- Sidecar model, MCP wiring, and AMM-side helper scripts for Hermes
+- [OpenClaw Integration](docs/openclaw-integration.md) -- Real OpenClaw example, native hooks, and AMM worker strategy
 - [Configuration](docs/configuration.md) -- Config file format and environment variables
 - [Agent Onboarding](docs/agent-onboarding.md) -- Guide for agents using AMM as their memory substrate
 

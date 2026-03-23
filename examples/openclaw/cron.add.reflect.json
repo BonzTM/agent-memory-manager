@@ -1,0 +1,17 @@
+{
+  "name": "AMM Reflect Maintenance",
+  "schedule": {
+    "kind": "cron",
+    "expr": "*/30 * * * *",
+    "tz": "UTC"
+  },
+  "sessionTarget": "isolated",
+  "payload": {
+    "kind": "agentTurn",
+    "message": "Run the AMM maintenance tool exactly once with `amm_jobs_run` and arguments `{\"kind\":\"reflect\"}`. Do not call any other AMM job in this turn. Do not send outbound messages unless the tool call fails.",
+    "lightContext": true
+  },
+  "delivery": {
+    "mode": "none"
+  }
+}

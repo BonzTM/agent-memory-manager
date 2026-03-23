@@ -36,3 +36,7 @@ coverage.html
 # Logs
 *.log
 excalidraw.log
+
+# Python cache artifacts
+__pycache__/
+*.pyc

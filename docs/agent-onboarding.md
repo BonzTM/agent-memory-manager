@@ -1,6 +1,14 @@
 # Agent Onboarding Guide
 
-This is a step-by-step guide designed to be handed to an AI agent (Claude, GPT, Codex, or similar) so it can set up AMM for its user with minimal human intervention.
+This is a step-by-step guide designed to be handed to an AI agent so it can set up AMM for its user with minimal human intervention.
+
+This onboarding guide is **Claude Code-first**, because this repo ships the most complete end-to-end reference hooks there. If you are wiring AMM into another runtime, use the runtime-specific companions alongside this guide:
+
+- [Codex Integration](codex-integration.md)
+- [Hermes-Agent Integration](hermes-agent-integration.md)
+- [OpenClaw Integration](openclaw-integration.md)
+
+In every runtime, the worker model stays the same: AMM background jobs are external `amm jobs run <kind>` calls against the AMM database, not a built-in scheduler.
 
 ---
 
@@ -134,7 +142,7 @@ echo "{
   \"content\": $(printf '%s' "$PROMPT" | jq -Rs .),
   \"session_id\": \"${SESSION_ID}\",
   \"project_id\": \"${PROJECT_ID}\"
-}" | AMM_DB_PATH="$DB" "$AMM" ingest event --stdin
+}" | AMM_DB_PATH="$DB" "$AMM" ingest event --in -
 
 RECALL=$(AMM_DB_PATH="$DB" "$AMM" recall --mode ambient --session "$SESSION_ID" --project "$PROJECT_ID" "$PROMPT" 2>/dev/null)
 
@@ -158,7 +166,7 @@ echo "{
   \"content\": $(printf '%s' "$RESPONSE" | jq -Rs .),
   \"session_id\": \"${SESSION_ID}\",
   \"project_id\": \"${PROJECT_ID}\"
-}" | AMM_DB_PATH="$DB" "$AMM" ingest event --stdin
+}" | AMM_DB_PATH="$DB" "$AMM" ingest event --in -
 ```
 
 Make them executable:

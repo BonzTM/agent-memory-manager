@@ -9,6 +9,19 @@ AMM (Agent Memory Manager) integrates with agent runtimes through two mechanisms
 
 Both mechanisms ultimately call the same service layer (`internal/service/service.go`), so they produce identical behavior. Choose hooks for transparent capture with no agent awareness, MCP tools when the agent should actively manage its own memory, or combine both for full coverage.
 
+AMM's maintenance jobs stay outside the runtime boundary. In practice, that means background work is triggered by external `amm jobs run <kind>` calls against the same SQLite database -- from cron, systemd, a runtime hook, or a runtime-owned background process -- rather than by an internal AMM scheduler.
+
+## Runtime Guides
+
+Use this page for the shared model, then jump to the runtime-specific companion that matches your agent host:
+
+| Runtime | Best fit | Guide |
+|---|---|---|
+| Codex | MCP + hooks + repo instructions | [Codex Integration](codex-integration.md) |
+| Hermes-agent | MCP + hook handlers + scheduled workers | [Hermes-Agent Integration](hermes-agent-integration.md) |
+| OpenClaw | MCP sidecar + native hooks + explicit recall (`examples/openclaw/`) | [OpenClaw Integration](openclaw-integration.md) |
+| Claude Code | Complete reference implementation shipped in this repo | This page + `examples/claude-code/` |
+
 ---
 
 ## The Capture Loop
@@ -25,7 +38,7 @@ This loop runs on every turn of conversation, building a growing knowledge base 
 
 ---
 
-## Hook-Based Integration (Claude Code)
+## Hook-Based Integration (Claude Code Reference Implementation)
 
 Claude Code supports lifecycle hooks that fire at defined points in the interaction cycle. AMM leverages three:
 
@@ -53,7 +66,7 @@ echo "{
   \"content\": $(printf '%s' "$PROMPT" | jq -Rs .),
   \"session_id\": \"${SESSION_ID}\",
   \"project_id\": \"${PROJECT_ID}\"
-}" | AMM_DB_PATH="$DB" "$AMM" ingest event --stdin
+}" | AMM_DB_PATH="$DB" "$AMM" ingest event --in -
 
 # Request ambient recall against the prompt text.
 RECALL=$(AMM_DB_PATH="$DB" "$AMM" recall --mode ambient --session "$SESSION_ID" --project "$PROJECT_ID" "$PROMPT" 2>/dev/null)
@@ -80,7 +93,7 @@ echo "{
   \"content\": $(printf '%s' "$RESPONSE" | jq -Rs .),
   \"session_id\": \"${SESSION_ID}\",
   \"project_id\": \"${PROJECT_ID}\"
-}" | AMM_DB_PATH="$DB" "$AMM" ingest event --stdin
+}" | AMM_DB_PATH="$DB" "$AMM" ingest event --in -
 ```
 
 ### Configuring Hooks in Claude Code
@@ -272,6 +285,8 @@ for job in reflect compress_history consolidate_sessions extract_claims form_epi
   amm jobs run "$job"
 done
 ```
+
+The `maintenance.auto_*` configuration flags are runtime configuration values, not proof of an internal AMM worker daemon. Use an external trigger unless your runtime explicitly shells out to `amm jobs run ...` for you.
 
 ---
 

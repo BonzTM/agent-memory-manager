@@ -1,0 +1,51 @@
+{
+  "plugins": {
+    "entries": {
+      "acpx": {
+        "enabled": true,
+        "config": {
+          "mcpServers": {
+            "amm": {
+              "command": "/home/you/.local/bin/amm-mcp",
+              "args": [],
+              "env": {
+                "AMM_DB_PATH": "/home/you/.amm/amm.db"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "load": {
+        "extraDirs": [
+          "/home/you/src/agent-memory-manager/examples/openclaw/hooks"
+        ]
+      },
+      "entries": {
+        "amm-memory-capture": {
+          "enabled": true,
+          "env": {
+            "AMM_BIN": "/home/you/.local/bin/amm",
+            "AMM_DB_PATH": "/home/you/.amm/amm.db",
+            "AMM_PROJECT_ID": "agent-memory-manager"
+          }
+        },
+        "amm-session-maintenance": {
+          "enabled": true,
+          "env": {
+            "AMM_BIN": "/home/you/.local/bin/amm",
+            "AMM_DB_PATH": "/home/you/.amm/amm.db",
+            "AMM_PROJECT_ID": "agent-memory-manager"
+          }
+        }
+      }
+    }
+  },
+  "cron": {
+    "enabled": true
+  }
+}
