@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -179,6 +180,13 @@ Environment:
 
 func runInit(args []string) error {
 	flags := parseFlags(args)
+
+	// Parse --db flag first and propagate via environment so getService
+	// opens the correct database, avoiding a redundant double-open.
+	if dbPath := flags["db"]; dbPath != "" {
+		os.Setenv("AMM_DB_PATH", dbPath)
+	}
+
 	svc, cleanup, err := getService()
 	if err != nil {
 		fail("init", "INIT_ERROR", err.Error())
@@ -186,17 +194,14 @@ func runInit(args []string) error {
 	}
 	defer cleanup()
 
-	dbPath := flags["db"]
-	if dbPath == "" {
-		dbPath = os.Getenv("AMM_DB_PATH")
-	}
-
+	// The factory already opens and migrates; just confirm status.
 	ctx := context.Background()
-	if err := svc.Init(ctx, dbPath); err != nil {
+	status, err := svc.Status(ctx)
+	if err != nil {
 		fail("init", "INIT_ERROR", err.Error())
 		return err
 	}
-	success("init", map[string]string{"status": "initialized"})
+	success("init", map[string]string{"status": "initialized", "db_path": status.DBPath})
 	return nil
 }
 
@@ -245,7 +250,11 @@ func runIngestEvent(args []string) error {
 		Metadata:     req.Metadata,
 	}
 	if req.OccurredAt != "" {
-		t, _ := time.Parse(time.RFC3339, req.OccurredAt)
+		t, err := time.Parse(time.RFC3339, req.OccurredAt)
+		if err != nil {
+			fail("ingest_event", "VALIDATION_ERROR", fmt.Sprintf("invalid occurred_at %q: %v", req.OccurredAt, err))
+			return fmt.Errorf("invalid occurred_at: %w", err)
+		}
 		event.OccurredAt = t
 	}
 
@@ -279,15 +288,36 @@ func runIngestTranscript(args []string) error {
 		input = f
 	}
 
+	// Support three input formats:
+	// 1. Wrapped: {"events": [...]}
+	// 2. Plain JSON array: [...]
+	// 3. JSONL: one JSON object per line (streaming)
+	data, err := io.ReadAll(input)
+	if err != nil {
+		fail("ingest_transcript", "READ_ERROR", err.Error())
+		return err
+	}
+
 	var events []*core.Event
-	dec := json.NewDecoder(input)
-	for dec.More() {
-		var evt core.Event
-		if err := dec.Decode(&evt); err != nil {
-			fail("ingest_transcript", "PARSE_ERROR", err.Error())
-			return err
+
+	// Try wrapped format {"events": [...]} first.
+	var wrapped struct {
+		Events []*core.Event `json:"events"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err == nil && len(wrapped.Events) > 0 {
+		events = wrapped.Events
+	} else if err := json.Unmarshal(data, &events); err != nil {
+		// Fall back to JSONL streaming.
+		events = nil
+		dec := json.NewDecoder(bytes.NewReader(data))
+		for dec.More() {
+			var evt core.Event
+			if err := dec.Decode(&evt); err != nil {
+				fail("ingest_transcript", "PARSE_ERROR", err.Error())
+				return err
+			}
+			events = append(events, &evt)
 		}
-		events = append(events, &evt)
 	}
 
 	ctx := context.Background()
