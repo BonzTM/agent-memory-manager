@@ -1,0 +1,176 @@
+# acm-rules.yaml
+# Governance rules for agent-memory-manager (AMM).
+# Starter rules + AMM-specific rules for a Go, API-first, CLI/MCP-driven project.
+
+version: acm.rules.v1
+rules:
+  # --- Starter rules (from acm init) ---
+
+  - id: rule_startup_context
+    summary: Start every task with context.
+    content: Retrieve context before reading or editing repo files, then follow every hard rule returned in the receipt.
+    enforcement: hard
+    tags: [startup, context]
+
+  - id: rule_fetch_surgically
+    summary: Keep context compact by fetching only the artifacts needed for the current step.
+    content: Fetch the specific pointer, plan, or task keys you need. If the receipt is missing obvious context, rerun context with a better task description instead of bulk fetching.
+    enforcement: soft
+    tags: [context, efficiency]
+
+  - id: rule_track_multistep_work
+    summary: Track multi-step or multi-file work with work.
+    content: Create or update a work plan when the task spans multiple steps, touches multiple files, or may need to survive context compaction. Use verify:tests as the executable verification task when code changes, and add any extra task keys required by .acm/acm-workflows.yaml.
+    enforcement: hard
+    tags: [planning, tracking]
+
+  - id: rule_no_silent_scope_expansion
+    summary: Do not silently widen scope.
+    content: If the task spills into adjacent systems, files, or decisions that are not represented in the current receipt, rerun context or record `plan.discovered_paths` through work before relying on review or done to pass.
+    enforcement: hard
+    tags: [scope, safety]
+
+  - id: rule_verify_code_changes
+    summary: Run verify before closing code, config, or behavior changes.
+    content: Use repo-defined verify checks that match the changed files and current phase. Do not call done until executable verification has passed or the required completion tasks from .acm/acm-workflows.yaml are satisfied.
+    enforcement: hard
+    tags: [verification, quality]
+
+  - id: rule_done
+    summary: Finish every task with done.
+    content: Report every changed file for file-backed work when you know them and give a concise outcome summary. ACM can derive the task delta from the receipt baseline; when that detected delta is empty, the closeout is effectively no-file.
+    enforcement: hard
+    tags: [completion, audit]
+
+  - id: rule_capture_durable_memory
+    summary: Persist reusable decisions and gotchas with memory.
+    content: Record stable architectural decisions, recurring setup pitfalls, or operator preferences when future tasks would benefit from retrieving them automatically.
+    enforcement: soft
+    tags: [memory, learning]
+
+  - id: rule_escalate_missing_decisions
+    summary: Escalate when a task depends on a missing product or architectural decision.
+    content: Do not invent product requirements, compatibility guarantees, migrations, or rollout behavior when the repo does not define them. Surface the decision and wait for direction.
+    enforcement: hard
+    tags: [escalation, safety]
+
+  # --- AMM-specific rules ---
+
+  - id: rule_go_api_first
+    summary: All functionality must flow through the service interface.
+    content: >-
+      AMM is API-first. The core service interface in `internal/core/service.go`
+      is the single entry point for all business logic. CLI commands, MCP tools,
+      and HTTP handlers are adapters that call the service — they must not contain
+      business logic, direct SQL, or direct database access. If you need new
+      behavior, add it to the service interface first, then wire adapters.
+    enforcement: hard
+    tags: [architecture, api, service]
+
+  - id: rule_contract_schema_lockstep
+    summary: Keep v1 contracts and schema files in lockstep.
+    content: >-
+      Any change to payloads, results, validation, or command semantics must
+      update `internal/contracts/v1`, `spec/v1` schemas, and the corresponding
+      tests together. Do not change one without the others.
+    enforcement: hard
+    tags: [contract, schema]
+
+  - id: rule_cli_mcp_parity
+    summary: CLI and MCP surfaces must expose the same commands.
+    content: >-
+      Command, flag, tool, help, or envelope behavior changes must be reflected
+      across `cmd/amm`, `cmd/amm-mcp`, MCP tool definitions, and associated
+      tests. A command available in the CLI must also be callable via MCP.
+    enforcement: hard
+    tags: [cli, mcp, parity]
+
+  - id: rule_sqlite_migrations
+    summary: Schema changes must go through the migration system.
+    content: >-
+      All SQLite DDL changes must be added as versioned migrations in
+      `internal/adapters/sqlite/migrations.go`. Do not write ad-hoc CREATE TABLE
+      or ALTER TABLE statements outside the migration system. Migrations must be
+      idempotent and forward-only.
+    enforcement: hard
+    tags: [sqlite, schema, migrations]
+
+  - id: rule_canonical_vs_derived
+    summary: Never treat derived/index tables as authoritative.
+    content: >-
+      Canonical tables (events, summaries, memories, claims, entities, episodes,
+      artifacts, jobs) are the source of truth. Derived tables (FTS5, embeddings,
+      retrieval_cache, recall_history) are rebuildable indexes. If derived state
+      is lost or corrupted, rebuild from canonical. Never write logic that depends
+      on derived tables being complete or present.
+    enforcement: hard
+    tags: [architecture, sqlite, canonical, derived]
+
+  - id: rule_spec_blueprint_alignment
+    summary: Implementation must stay aligned with the spec and blueprint.
+    content: >-
+      `refined-spec.md` and `technical-blueprint.md` define AMM's design intent.
+      When implementation diverges from these documents (new types, changed
+      schema, altered retrieval modes), update the spec/blueprint in the same
+      change or flag the divergence explicitly. Do not silently drift.
+    enforcement: hard
+    tags: [spec, blueprint, docs]
+
+  - id: rule_tdd_go
+    summary: Go behavior changes need test coverage or explicit exemption.
+    content: >-
+      For behavior-changing Go work under `cmd/**` or `internal/**`, include
+      test updates in the same change. If TDD is intentionally skipped, record
+      why in the task. Prefer targeted package tests before the full suite.
+    enforcement: hard
+    tags: [tests, tdd, quality]
+
+  # --- Staged plan contract rules ---
+
+  - id: rule_repo_staged_plan_schema
+    summary: Governed multi-step work must use the staged plan contract.
+    content: >-
+      For governed multi-file or multi-step work in this repo, create a root
+      ACM plan with `kind=feature|maintenance|governance`, explicit scope
+      metadata (`objective`, `in_scope`, `out_of_scope`, `constraints`,
+      `references`), `stages.spec_outline` / `refined_spec` /
+      `implementation_plan`, top-level `stage:*` tasks, and leaf tasks that
+      include exact `references` plus explicit `acceptance_criteria`. Use
+      `acm verify` to enforce the schema through
+      `scripts/acm-feature-plan-validate.py`.
+    enforcement: hard
+    tags: [planning, workflow, docs]
+
+  - id: rule_repo_atomic_leaf_tasks
+    summary: Atomic leaf tasks must be executable with minimal inference.
+    content: >-
+      Every non-gate leaf task in a governed staged plan must be narrow enough
+      for low-context execution. Use exact `references`, explicit
+      `acceptance_criteria`, real `depends_on` edges, and a bounded change
+      objective. Each leaf must describe one deliverable, list 1-3 exact
+      starting paths, and include at least two acceptance criteria: one output
+      criterion and one proof criterion. Do not create catch-all tasks such as
+      `misc`, `polish`, `remaining`, `cleanup`, or `wire the rest`.
+    enforcement: hard
+    tags: [planning, workflow]
+
+  - id: rule_repo_orchestrator_ownership
+    summary: One orchestrator owns every multi-step plan.
+    content: >-
+      Multi-file or multi-step work must have one orchestrator agent
+      responsible for the root plan, stage transitions, scope declarations,
+      verification, review, and done. Leaf tasks are execution units, not
+      planning documents, and must not silently widen scope or redefine the
+      root objective.
+    enforcement: hard
+    tags: [planning, workflow, scope]
+
+  - id: rule_repo_delegate_leaf_tasks
+    summary: Delegate bounded leaf tasks when the tool supports sub-agents.
+    content: >-
+      When the tool supports sub-agents, keep the orchestrator's context narrow
+      and delegate bounded leaf tasks to sub-agents. If the tool does not
+      support delegation, emulate the same structure sequentially instead of
+      collapsing multiple concerns into one oversized task.
+    enforcement: soft
+    tags: [planning, workflow, context]

@@ -1,0 +1,1332 @@
+package sqlite
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/joshd-04/agent-memory-manager/internal/core"
+)
+
+// generateID creates a prefixed random hex ID (e.g., "evt_" + 12 random hex chars).
+func generateID(prefix string) string {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("generateID: crypto/rand failed: %v", err))
+	}
+	return prefix + hex.EncodeToString(b)
+}
+
+// SQLiteRepository implements core.Repository backed by SQLite.
+type SQLiteRepository struct {
+	*DB
+}
+
+// Compile-time check that SQLiteRepository implements core.Repository.
+var _ core.Repository = (*SQLiteRepository)(nil)
+
+// NewSQLiteRepository creates a new repository (DB not yet opened).
+func NewSQLiteRepository() *SQLiteRepository {
+	return &SQLiteRepository{}
+}
+
+// ---------- Lifecycle ----------
+
+func (r *SQLiteRepository) Open(ctx context.Context, dbPath string) error {
+	db, err := Open(ctx, dbPath)
+	if err != nil {
+		return err
+	}
+	r.DB = db
+	return nil
+}
+
+func (r *SQLiteRepository) Close() error {
+	if r.DB == nil {
+		return nil
+	}
+	return r.DB.Close()
+}
+
+func (r *SQLiteRepository) Migrate(ctx context.Context) error {
+	return Migrate(ctx, r.DB)
+}
+
+func (r *SQLiteRepository) IsInitialized(ctx context.Context) (bool, error) {
+	row := r.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_version'")
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return false, err
+	}
+	if count == 0 {
+		return false, nil
+	}
+	row = r.QueryRowContext(ctx, "SELECT COALESCE(MAX(version),0) FROM schema_version")
+	var ver int
+	if err := row.Scan(&ver); err != nil {
+		return false, err
+	}
+	return ver > 0, nil
+}
+
+// ---------- helpers ----------
+
+func defaultLimit(limit int) int {
+	if limit <= 0 {
+		return 100
+	}
+	return limit
+}
+
+func marshalJSON(v interface{}) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+func emptyMapJSON() string   { return "{}" }
+func emptySliceJSON() string { return "[]" }
+
+func marshalMapJSON(m map[string]string) string {
+	if m == nil {
+		return emptyMapJSON()
+	}
+	return marshalJSON(m)
+}
+
+func marshalSliceJSON(s []string) string {
+	if s == nil {
+		return emptySliceJSON()
+	}
+	return marshalJSON(s)
+}
+
+func unmarshalMap(data string) map[string]string {
+	m := make(map[string]string)
+	_ = json.Unmarshal([]byte(data), &m)
+	return m
+}
+
+func unmarshalSlice(data string) []string {
+	var s []string
+	_ = json.Unmarshal([]byte(data), &s)
+	return s
+}
+
+func timeToStr(t time.Time) string {
+	return t.Format(time.RFC3339)
+}
+
+func ptrTimeToStr(t *time.Time) sql.NullString {
+	if t == nil {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: t.Format(time.RFC3339), Valid: true}
+}
+
+func strToTime(s string) time.Time {
+	t, _ := time.Parse(time.RFC3339, s)
+	return t
+}
+
+func nullStrToPtrTime(ns sql.NullString) *time.Time {
+	if !ns.Valid {
+		return nil
+	}
+	t := strToTime(ns.String)
+	return &t
+}
+
+func nullStr(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
+// ---------- Events ----------
+
+func (r *SQLiteRepository) InsertEvent(ctx context.Context, event *core.Event) error {
+	if event.ID == "" {
+		event.ID = generateID("evt_")
+	}
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO events (id, kind, source_system, surface, session_id, project_id,
+			agent_id, actor_type, actor_id, privacy_level, content, metadata_json, hash,
+			occurred_at, ingested_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		event.ID, event.Kind, event.SourceSystem,
+		nullStr(event.Surface), nullStr(event.SessionID), nullStr(event.ProjectID),
+		nullStr(event.AgentID), nullStr(event.ActorType), nullStr(event.ActorID),
+		string(event.PrivacyLevel), event.Content,
+		marshalMapJSON(event.Metadata), nullStr(event.Hash),
+		timeToStr(event.OccurredAt), timeToStr(event.IngestedAt),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) GetEvent(ctx context.Context, id string) (*core.Event, error) {
+	row := r.QueryRowContext(ctx, `
+		SELECT id, kind, source_system, COALESCE(surface,''), COALESCE(session_id,''),
+			COALESCE(project_id,''), COALESCE(agent_id,''), COALESCE(actor_type,''),
+			COALESCE(actor_id,''), privacy_level, content, metadata_json,
+			COALESCE(hash,''), occurred_at, ingested_at
+		FROM events WHERE id = ?`, id)
+
+	var e core.Event
+	var metaJSON, occurredAt, ingestedAt string
+	err := row.Scan(&e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
+		&e.ProjectID, &e.AgentID, &e.ActorType, &e.ActorID, &e.PrivacyLevel,
+		&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("event not found: %s", id)
+		}
+		return nil, err
+	}
+	e.Metadata = unmarshalMap(metaJSON)
+	e.OccurredAt = strToTime(occurredAt)
+	e.IngestedAt = strToTime(ingestedAt)
+	return &e, nil
+}
+
+func (r *SQLiteRepository) ListEvents(ctx context.Context, opts core.ListEventsOptions) ([]core.Event, error) {
+	query := `SELECT id, kind, source_system, COALESCE(surface,''), COALESCE(session_id,''),
+		COALESCE(project_id,''), COALESCE(agent_id,''), COALESCE(actor_type,''),
+		COALESCE(actor_id,''), privacy_level, content, metadata_json,
+		COALESCE(hash,''), occurred_at, ingested_at
+		FROM events WHERE 1=1`
+	var args []interface{}
+
+	if opts.SessionID != "" {
+		query += " AND session_id = ?"
+		args = append(args, opts.SessionID)
+	}
+	if opts.ProjectID != "" {
+		query += " AND project_id = ?"
+		args = append(args, opts.ProjectID)
+	}
+	if opts.Kind != "" {
+		query += " AND kind = ?"
+		args = append(args, opts.Kind)
+	}
+	if opts.Before != "" {
+		query += " AND occurred_at < ?"
+		args = append(args, opts.Before)
+	}
+	if opts.After != "" {
+		query += " AND occurred_at > ?"
+		args = append(args, opts.After)
+	}
+	query += " ORDER BY occurred_at DESC LIMIT ?"
+	args = append(args, defaultLimit(opts.Limit))
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []core.Event
+	for rows.Next() {
+		var e core.Event
+		var metaJSON, occurredAt, ingestedAt string
+		if err := rows.Scan(&e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
+			&e.ProjectID, &e.AgentID, &e.ActorType, &e.ActorID, &e.PrivacyLevel,
+			&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt); err != nil {
+			return nil, err
+		}
+		e.Metadata = unmarshalMap(metaJSON)
+		e.OccurredAt = strToTime(occurredAt)
+		e.IngestedAt = strToTime(ingestedAt)
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+func (r *SQLiteRepository) SearchEvents(ctx context.Context, query string, limit int) ([]core.Event, error) {
+	rows, err := r.QueryContext(ctx, `
+		SELECT e.id, e.kind, e.source_system, COALESCE(e.surface,''), COALESCE(e.session_id,''),
+			COALESCE(e.project_id,''), COALESCE(e.agent_id,''), COALESCE(e.actor_type,''),
+			COALESCE(e.actor_id,''), e.privacy_level, e.content, e.metadata_json,
+			COALESCE(e.hash,''), e.occurred_at, e.ingested_at
+		FROM events_fts f JOIN events e ON f.id = e.id
+		WHERE events_fts MATCH ?
+		ORDER BY rank
+		LIMIT ?`, query, defaultLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []core.Event
+	for rows.Next() {
+		var e core.Event
+		var metaJSON, occurredAt, ingestedAt string
+		if err := rows.Scan(&e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
+			&e.ProjectID, &e.AgentID, &e.ActorType, &e.ActorID, &e.PrivacyLevel,
+			&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt); err != nil {
+			return nil, err
+		}
+		e.Metadata = unmarshalMap(metaJSON)
+		e.OccurredAt = strToTime(occurredAt)
+		e.IngestedAt = strToTime(ingestedAt)
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+// ---------- Summaries ----------
+
+func (r *SQLiteRepository) InsertSummary(ctx context.Context, summary *core.Summary) error {
+	if summary.ID == "" {
+		summary.ID = generateID("sum_")
+	}
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO summaries (id, kind, scope, project_id, session_id, agent_id,
+			title, body, tight_description, privacy_level, source_span_json,
+			metadata_json, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		summary.ID, summary.Kind, string(summary.Scope),
+		nullStr(summary.ProjectID), nullStr(summary.SessionID), nullStr(summary.AgentID),
+		nullStr(summary.Title), summary.Body, summary.TightDescription,
+		string(summary.PrivacyLevel), marshalJSON(summary.SourceSpan),
+		marshalMapJSON(summary.Metadata),
+		timeToStr(summary.CreatedAt), timeToStr(summary.UpdatedAt),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) GetSummary(ctx context.Context, id string) (*core.Summary, error) {
+	row := r.QueryRowContext(ctx, `
+		SELECT id, kind, scope, COALESCE(project_id,''), COALESCE(session_id,''),
+			COALESCE(agent_id,''), COALESCE(title,''), body, tight_description,
+			privacy_level, source_span_json, metadata_json, created_at, updated_at
+		FROM summaries WHERE id = ?`, id)
+
+	var s core.Summary
+	var spanJSON, metaJSON, createdAt, updatedAt string
+	err := row.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID,
+		&s.AgentID, &s.Title, &s.Body, &s.TightDescription,
+		&s.PrivacyLevel, &spanJSON, &metaJSON, &createdAt, &updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("summary not found: %s", id)
+		}
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(spanJSON), &s.SourceSpan)
+	s.Metadata = unmarshalMap(metaJSON)
+	s.CreatedAt = strToTime(createdAt)
+	s.UpdatedAt = strToTime(updatedAt)
+	return &s, nil
+}
+
+func (r *SQLiteRepository) ListSummaries(ctx context.Context, opts core.ListSummariesOptions) ([]core.Summary, error) {
+	query := `SELECT id, kind, scope, COALESCE(project_id,''), COALESCE(session_id,''),
+		COALESCE(agent_id,''), COALESCE(title,''), body, tight_description,
+		privacy_level, source_span_json, metadata_json, created_at, updated_at
+		FROM summaries WHERE 1=1`
+	var args []interface{}
+
+	if opts.Kind != "" {
+		query += " AND kind = ?"
+		args = append(args, opts.Kind)
+	}
+	if opts.Scope != "" {
+		query += " AND scope = ?"
+		args = append(args, string(opts.Scope))
+	}
+	if opts.ProjectID != "" {
+		query += " AND project_id = ?"
+		args = append(args, opts.ProjectID)
+	}
+	if opts.SessionID != "" {
+		query += " AND session_id = ?"
+		args = append(args, opts.SessionID)
+	}
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, defaultLimit(opts.Limit))
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var summaries []core.Summary
+	for rows.Next() {
+		var s core.Summary
+		var spanJSON, metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID,
+			&s.AgentID, &s.Title, &s.Body, &s.TightDescription,
+			&s.PrivacyLevel, &spanJSON, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(spanJSON), &s.SourceSpan)
+		s.Metadata = unmarshalMap(metaJSON)
+		s.CreatedAt = strToTime(createdAt)
+		s.UpdatedAt = strToTime(updatedAt)
+		summaries = append(summaries, s)
+	}
+	return summaries, rows.Err()
+}
+
+func (r *SQLiteRepository) SearchSummaries(ctx context.Context, query string, limit int) ([]core.Summary, error) {
+	rows, err := r.QueryContext(ctx, `
+		SELECT s.id, s.kind, s.scope, COALESCE(s.project_id,''), COALESCE(s.session_id,''),
+			COALESCE(s.agent_id,''), COALESCE(s.title,''), s.body, s.tight_description,
+			s.privacy_level, s.source_span_json, s.metadata_json, s.created_at, s.updated_at
+		FROM summaries_fts f JOIN summaries s ON f.id = s.id
+		WHERE summaries_fts MATCH ?
+		ORDER BY rank
+		LIMIT ?`, query, defaultLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var summaries []core.Summary
+	for rows.Next() {
+		var s core.Summary
+		var spanJSON, metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID,
+			&s.AgentID, &s.Title, &s.Body, &s.TightDescription,
+			&s.PrivacyLevel, &spanJSON, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(spanJSON), &s.SourceSpan)
+		s.Metadata = unmarshalMap(metaJSON)
+		s.CreatedAt = strToTime(createdAt)
+		s.UpdatedAt = strToTime(updatedAt)
+		summaries = append(summaries, s)
+	}
+	return summaries, rows.Err()
+}
+
+func (r *SQLiteRepository) GetSummaryChildren(ctx context.Context, parentID string) ([]core.SummaryEdge, error) {
+	rows, err := r.QueryContext(ctx, `
+		SELECT parent_summary_id, child_kind, child_id, COALESCE(edge_order, 0)
+		FROM summary_edges WHERE parent_summary_id = ?
+		ORDER BY edge_order`, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var edges []core.SummaryEdge
+	for rows.Next() {
+		var e core.SummaryEdge
+		if err := rows.Scan(&e.ParentSummaryID, &e.ChildKind, &e.ChildID, &e.EdgeOrder); err != nil {
+			return nil, err
+		}
+		edges = append(edges, e)
+	}
+	return edges, rows.Err()
+}
+
+func (r *SQLiteRepository) InsertSummaryEdge(ctx context.Context, edge *core.SummaryEdge) error {
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO summary_edges (parent_summary_id, child_kind, child_id, edge_order)
+		VALUES (?,?,?,?)`,
+		edge.ParentSummaryID, edge.ChildKind, edge.ChildID, edge.EdgeOrder)
+	return err
+}
+
+// ---------- Memories ----------
+
+func (r *SQLiteRepository) InsertMemory(ctx context.Context, memory *core.Memory) error {
+	if memory.ID == "" {
+		memory.ID = generateID("mem_")
+	}
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO memories (id, type, scope, project_id, session_id, agent_id,
+			subject, body, tight_description, confidence, importance, privacy_level,
+			status, observed_at, created_at, updated_at, valid_from, valid_to,
+			last_confirmed_at, supersedes, superseded_by, superseded_at,
+			source_event_ids_json, source_summary_ids_json, source_artifact_ids_json,
+			tags_json, metadata_json)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		memory.ID, string(memory.Type), string(memory.Scope),
+		nullStr(memory.ProjectID), nullStr(memory.SessionID), nullStr(memory.AgentID),
+		nullStr(memory.Subject), memory.Body, memory.TightDescription,
+		memory.Confidence, memory.Importance, string(memory.PrivacyLevel),
+		string(memory.Status),
+		ptrTimeToStr(memory.ObservedAt),
+		timeToStr(memory.CreatedAt), timeToStr(memory.UpdatedAt),
+		ptrTimeToStr(memory.ValidFrom), ptrTimeToStr(memory.ValidTo),
+		ptrTimeToStr(memory.LastConfirmedAt),
+		nullStr(memory.Supersedes), nullStr(memory.SupersededBy),
+		ptrTimeToStr(memory.SupersededAt),
+		marshalSliceJSON(memory.SourceEventIDs),
+		marshalSliceJSON(memory.SourceSummaryIDs),
+		marshalSliceJSON(memory.SourceArtifactIDs),
+		marshalSliceJSON(memory.Tags),
+		marshalMapJSON(memory.Metadata),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) scanMemory(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*core.Memory, error) {
+	var m core.Memory
+	var observedAt, validFrom, validTo, lastConfirmed, supersededAt sql.NullString
+	var metaJSON, evtJSON, sumJSON, artJSON, tagsJSON string
+	var createdAt, updatedAt string
+
+	err := scanner.Scan(
+		&m.ID, &m.Type, &m.Scope, &m.ProjectID, &m.SessionID, &m.AgentID,
+		&m.Subject, &m.Body, &m.TightDescription, &m.Confidence, &m.Importance,
+		&m.PrivacyLevel, &m.Status,
+		&observedAt, &createdAt, &updatedAt, &validFrom, &validTo,
+		&lastConfirmed, &m.Supersedes, &m.SupersededBy, &supersededAt,
+		&evtJSON, &sumJSON, &artJSON, &tagsJSON, &metaJSON,
+	)
+	if err != nil {
+		return nil, err
+	}
+	m.ObservedAt = nullStrToPtrTime(observedAt)
+	m.CreatedAt = strToTime(createdAt)
+	m.UpdatedAt = strToTime(updatedAt)
+	m.ValidFrom = nullStrToPtrTime(validFrom)
+	m.ValidTo = nullStrToPtrTime(validTo)
+	m.LastConfirmedAt = nullStrToPtrTime(lastConfirmed)
+	m.SupersededAt = nullStrToPtrTime(supersededAt)
+	m.SourceEventIDs = unmarshalSlice(evtJSON)
+	m.SourceSummaryIDs = unmarshalSlice(sumJSON)
+	m.SourceArtifactIDs = unmarshalSlice(artJSON)
+	m.Tags = unmarshalSlice(tagsJSON)
+	m.Metadata = unmarshalMap(metaJSON)
+	return &m, nil
+}
+
+const memoryCols = `id, type, scope, COALESCE(project_id,''), COALESCE(session_id,''),
+	COALESCE(agent_id,''), COALESCE(subject,''), body, tight_description,
+	confidence, importance, privacy_level, status,
+	observed_at, created_at, updated_at, valid_from, valid_to,
+	last_confirmed_at, COALESCE(supersedes,''), COALESCE(superseded_by,''),
+	superseded_at,
+	source_event_ids_json, source_summary_ids_json, source_artifact_ids_json,
+	tags_json, metadata_json`
+
+func (r *SQLiteRepository) GetMemory(ctx context.Context, id string) (*core.Memory, error) {
+	row := r.QueryRowContext(ctx,
+		"SELECT "+memoryCols+" FROM memories WHERE id = ?", id)
+	m, err := r.scanMemory(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("memory not found: %s", id)
+		}
+		return nil, err
+	}
+	return m, nil
+}
+
+func (r *SQLiteRepository) UpdateMemory(ctx context.Context, memory *core.Memory) error {
+	_, err := r.ExecContext(ctx, `
+		UPDATE memories SET type=?, scope=?, project_id=?, session_id=?, agent_id=?,
+			subject=?, body=?, tight_description=?, confidence=?, importance=?,
+			privacy_level=?, status=?, observed_at=?, updated_at=?,
+			valid_from=?, valid_to=?, last_confirmed_at=?,
+			supersedes=?, superseded_by=?, superseded_at=?,
+			source_event_ids_json=?, source_summary_ids_json=?, source_artifact_ids_json=?,
+			tags_json=?, metadata_json=?
+		WHERE id=?`,
+		string(memory.Type), string(memory.Scope),
+		nullStr(memory.ProjectID), nullStr(memory.SessionID), nullStr(memory.AgentID),
+		nullStr(memory.Subject), memory.Body, memory.TightDescription,
+		memory.Confidence, memory.Importance, string(memory.PrivacyLevel),
+		string(memory.Status),
+		ptrTimeToStr(memory.ObservedAt), timeToStr(memory.UpdatedAt),
+		ptrTimeToStr(memory.ValidFrom), ptrTimeToStr(memory.ValidTo),
+		ptrTimeToStr(memory.LastConfirmedAt),
+		nullStr(memory.Supersedes), nullStr(memory.SupersededBy),
+		ptrTimeToStr(memory.SupersededAt),
+		marshalSliceJSON(memory.SourceEventIDs),
+		marshalSliceJSON(memory.SourceSummaryIDs),
+		marshalSliceJSON(memory.SourceArtifactIDs),
+		marshalSliceJSON(memory.Tags),
+		marshalMapJSON(memory.Metadata),
+		memory.ID,
+	)
+	return err
+}
+
+func (r *SQLiteRepository) ListMemories(ctx context.Context, opts core.ListMemoriesOptions) ([]core.Memory, error) {
+	query := "SELECT " + memoryCols + " FROM memories WHERE 1=1"
+	var args []interface{}
+
+	if opts.Type != "" {
+		query += " AND type = ?"
+		args = append(args, string(opts.Type))
+	}
+	if opts.Scope != "" {
+		query += " AND scope = ?"
+		args = append(args, string(opts.Scope))
+	}
+	if opts.ProjectID != "" {
+		query += " AND project_id = ?"
+		args = append(args, opts.ProjectID)
+	}
+	if opts.Status != "" {
+		query += " AND status = ?"
+		args = append(args, string(opts.Status))
+	}
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, defaultLimit(opts.Limit))
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var memories []core.Memory
+	for rows.Next() {
+		m, err := r.scanMemory(rows)
+		if err != nil {
+			return nil, err
+		}
+		memories = append(memories, *m)
+	}
+	return memories, rows.Err()
+}
+
+func (r *SQLiteRepository) SearchMemories(ctx context.Context, query string, limit int) ([]core.Memory, error) {
+	q := "SELECT " + prefixCols("m", memoryCols) + `
+		FROM memories_fts f JOIN memories m ON f.id = m.id
+		WHERE memories_fts MATCH ?
+		ORDER BY rank
+		LIMIT ?`
+	rows, err := r.QueryContext(ctx, q, query, defaultLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var memories []core.Memory
+	for rows.Next() {
+		m, err := r.scanMemory(rows)
+		if err != nil {
+			return nil, err
+		}
+		memories = append(memories, *m)
+	}
+	return memories, rows.Err()
+}
+
+// prefixCols adds a table alias prefix to each column expression in a comma-separated list.
+// It handles COALESCE(...) expressions correctly.
+func prefixCols(alias, cols string) string {
+	// Split carefully: we need to handle COALESCE() which contains commas.
+	var result []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(cols); i++ {
+		switch cols[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				result = append(result, strings.TrimSpace(cols[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	result = append(result, strings.TrimSpace(cols[start:]))
+
+	var prefixed []string
+	for _, col := range result {
+		upper := strings.ToUpper(col)
+		if strings.HasPrefix(upper, "COALESCE(") {
+			// Replace the column name inside COALESCE: COALESCE(col,'') -> COALESCE(m.col,'')
+			inner := col[len("COALESCE(") : len(col)-1]
+			parts := strings.SplitN(inner, ",", 2)
+			prefixed = append(prefixed, fmt.Sprintf("COALESCE(%s.%s,%s)", alias, strings.TrimSpace(parts[0]), parts[1]))
+		} else {
+			prefixed = append(prefixed, alias+"."+col)
+		}
+	}
+	return strings.Join(prefixed, ", ")
+}
+
+// ---------- Claims ----------
+
+func (r *SQLiteRepository) InsertClaim(ctx context.Context, claim *core.Claim) error {
+	if claim.ID == "" {
+		claim.ID = generateID("clm_")
+	}
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO claims (id, memory_id, subject_entity_id, predicate, object_value,
+			object_entity_id, confidence, source_event_id, source_summary_id,
+			observed_at, valid_from, valid_to, metadata_json)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		claim.ID, claim.MemoryID,
+		nullStr(claim.SubjectEntityID), claim.Predicate,
+		nullStr(claim.ObjectValue), nullStr(claim.ObjectEntityID),
+		claim.Confidence,
+		nullStr(claim.SourceEventID), nullStr(claim.SourceSummaryID),
+		ptrTimeToStr(claim.ObservedAt),
+		ptrTimeToStr(claim.ValidFrom), ptrTimeToStr(claim.ValidTo),
+		marshalMapJSON(claim.Metadata),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) GetClaim(ctx context.Context, id string) (*core.Claim, error) {
+	row := r.QueryRowContext(ctx, `
+		SELECT id, memory_id, COALESCE(subject_entity_id,''), predicate,
+			COALESCE(object_value,''), COALESCE(object_entity_id,''), confidence,
+			COALESCE(source_event_id,''), COALESCE(source_summary_id,''),
+			observed_at, valid_from, valid_to, metadata_json
+		FROM claims WHERE id = ?`, id)
+
+	var c core.Claim
+	var observedAt, validFrom, validTo sql.NullString
+	var metaJSON string
+	err := row.Scan(&c.ID, &c.MemoryID, &c.SubjectEntityID, &c.Predicate,
+		&c.ObjectValue, &c.ObjectEntityID, &c.Confidence,
+		&c.SourceEventID, &c.SourceSummaryID,
+		&observedAt, &validFrom, &validTo, &metaJSON)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("claim not found: %s", id)
+		}
+		return nil, err
+	}
+	c.ObservedAt = nullStrToPtrTime(observedAt)
+	c.ValidFrom = nullStrToPtrTime(validFrom)
+	c.ValidTo = nullStrToPtrTime(validTo)
+	c.Metadata = unmarshalMap(metaJSON)
+	return &c, nil
+}
+
+func (r *SQLiteRepository) ListClaimsByMemory(ctx context.Context, memoryID string) ([]core.Claim, error) {
+	rows, err := r.QueryContext(ctx, `
+		SELECT id, memory_id, COALESCE(subject_entity_id,''), predicate,
+			COALESCE(object_value,''), COALESCE(object_entity_id,''), confidence,
+			COALESCE(source_event_id,''), COALESCE(source_summary_id,''),
+			observed_at, valid_from, valid_to, metadata_json
+		FROM claims WHERE memory_id = ?`, memoryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var claims []core.Claim
+	for rows.Next() {
+		var c core.Claim
+		var observedAt, validFrom, validTo sql.NullString
+		var metaJSON string
+		if err := rows.Scan(&c.ID, &c.MemoryID, &c.SubjectEntityID, &c.Predicate,
+			&c.ObjectValue, &c.ObjectEntityID, &c.Confidence,
+			&c.SourceEventID, &c.SourceSummaryID,
+			&observedAt, &validFrom, &validTo, &metaJSON); err != nil {
+			return nil, err
+		}
+		c.ObservedAt = nullStrToPtrTime(observedAt)
+		c.ValidFrom = nullStrToPtrTime(validFrom)
+		c.ValidTo = nullStrToPtrTime(validTo)
+		c.Metadata = unmarshalMap(metaJSON)
+		claims = append(claims, c)
+	}
+	return claims, rows.Err()
+}
+
+// ---------- Entities ----------
+
+func (r *SQLiteRepository) InsertEntity(ctx context.Context, entity *core.Entity) error {
+	if entity.ID == "" {
+		entity.ID = generateID("ent_")
+	}
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO entities (id, type, canonical_name, aliases_json, description,
+			metadata_json, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?)`,
+		entity.ID, entity.Type, entity.CanonicalName,
+		marshalSliceJSON(entity.Aliases), nullStr(entity.Description),
+		marshalMapJSON(entity.Metadata),
+		timeToStr(entity.CreatedAt), timeToStr(entity.UpdatedAt),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) GetEntity(ctx context.Context, id string) (*core.Entity, error) {
+	row := r.QueryRowContext(ctx, `
+		SELECT id, type, canonical_name, aliases_json, COALESCE(description,''),
+			metadata_json, created_at, updated_at
+		FROM entities WHERE id = ?`, id)
+
+	var e core.Entity
+	var aliasesJSON, metaJSON, createdAt, updatedAt string
+	err := row.Scan(&e.ID, &e.Type, &e.CanonicalName, &aliasesJSON,
+		&e.Description, &metaJSON, &createdAt, &updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("entity not found: %s", id)
+		}
+		return nil, err
+	}
+	e.Aliases = unmarshalSlice(aliasesJSON)
+	e.Metadata = unmarshalMap(metaJSON)
+	e.CreatedAt = strToTime(createdAt)
+	e.UpdatedAt = strToTime(updatedAt)
+	return &e, nil
+}
+
+func (r *SQLiteRepository) ListEntities(ctx context.Context, opts core.ListEntitiesOptions) ([]core.Entity, error) {
+	query := `SELECT id, type, canonical_name, aliases_json, COALESCE(description,''),
+		metadata_json, created_at, updated_at
+		FROM entities WHERE 1=1`
+	var args []interface{}
+
+	if opts.Type != "" {
+		query += " AND type = ?"
+		args = append(args, opts.Type)
+	}
+	query += " ORDER BY canonical_name LIMIT ?"
+	args = append(args, defaultLimit(opts.Limit))
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entities []core.Entity
+	for rows.Next() {
+		var e core.Entity
+		var aliasesJSON, metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&e.ID, &e.Type, &e.CanonicalName, &aliasesJSON,
+			&e.Description, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		e.Aliases = unmarshalSlice(aliasesJSON)
+		e.Metadata = unmarshalMap(metaJSON)
+		e.CreatedAt = strToTime(createdAt)
+		e.UpdatedAt = strToTime(updatedAt)
+		entities = append(entities, e)
+	}
+	return entities, rows.Err()
+}
+
+func (r *SQLiteRepository) SearchEntities(ctx context.Context, query string, limit int) ([]core.Entity, error) {
+	// Entities don't have an FTS table; search canonical_name and description with LIKE.
+	likeQ := "%" + query + "%"
+	rows, err := r.QueryContext(ctx, `
+		SELECT id, type, canonical_name, aliases_json, COALESCE(description,''),
+			metadata_json, created_at, updated_at
+		FROM entities
+		WHERE canonical_name LIKE ? OR description LIKE ?
+		LIMIT ?`, likeQ, likeQ, defaultLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entities []core.Entity
+	for rows.Next() {
+		var e core.Entity
+		var aliasesJSON, metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&e.ID, &e.Type, &e.CanonicalName, &aliasesJSON,
+			&e.Description, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		e.Aliases = unmarshalSlice(aliasesJSON)
+		e.Metadata = unmarshalMap(metaJSON)
+		e.CreatedAt = strToTime(createdAt)
+		e.UpdatedAt = strToTime(updatedAt)
+		entities = append(entities, e)
+	}
+	return entities, rows.Err()
+}
+
+func (r *SQLiteRepository) LinkMemoryEntity(ctx context.Context, memoryID, entityID, role string) error {
+	_, err := r.ExecContext(ctx, `
+		INSERT OR REPLACE INTO memory_entities (memory_id, entity_id, role)
+		VALUES (?,?,?)`, memoryID, entityID, nullStr(role))
+	return err
+}
+
+func (r *SQLiteRepository) GetMemoryEntities(ctx context.Context, memoryID string) ([]core.Entity, error) {
+	rows, err := r.QueryContext(ctx, `
+		SELECT e.id, e.type, e.canonical_name, e.aliases_json, COALESCE(e.description,''),
+			e.metadata_json, e.created_at, e.updated_at
+		FROM entities e
+		JOIN memory_entities me ON me.entity_id = e.id
+		WHERE me.memory_id = ?`, memoryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entities []core.Entity
+	for rows.Next() {
+		var e core.Entity
+		var aliasesJSON, metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&e.ID, &e.Type, &e.CanonicalName, &aliasesJSON,
+			&e.Description, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		e.Aliases = unmarshalSlice(aliasesJSON)
+		e.Metadata = unmarshalMap(metaJSON)
+		e.CreatedAt = strToTime(createdAt)
+		e.UpdatedAt = strToTime(updatedAt)
+		entities = append(entities, e)
+	}
+	return entities, rows.Err()
+}
+
+// ---------- Episodes ----------
+
+func (r *SQLiteRepository) InsertEpisode(ctx context.Context, episode *core.Episode) error {
+	if episode.ID == "" {
+		episode.ID = generateID("epi_")
+	}
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO episodes (id, title, summary, tight_description, scope, project_id,
+			session_id, importance, privacy_level, started_at, ended_at,
+			source_span_json, source_summary_ids_json, participants_json,
+			related_entities_json, outcomes_json, unresolved_items_json,
+			metadata_json, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		episode.ID, episode.Title, episode.Summary, episode.TightDescription,
+		string(episode.Scope), nullStr(episode.ProjectID), nullStr(episode.SessionID),
+		episode.Importance, string(episode.PrivacyLevel),
+		ptrTimeToStr(episode.StartedAt), ptrTimeToStr(episode.EndedAt),
+		marshalJSON(episode.SourceSpan),
+		marshalSliceJSON(episode.SourceSummaryIDs),
+		marshalSliceJSON(episode.Participants),
+		marshalSliceJSON(episode.RelatedEntities),
+		marshalSliceJSON(episode.Outcomes),
+		marshalSliceJSON(episode.UnresolvedItems),
+		marshalMapJSON(episode.Metadata),
+		timeToStr(episode.CreatedAt), timeToStr(episode.UpdatedAt),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) scanEpisode(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*core.Episode, error) {
+	var ep core.Episode
+	var startedAt, endedAt sql.NullString
+	var spanJSON, sumIDsJSON, partJSON, relJSON, outJSON, unresJSON, metaJSON string
+	var createdAt, updatedAt string
+
+	err := scanner.Scan(
+		&ep.ID, &ep.Title, &ep.Summary, &ep.TightDescription, &ep.Scope,
+		&ep.ProjectID, &ep.SessionID, &ep.Importance, &ep.PrivacyLevel,
+		&startedAt, &endedAt,
+		&spanJSON, &sumIDsJSON, &partJSON, &relJSON, &outJSON, &unresJSON,
+		&metaJSON, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	ep.StartedAt = nullStrToPtrTime(startedAt)
+	ep.EndedAt = nullStrToPtrTime(endedAt)
+	_ = json.Unmarshal([]byte(spanJSON), &ep.SourceSpan)
+	ep.SourceSummaryIDs = unmarshalSlice(sumIDsJSON)
+	ep.Participants = unmarshalSlice(partJSON)
+	ep.RelatedEntities = unmarshalSlice(relJSON)
+	ep.Outcomes = unmarshalSlice(outJSON)
+	ep.UnresolvedItems = unmarshalSlice(unresJSON)
+	ep.Metadata = unmarshalMap(metaJSON)
+	ep.CreatedAt = strToTime(createdAt)
+	ep.UpdatedAt = strToTime(updatedAt)
+	return &ep, nil
+}
+
+const episodeCols = `id, title, summary, tight_description, scope,
+	COALESCE(project_id,''), COALESCE(session_id,''), importance, privacy_level,
+	started_at, ended_at,
+	source_span_json, source_summary_ids_json, participants_json,
+	related_entities_json, outcomes_json, unresolved_items_json,
+	metadata_json, created_at, updated_at`
+
+func (r *SQLiteRepository) GetEpisode(ctx context.Context, id string) (*core.Episode, error) {
+	row := r.QueryRowContext(ctx,
+		"SELECT "+episodeCols+" FROM episodes WHERE id = ?", id)
+	ep, err := r.scanEpisode(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("episode not found: %s", id)
+		}
+		return nil, err
+	}
+	return ep, nil
+}
+
+func (r *SQLiteRepository) ListEpisodes(ctx context.Context, opts core.ListEpisodesOptions) ([]core.Episode, error) {
+	query := "SELECT " + episodeCols + " FROM episodes WHERE 1=1"
+	var args []interface{}
+
+	if opts.Scope != "" {
+		query += " AND scope = ?"
+		args = append(args, string(opts.Scope))
+	}
+	if opts.ProjectID != "" {
+		query += " AND project_id = ?"
+		args = append(args, opts.ProjectID)
+	}
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, defaultLimit(opts.Limit))
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var episodes []core.Episode
+	for rows.Next() {
+		ep, err := r.scanEpisode(rows)
+		if err != nil {
+			return nil, err
+		}
+		episodes = append(episodes, *ep)
+	}
+	return episodes, rows.Err()
+}
+
+func (r *SQLiteRepository) SearchEpisodes(ctx context.Context, query string, limit int) ([]core.Episode, error) {
+	q := "SELECT " + prefixCols("e", episodeCols) + `
+		FROM episodes_fts f JOIN episodes e ON f.id = e.id
+		WHERE episodes_fts MATCH ?
+		ORDER BY rank
+		LIMIT ?`
+	rows, err := r.QueryContext(ctx, q, query, defaultLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var episodes []core.Episode
+	for rows.Next() {
+		ep, err := r.scanEpisode(rows)
+		if err != nil {
+			return nil, err
+		}
+		episodes = append(episodes, *ep)
+	}
+	return episodes, rows.Err()
+}
+
+// ---------- Artifacts ----------
+
+func (r *SQLiteRepository) InsertArtifact(ctx context.Context, artifact *core.Artifact) error {
+	if artifact.ID == "" {
+		artifact.ID = generateID("art_")
+	}
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO artifacts (id, kind, source_system, project_id, path, content,
+			metadata_json, created_at)
+		VALUES (?,?,?,?,?,?,?,?)`,
+		artifact.ID, artifact.Kind,
+		nullStr(artifact.SourceSystem), nullStr(artifact.ProjectID),
+		nullStr(artifact.Path), nullStr(artifact.Content),
+		marshalMapJSON(artifact.Metadata), timeToStr(artifact.CreatedAt),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) GetArtifact(ctx context.Context, id string) (*core.Artifact, error) {
+	row := r.QueryRowContext(ctx, `
+		SELECT id, kind, COALESCE(source_system,''), COALESCE(project_id,''),
+			COALESCE(path,''), COALESCE(content,''), metadata_json, created_at
+		FROM artifacts WHERE id = ?`, id)
+
+	var a core.Artifact
+	var metaJSON, createdAt string
+	err := row.Scan(&a.ID, &a.Kind, &a.SourceSystem, &a.ProjectID,
+		&a.Path, &a.Content, &metaJSON, &createdAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("artifact not found: %s", id)
+		}
+		return nil, err
+	}
+	a.Metadata = unmarshalMap(metaJSON)
+	a.CreatedAt = strToTime(createdAt)
+	return &a, nil
+}
+
+// ---------- Jobs ----------
+
+func (r *SQLiteRepository) InsertJob(ctx context.Context, job *core.Job) error {
+	if job.ID == "" {
+		job.ID = generateID("job_")
+	}
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO jobs (id, kind, status, payload_json, result_json, error_text,
+			scheduled_at, started_at, finished_at, created_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		job.ID, job.Kind, job.Status,
+		marshalMapJSON(job.Payload), marshalMapJSON(job.Result),
+		nullStr(job.ErrorText),
+		ptrTimeToStr(job.ScheduledAt), ptrTimeToStr(job.StartedAt),
+		ptrTimeToStr(job.FinishedAt),
+		timeToStr(job.CreatedAt),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) GetJob(ctx context.Context, id string) (*core.Job, error) {
+	row := r.QueryRowContext(ctx, `
+		SELECT id, kind, status, payload_json, result_json, COALESCE(error_text,''),
+			scheduled_at, started_at, finished_at, created_at
+		FROM jobs WHERE id = ?`, id)
+
+	var j core.Job
+	var payJSON, resJSON string
+	var scheduledAt, startedAt, finishedAt sql.NullString
+	var createdAt string
+	err := row.Scan(&j.ID, &j.Kind, &j.Status, &payJSON, &resJSON, &j.ErrorText,
+		&scheduledAt, &startedAt, &finishedAt, &createdAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("job not found: %s", id)
+		}
+		return nil, err
+	}
+	j.Payload = unmarshalMap(payJSON)
+	j.Result = unmarshalMap(resJSON)
+	j.ScheduledAt = nullStrToPtrTime(scheduledAt)
+	j.StartedAt = nullStrToPtrTime(startedAt)
+	j.FinishedAt = nullStrToPtrTime(finishedAt)
+	j.CreatedAt = strToTime(createdAt)
+	return &j, nil
+}
+
+func (r *SQLiteRepository) UpdateJob(ctx context.Context, job *core.Job) error {
+	_, err := r.ExecContext(ctx, `
+		UPDATE jobs SET kind=?, status=?, payload_json=?, result_json=?,
+			error_text=?, scheduled_at=?, started_at=?, finished_at=?
+		WHERE id=?`,
+		job.Kind, job.Status,
+		marshalMapJSON(job.Payload), marshalMapJSON(job.Result),
+		nullStr(job.ErrorText),
+		ptrTimeToStr(job.ScheduledAt), ptrTimeToStr(job.StartedAt),
+		ptrTimeToStr(job.FinishedAt),
+		job.ID,
+	)
+	return err
+}
+
+func (r *SQLiteRepository) ListJobs(ctx context.Context, opts core.ListJobsOptions) ([]core.Job, error) {
+	query := `SELECT id, kind, status, payload_json, result_json, COALESCE(error_text,''),
+		scheduled_at, started_at, finished_at, created_at
+		FROM jobs WHERE 1=1`
+	var args []interface{}
+
+	if opts.Kind != "" {
+		query += " AND kind = ?"
+		args = append(args, opts.Kind)
+	}
+	if opts.Status != "" {
+		query += " AND status = ?"
+		args = append(args, opts.Status)
+	}
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, defaultLimit(opts.Limit))
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []core.Job
+	for rows.Next() {
+		var j core.Job
+		var payJSON, resJSON string
+		var scheduledAt, startedAt, finishedAt sql.NullString
+		var createdAt string
+		if err := rows.Scan(&j.ID, &j.Kind, &j.Status, &payJSON, &resJSON, &j.ErrorText,
+			&scheduledAt, &startedAt, &finishedAt, &createdAt); err != nil {
+			return nil, err
+		}
+		j.Payload = unmarshalMap(payJSON)
+		j.Result = unmarshalMap(resJSON)
+		j.ScheduledAt = nullStrToPtrTime(scheduledAt)
+		j.StartedAt = nullStrToPtrTime(startedAt)
+		j.FinishedAt = nullStrToPtrTime(finishedAt)
+		j.CreatedAt = strToTime(createdAt)
+		jobs = append(jobs, j)
+	}
+	return jobs, rows.Err()
+}
+
+// ---------- Ingestion Policies ----------
+
+func (r *SQLiteRepository) InsertIngestionPolicy(ctx context.Context, policy *core.IngestionPolicy) error {
+	if policy.ID == "" {
+		policy.ID = generateID("pol_")
+	}
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO ingestion_policies (id, pattern_type, pattern, mode,
+			metadata_json, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?)`,
+		policy.ID, policy.PatternType, policy.Pattern, policy.Mode,
+		marshalMapJSON(policy.Metadata),
+		timeToStr(policy.CreatedAt), timeToStr(policy.UpdatedAt),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) GetIngestionPolicy(ctx context.Context, id string) (*core.IngestionPolicy, error) {
+	row := r.QueryRowContext(ctx, `
+		SELECT id, pattern_type, pattern, mode, metadata_json, created_at, updated_at
+		FROM ingestion_policies WHERE id = ?`, id)
+
+	var p core.IngestionPolicy
+	var metaJSON, createdAt, updatedAt string
+	err := row.Scan(&p.ID, &p.PatternType, &p.Pattern, &p.Mode,
+		&metaJSON, &createdAt, &updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("ingestion policy not found: %s", id)
+		}
+		return nil, err
+	}
+	p.Metadata = unmarshalMap(metaJSON)
+	p.CreatedAt = strToTime(createdAt)
+	p.UpdatedAt = strToTime(updatedAt)
+	return &p, nil
+}
+
+func (r *SQLiteRepository) MatchIngestionPolicy(ctx context.Context, patternType, value string) (*core.IngestionPolicy, error) {
+	row := r.QueryRowContext(ctx, `
+		SELECT id, pattern_type, pattern, mode, metadata_json, created_at, updated_at
+		FROM ingestion_policies
+		WHERE pattern_type = ? AND ? GLOB pattern
+		ORDER BY created_at ASC
+		LIMIT 1`, patternType, value)
+
+	var p core.IngestionPolicy
+	var metaJSON, createdAt, updatedAt string
+	err := row.Scan(&p.ID, &p.PatternType, &p.Pattern, &p.Mode,
+		&metaJSON, &createdAt, &updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // no match is not an error
+		}
+		return nil, err
+	}
+	p.Metadata = unmarshalMap(metaJSON)
+	p.CreatedAt = strToTime(createdAt)
+	p.UpdatedAt = strToTime(updatedAt)
+	return &p, nil
+}
+
+// ---------- Recall History ----------
+
+func (r *SQLiteRepository) RecordRecall(ctx context.Context, sessionID, itemID, itemKind string) error {
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO recall_history (session_id, item_id, item_kind, shown_at)
+		VALUES (?,?,?,?)`,
+		sessionID, itemID, itemKind, timeToStr(time.Now().UTC()))
+	return err
+}
+
+func (r *SQLiteRepository) GetRecentRecalls(ctx context.Context, sessionID string, limit int) ([]core.RecallHistoryEntry, error) {
+	rows, err := r.QueryContext(ctx, `
+		SELECT session_id, item_id, item_kind, shown_at
+		FROM recall_history
+		WHERE session_id = ?
+		ORDER BY shown_at DESC
+		LIMIT ?`, sessionID, defaultLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []core.RecallHistoryEntry
+	for rows.Next() {
+		var e core.RecallHistoryEntry
+		if err := rows.Scan(&e.SessionID, &e.ItemID, &e.ItemKind, &e.ShownAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+func (r *SQLiteRepository) CleanupRecallHistory(ctx context.Context, olderThanDays int) (int64, error) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -olderThanDays).Format(time.RFC3339)
+	result, err := r.ExecContext(ctx, `
+		DELETE FROM recall_history WHERE shown_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// ---------- Counts ----------
+
+func (r *SQLiteRepository) countTable(ctx context.Context, table string) (int64, error) {
+	row := r.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table)
+	var n int64
+	err := row.Scan(&n)
+	return n, err
+}
+
+func (r *SQLiteRepository) CountEvents(ctx context.Context) (int64, error) {
+	return r.countTable(ctx, "events")
+}
+
+func (r *SQLiteRepository) CountMemories(ctx context.Context) (int64, error) {
+	return r.countTable(ctx, "memories")
+}
+
+func (r *SQLiteRepository) CountSummaries(ctx context.Context) (int64, error) {
+	return r.countTable(ctx, "summaries")
+}
+
+func (r *SQLiteRepository) CountEpisodes(ctx context.Context) (int64, error) {
+	return r.countTable(ctx, "episodes")
+}
+
+func (r *SQLiteRepository) CountEntities(ctx context.Context) (int64, error) {
+	return r.countTable(ctx, "entities")
+}
+
+// ---------- Index Management ----------
+
+func (r *SQLiteRepository) RebuildFTSIndexes(ctx context.Context) error {
+	stmts := []string{
+		// Clear all FTS content
+		"DELETE FROM memories_fts",
+		"DELETE FROM summaries_fts",
+		"DELETE FROM episodes_fts",
+		"DELETE FROM events_fts",
+
+		// Re-insert from canonical tables
+		`INSERT INTO memories_fts(id, type, subject, body, tight_description, tags)
+		 SELECT id, type, subject, body, tight_description, tags_json FROM memories`,
+
+		`INSERT INTO summaries_fts(id, kind, title, body, tight_description)
+		 SELECT id, kind, title, body, tight_description FROM summaries`,
+
+		`INSERT INTO episodes_fts(id, title, summary, tight_description)
+		 SELECT id, title, summary, tight_description FROM episodes`,
+
+		`INSERT INTO events_fts(id, kind, content)
+		 SELECT id, kind, content FROM events`,
+	}
+	for _, stmt := range stmts {
+		if _, err := r.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("rebuild FTS: %w", err)
+		}
+	}
+	return nil
+}

@@ -1,0 +1,14 @@
+version: acm.workflows.v1
+completion:
+  required_tasks:
+    - key: verify:tests
+      select:
+        changed_paths_any:
+          - ".acm/**"
+          - "AGENTS.md"
+          - "CLAUDE.md"
+          - "cmd/**"
+          - "internal/**"
+          - "go.mod"
+          - "go.sum"
+          - "spec/**"

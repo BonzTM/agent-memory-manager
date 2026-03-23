@@ -1,0 +1,38 @@
+# ACM local state
+.acm/context.db
+.acm/context.db-shm
+.acm/context.db-wal
+
+# Secrets
+.env
+
+# Go build artifacts
+/amm
+/amm-mcp
+/bin/
+*.exe
+
+# AMM local database
+.amm/
+*.db
+*.db-shm
+*.db-wal
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+coverage.out
+coverage.html
+
+# Logs
+*.log
+excalidraw.log

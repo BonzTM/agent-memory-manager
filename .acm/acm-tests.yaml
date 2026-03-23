@@ -1,0 +1,101 @@
+version: acm.tests.v1
+
+defaults:
+  cwd: .
+  timeout_sec: 300
+
+tests:
+  - id: smoke
+    summary: Confirm ACM can load repo-local setup and report current status
+    command:
+      argv: ["acm", "status", "--project-root", "."]
+    select:
+      always_run: true
+    expected:
+      exit_code: 0
+
+  - id: go-build
+    summary: Ensure both CLI entrypoints build
+    command:
+      argv: ["go", "build", "-tags", "fts5", "./cmd/amm", "./cmd/amm-mcp"]
+      env:
+        CGO_ENABLED: "1"
+        GOCACHE: "/tmp/agent-memory-manager-gocache"
+        GOMODCACHE: "/tmp/agent-memory-manager-gomodcache"
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["cmd/**", "internal/**", "go.mod", "go.sum"]
+    expected:
+      exit_code: 0
+
+  - id: go-test-smoke
+    summary: Run core and runtime tests on every verification pass
+    command:
+      argv: ["go", "test", "-tags", "fts5", "./internal/core/...", "./internal/runtime/...", "-count=1"]
+      env:
+        CGO_ENABLED: "1"
+        GOCACHE: "/tmp/agent-memory-manager-gocache"
+        GOMODCACHE: "/tmp/agent-memory-manager-gomodcache"
+    select:
+      always_run: true
+    expected:
+      exit_code: 0
+
+  - id: go-test-changed
+    summary: Run go test for packages touched by the current verify diff
+    command:
+      argv: ["go", "test", "-tags", "fts5", "./...", "-count=1", "-short"]
+      env:
+        CGO_ENABLED: "1"
+        GOCACHE: "/tmp/agent-memory-manager-gocache"
+        GOMODCACHE: "/tmp/agent-memory-manager-gomodcache"
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["cmd/**", "internal/**", "go.mod", "go.sum"]
+    expected:
+      exit_code: 0
+
+  - id: go-test-full
+    summary: Run the full Go test suite for product changes
+    command:
+      argv: ["go", "test", "-tags", "fts5", "./..."]
+      env:
+        CGO_ENABLED: "1"
+        GOFLAGS: "-count=1"
+        GOCACHE: "/tmp/agent-memory-manager-gocache"
+        GOMODCACHE: "/tmp/agent-memory-manager-gomodcache"
+    select:
+      phases: ["review"]
+      changed_paths_any: ["cmd/**", "internal/**", "go.mod", "go.sum"]
+    expected:
+      exit_code: 0
+
+  - id: acm-feature-plan-help
+    summary: Ensure the repo-local ACM staged-plan validator exposes help
+    command:
+      argv: ["python3", "scripts/acm-feature-plan-validate.py", "--help"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["AGENTS.md", "CLAUDE.md", ".acm/**", "scripts/**"]
+    expected:
+      exit_code: 0
+
+  - id: acm-feature-plan-validate
+    summary: Validate the repo-local ACM staged-plan schema for governed work
+    command:
+      argv: ["python3", "scripts/acm-feature-plan-validate.py"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["AGENTS.md", "CLAUDE.md", ".acm/**", "cmd/**", "internal/**", "go.mod", "go.sum", "scripts/**", "spec/**"]
+    expected:
+      exit_code: 0
+
+  - id: repo-diff-check
+    summary: Catch whitespace errors and unresolved merge markers in tracked changes
+    command:
+      argv: ["git", "diff", "--check"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any: ["**"]
+    expected:
+      exit_code: 0
