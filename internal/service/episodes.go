@@ -36,9 +36,10 @@ func (s *AMMService) FormEpisodes(ctx context.Context) (int, error) {
 
 	for sessionID, evts := range sessionEvents {
 		// Check if an episode already exists for this session.
-		existing, err := s.repo.SearchEpisodes(ctx, sessionID, 1)
+		// Use quoted FTS query for exact matching, then verify the session_id field
+		// to avoid false positives from partial FTS matches.
+		existing, err := s.repo.SearchEpisodes(ctx, fmt.Sprintf("%q", sessionID), 10)
 		if err == nil && len(existing) > 0 {
-			// Verify the match is actually for this session.
 			skip := false
 			for _, ep := range existing {
 				if ep.SessionID == sessionID {
@@ -88,9 +89,10 @@ func (s *AMMService) FormEpisodes(ctx context.Context) (int, error) {
 		// Determine scope.
 		scope, projectID := inferScopeFromEvents(evts)
 
-		// Timestamps.
-		startedAt := evts[0].OccurredAt
-		endedAt := evts[len(evts)-1].OccurredAt
+		// Timestamps: events come back from ListEvents in DESC order (newest first),
+		// so evts[0] is the newest and evts[len-1] is the oldest.
+		startedAt := evts[len(evts)-1].OccurredAt // oldest
+		endedAt := evts[0].OccurredAt              // newest
 
 		episode := &core.Episode{
 			ID:    generateID("ep_"),
