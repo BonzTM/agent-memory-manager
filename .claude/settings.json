@@ -42,16 +42,16 @@
         "matcher": "startup|resume|clear|compact"
       }
     ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-stop-guard.sh",
-            "type": "command"
-          }
-        ]
-      }
-    ],
+    // "Stop": [
+    //   {
+    //     "hooks": [
+    //       {
+    //         "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-stop-guard.sh",
+    //         "type": "command"
+    //       }
+    //     ]
+    //   }
+    // ],
     "UserPromptSubmit": [
       {
         "hooks": [
