@@ -56,24 +56,6 @@ For non-trivial work (multi-step, multi-file, or governed changes), follow this 
 
 See [.acm/acm-work-loop.md](.acm/acm-work-loop.md) for the full ACM command reference (CLI and MCP).
 
-## Memory (AMM)
-
-This repo uses [AMM (Agent Memory Manager)](https://github.com/bonztm/agent-memory-manager) for durable memory. AMM is available via MCP tools (`amm_recall`, `amm_remember`, `amm_expand`) and CLI (`amm`).
-
-**When to query AMM:**
-- **Session start.** Run `amm recall|amm_recall` (mode `ambient`) at the beginning of every session to load relevant prior context about this project, the user, and past decisions.
-- **Before decisions.** When you encounter an architectural choice, a naming question, a pattern question, or anything where prior context might exist, query AMM before guessing.
-- **On uncertainty.** If you don't know something about the project, the user's preferences, or past work — ask AMM first.
-
-**When to write to AMM:**
-- **Stable decisions.** When a decision is made (architecture, naming, tooling choice), commit it with `amm remember|amm_remember`.
-- **User preferences.** When you learn how the user likes to work, record it.
-- **Gotchas and lessons.** When something surprising happens or a non-obvious fix is found, save it for next time.
-
-**When not to use AMM:**
-- Transient task state belongs in ACM `work` plans, not AMM.
-- Don't store information that's already in the code or git history.
-
 ## Working Rules
 
 - Do not silently expand governed file scope. Refresh context first.
@@ -124,8 +106,3 @@ Governed multi-step work in this repo must use the staged plan contract:
 1. Edit the canonical rules, tags, tests, or workflow files.
 2. Run `acm sync --mode working_tree --insert-new-candidates` or `acm health --apply`.
 3. Run `acm health --include-details` and resolve blocking findings.
-
-## Tool-Specific Companions
-
-`CLAUDE.md`, `CODEX.md`, and other tool-specific files should stay thin and map their workflow back to this file.
-If they disagree with this file, this file is authoritative.
