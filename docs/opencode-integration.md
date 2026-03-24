@@ -59,15 +59,16 @@ That gives you useful operational memory without promising transcript fidelity f
 
 ## 3. Keep workers external
 
-OpenCode plugins can trigger light amm jobs, but the heavy maintenance loop still belongs outside the runtime:
+OpenCode plugins can trigger light amm jobs, but the heavy maintenance loop still belongs outside the runtime. Because SQLite is a single-writer system, we recommend running the **conservative baseline** maintenance jobs sequentially using the shared worker runner:
 
 ```bash
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run reflect
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run compress_history
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run consolidate_sessions
+# Recommended: Serialized Baseline Runner
+/path/to/agent-memory-manager/examples/scripts/run-workers.sh
 ```
 
-Use host cron/systemd or the shared [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) for the cold path.
+The baseline runner covers essential maintenance. Aggressive jobs (`decay_stale_memory`, `merge_duplicates`) or low-cadence repairs (`rebuild_indexes`) should be run separately. Structural repairs like `repair_links` should only be run via `amm repair --fix links`.
+
+Use host cron/systemd or the shared [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) for the cold-path baseline.
 
 ## Default operator contract
 

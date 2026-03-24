@@ -4,7 +4,7 @@ Use this companion when running `acm-broker` workflow inside Claude Code.
 
 ## Required Order
 
-1. For non-trivial work, run `/acm-context [phase] ...` first to request `context`. Trivial single-file fixes can skip the ACM ceremony.
+1. Run `/acm-context [phase] ...` first to request `context`.
 2. Follow the returned `context` rules block (or rule pointers) as hard constraints.
 3. Use `fetch` with `receipt_id` shorthand (or explicit keys) only when a returned plan, task, or pointer key actually needs to be hydrated.
 4. Execute work; if the receipt is stale, too narrow, or the task changed materially, request `context` again with better task text.

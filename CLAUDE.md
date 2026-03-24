@@ -8,22 +8,19 @@ Claude companion for amm (Agent Memory Manager). Primary contract is `AGENTS.md`
 - Use this file only to map Claude's workflow to the repo contract.
 - If this file conflicts with `AGENTS.md`, `AGENTS.md` wins.
 
-## Claude Workflow
+## ACM Workflow
 
-For non-trivial work (multi-step, multi-file, or governed), use the ACM task loop:
+See [.acm/acm-work-loop.md](.acm/acm-work-loop.md) for the full command reference. Claude slash-command equivalents:
 
-1. Start with `/acm-context [phase] <task>`.
-2. Read the returned hard rules before touching files.
-3. Use `/acm-work ...` when the task is multi-step, spans multiple files, or needs durable state.
-4. Use `/acm-verify ...` before `/acm-done ...` for any code, config, schema, or executable behavior change.
-5. Use `/acm-done ...` to close the task; include changed files for file-backed work.
+| AGENTS.md step | Claude command |
+|---|---|
+| `acm context` | `/acm-context [phase] <task>` |
+| `acm work` | `/acm-work` |
+| `acm verify` | `/acm-verify` |
+| `acm review --run` | `/acm-review <id> {"run":true}` |
+| `acm done` | `/acm-done` |
 
-Trivial single-file fixes can skip the ACM ceremony.
-
-If the task changes rules, tags, tests, workflows, or tool-surface behavior, run direct CLI `acm sync --mode working_tree --insert-new-candidates` and `acm health --include-details` before `/acm-done`.
-
-If you need historical discovery after compaction, use direct CLI `acm history` then `acm fetch`.
-If you need runtime or setup diagnostics, use direct CLI `acm status`.
+Direct CLI (`acm sync`, `acm health`, `acm history`, `acm status`) has no slash-command wrappers — call those directly.
 
 ## Memory (AMM)
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# amm Worker Runner — run all maintenance jobs
 # Suitable for cron: */30 * * * * /path/to/run-workers.sh
 set -euo pipefail
 

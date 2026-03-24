@@ -163,24 +163,24 @@ If you want a Codex-specific instruction block, add something like this to your 
 
 This is the important operational point: **the workers do not need to live inside Codex**.
 
-Use cron, systemd, a wrapper script, or any other local scheduler to invoke the same amm database out-of-band:
+Because SQLite supports only one concurrent writer, we recommend running maintenance jobs sequentially. Use cron, systemd, or a wrapper script to invoke the **conservative baseline** sequence in a deterministic order:
 
 ```bash
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run reflect
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run compress_history
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run consolidate_sessions
+# Recommended: Serialized Baseline Runner
+/home/you/src/agent-memory-manager/examples/scripts/run-workers.sh
 ```
 
-The existing shared runner in [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) is already a truthful model for this.
+The baseline runner covers the essential sequence (`reflect`, `compress_history`, etc.). Aggressive maintenance (`decay_stale_memory`, `merge_duplicates`) or low-cadence repairs (`rebuild_indexes`) should be run separately on a slower schedule.
+
+The existing shared runner in [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) is the preferred model for the cold-path baseline.
 
 ## Suggested Runtime Pattern
 
-Use a split hot-path / warm-path / cold-path model:
+Use a split hot-path / warm-path / cold-path model to manage SQLite's single-writer constraint:
 
 - **Hot path**: `UserPromptSubmit` ingests the prompt and asks for `ambient` recall
-- **Warm path**: `Stop` runs `reflect` and `compress_history`
-- **Cold path**: cron or systemd runs `consolidate_sessions`, `extract_claims`, `form_episodes`, `detect_contradictions`, `merge_duplicates`, and `cleanup_recall_history`
-
+- **Warm path**: `Stop` runs the repo's warm-path maintenance sequence (`reflect`, `compress_history`, `consolidate_sessions`) serially
+- **Cold path**: external serialized jobs run the **baseline** maintenance sequence (consolidate_sessions, extract_claims, etc.) via the shared runner
 That keeps the Codex interaction fast while still letting amm build structure from the accumulated history.
 
 ## Notes on Transcript Capture
@@ -201,7 +201,7 @@ This repo still does **not** claim that Codex exposes a public tool-result hook.
 - Codex loads `~/.codex/hooks.json` and the three hook handlers
 - `UserPromptSubmit` writes an event and returns recall hints when amm has relevant data
 - `Stop` backfills assistant/tool history from `transcript_path` or falls back to `last_assistant_message`
-- `Stop` can run `amm jobs run reflect` and `amm jobs run compress_history`
+- `Stop` can run `amm jobs run reflect`, `amm jobs run compress_history`, and `amm jobs run consolidate_sessions`
 - Your external scheduler can run the heavier jobs against the same database
 
 ## What This Repo Does Not Promise

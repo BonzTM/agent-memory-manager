@@ -70,29 +70,28 @@ That keeps the amm scripts reusable even if your Hermes hook wiring changes over
 
 ## 3. Keep Background Workers External
 
-amm does not currently ship an internal scheduler loop. The repo documents worker execution as external CLI calls:
+amm does not ship an internal scheduler loop. Because SQLite only allows one writer at a time, we recommend running the **conservative baseline** maintenance jobs sequentially:
 
 ```bash
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run reflect
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run compress_history
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run consolidate_sessions
+# Recommended: Serialized Baseline Runner
+/path/to/agent-memory-manager/examples/scripts/run-workers.sh
 ```
 
-For a full maintenance pass, the shared runner in [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) is the clearest starting point.
+For the baseline maintenance sequence, the runner in [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) is the preferred starting point. Aggressive jobs (`decay_stale_memory`, `merge_duplicates`) or low-cadence repairs (`rebuild_indexes`) should be run separately on a slower schedule.
 
 That means you can choose the trigger that fits Hermes best:
 
-- Hermes cron or scheduled jobs
-- a host-level cron or systemd timer
-- a session-end hook that runs the lighter jobs immediately
+- Hermes cron or scheduled jobs (staggered or serialized baseline)
+- a host-level cron or systemd timer (serialized baseline runner)
+- a session-end hook that runs the repo-shipped warm-path sequence via `examples/hermes-agent/on-session-end.sh`
 
 ## Suggested Operational Pattern
 
 Use a hot/warm/cold split:
 
 - **Hot path**: a Hermes hook handler passes the current user message to `on-user-message.sh`, which ingests the event and returns thin ambient recall hints
-- **Warm path**: a session-end or periodic Hermes task runs `reflect` and `compress_history`
-- **Cold path**: scheduled jobs run `consolidate_sessions`, `extract_claims`, `form_episodes`, `detect_contradictions`, `merge_duplicates`, and `cleanup_recall_history`
+- **Warm path**: a session-end or periodic Hermes task runs the repo-shipped warm-path sequence serially via `examples/hermes-agent/on-session-end.sh`
+- **Cold path**: scheduled jobs run the broader maintenance sequence through the shared runner or explicitly staggered entries
 
 That gives you immediate context injection without forcing the heavy jobs into the interactive loop.
 

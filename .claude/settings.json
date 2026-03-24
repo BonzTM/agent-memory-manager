@@ -1,5 +1,37 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-session-context.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": "startup|resume|clear|compact"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-session-context.sh",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-receipt-guard.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit"
+      }
+    ],
     "PostToolUse": [
       {
         "hooks": [
@@ -19,29 +51,7 @@
         ],
         "matcher": "Bash"
       }
-    ],
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-receipt-guard.sh",
-            "type": "command"
-          }
-        ],
-        "matcher": "Edit|MultiEdit|Write|NotebookEdit"
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-session-context.sh",
-            "type": "command"
-          }
-        ],
-        "matcher": "startup|resume|clear|compact"
-      }
-    ],
+    ]
     // "Stop": [
     //   {
     //     "hooks": [
@@ -52,15 +62,5 @@
     //     ]
     //   }
     // ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-session-context.sh",
-            "type": "command"
-          }
-        ]
-      }
-    ]
   }
 }

@@ -373,21 +373,32 @@ After events accumulate, background workers extract structure and consolidate kn
 
 ### Running Workers
 
-Workers can be triggered manually, on a schedule, or after a threshold of new events:
+Workers can be triggered manually, on a schedule, or after a threshold of new events. Because SQLite supports only one concurrent writer, we recommend running maintenance jobs sequentially.
+
+#### Baseline vs. Optional Maintenance
+
+We distinguish between **baseline** jobs (essential for daily memory building) and **optional** jobs (aggressive optimization or repair).
+
+- **Baseline Jobs**: Essential sequence included in the shared runner (`reflect`, `compress_history`, `consolidate_sessions`, `extract_claims`, `form_episodes`, `detect_contradictions`, `cleanup_recall_history`).
+- **Optional Jobs**: Aggressive maintenance (`decay_stale_memory`, `merge_duplicates`) or low-cadence repairs (`rebuild_indexes`). These should run separately from the baseline runner on a slower schedule.
+- **System Repairs**: Structural repairs like `repair_links` are not job kinds; run them via `amm repair --fix links`.
 
 ```bash
-# Manual
-amm jobs run reflect
-amm jobs run compress_history
+# Recommended: Serialized Baseline Runner
+# This script runs the essential jobs one by one.
+/path/to/agent-memory-manager/examples/scripts/run-workers.sh
 
-# Cron (every 30 minutes)
-*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run reflect
-*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run compress_history
+# Optional: Separate Aggressive Maintenance (Daily)
+amm jobs run decay_stale_memory
+amm jobs run merge_duplicates
 
-# Full maintenance pass
-for job in reflect compress_history consolidate_sessions extract_claims form_episodes detect_contradictions decay_stale_memory merge_duplicates; do
-  amm jobs run "$job"
-done
+# Optional: Low-cadence Repair/Index Maintenance
+amm jobs run rebuild_indexes
+amm repair --fix links
+
+# Alternative: Staggered Cron (avoid overlapping minutes)
+0,30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run reflect
+5,35 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run compress_history
 ```
 
 The `maintenance.auto_*` configuration flags are runtime configuration values, not proof of an internal amm worker daemon. Use an external trigger unless your runtime explicitly shells out to `amm jobs run ...` for you.

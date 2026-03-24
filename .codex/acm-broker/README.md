@@ -26,6 +26,15 @@ That template seeds:
 
 The template is documentation only. It does not add hidden hooks or special Codex-only runtime behavior.
 
+If you also want the current experimental repo-local Codex hook layer, run:
+
+```bash
+acm init --apply-template codex-hooks
+```
+
+That template seeds `.codex/config.toml`, `.codex/hooks.json`, and `.codex/hooks/*`.
+It is opt-in and experimental. It only adds lightweight lifecycle reminders around context-first prompts and closeout, and it depends on Codex's current experimental hooks support.
+
 ## Recommended Codex loop
 
 Codex can drive the full ACM workflow directly:
@@ -36,6 +45,8 @@ Codex can drive the full ACM workflow directly:
 4. `acm verify` for deterministic repo-defined checks
 5. `acm review` when a workflow gate needs one review record or runnable signoff gate
 6. `acm done`
+
+If the repo also uses [AMM](https://github.com/bonztm/agent-memory-manager), use AMM for durable memory.
 
 Keep the command boundary explicit:
 

@@ -368,27 +368,57 @@ amm remember --type constraint --scope project --project "my-project" \
 
 Background workers extract structure from raw events. Without them, amm only stores what you explicitly `remember`. With them, amm automatically discovers memories from conversation history.
 
-### Option A: Cron (simplest)
+SQLite allows only one writer at a time. To avoid "database is locked" errors, we recommend running maintenance jobs sequentially using the shared worker runner script.
+
+### Option A: Serialized Runner (Baseline)
+
+This approach uses a single script to run the **conservative baseline** maintenance jobs one after another. This is the recommended default for most users.
 
 ```bash
 # Add to crontab (crontab -e)
-# Run reflect and compress every 30 minutes
-*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run reflect >/dev/null 2>&1
-*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run compress_history >/dev/null 2>&1
-
-# Run heavier jobs once per hour
-0 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run consolidate_sessions >/dev/null 2>&1
-0 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run extract_claims >/dev/null 2>&1
-0 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run form_episodes >/dev/null 2>&1
-
-# Run maintenance jobs once per day at 3am
-0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run detect_contradictions >/dev/null 2>&1
-0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run decay_stale_memory >/dev/null 2>&1
-0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run merge_duplicates >/dev/null 2>&1
-0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run cleanup_recall_history >/dev/null 2>&1
+# Run the serialized worker runner every 30 minutes
+*/30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /path/to/agent-memory-manager/examples/scripts/run-workers.sh >/dev/null 2>&1
 ```
 
-### Option B: systemd Timer (Linux)
+The baseline runner covers the essential sequence: `reflect`, `compress_history`, `consolidate_sessions`, `extract_claims`, `form_episodes`, `detect_contradictions`, and `cleanup_recall_history`.
+
+### Option B: Optional Maintenance (Advanced/Repair)
+
+Heavier or more aggressive maintenance jobs should be run separately on a slower cadence (e.g., daily or weekly). These jobs perform deeper mutations or index repairs that fall outside the conservative baseline.
+
+```bash
+# Optional: Aggressive maintenance (e.g., daily at 4am, staggered)
+0 4 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run decay_stale_memory >/dev/null 2>&1
+15 4 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run merge_duplicates >/dev/null 2>&1
+
+# Optional: Index/Link Repair (e.g., weekly on Sunday at 5am, staggered)
+0 5 * * 0 AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run rebuild_indexes >/dev/null 2>&1
+15 5 * * 0 AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm repair --fix links >/dev/null 2>&1
+```
+
+Note: `rebuild_indexes` and `repair --fix links` are repair-style operations and are not required for normal operation.
+
+### Option C: Staggered Cron (Alternative)
+
+If you prefer individual cron entries, you must stagger them so they do not fire on the same minute. SQLite's single-writer model means overlapping write-heavy jobs will block each other.
+
+```bash
+# Add to crontab (crontab -e)
+# Stagger light jobs by 5 minutes
+0,30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run reflect >/dev/null 2>&1
+5,35 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run compress_history >/dev/null 2>&1
+
+# Stagger heavier jobs throughout the hour
+10 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run consolidate_sessions >/dev/null 2>&1
+15 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run extract_claims >/dev/null 2>&1
+20 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run form_episodes >/dev/null 2>&1
+
+# Run the remaining baseline jobs at different times during the night
+0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run detect_contradictions >/dev/null 2>&1
+15 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run cleanup_recall_history >/dev/null 2>&1
+```
+
+### Option D: systemd Timer (Linux)
 
 Create `~/.config/systemd/user/amm-maintenance.service`:
 
@@ -404,6 +434,8 @@ ExecStart=/usr/local/bin/amm jobs run compress_history
 ExecStart=/usr/local/bin/amm jobs run consolidate_sessions
 ExecStart=/usr/local/bin/amm jobs run extract_claims
 ExecStart=/usr/local/bin/amm jobs run form_episodes
+ExecStart=/usr/local/bin/amm jobs run detect_contradictions
+ExecStart=/usr/local/bin/amm jobs run cleanup_recall_history
 ```
 
 Create `~/.config/systemd/user/amm-maintenance.timer`:
@@ -427,7 +459,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now amm-maintenance.timer
 ```
 
-### Option C: Agent-Triggered
+### Option E: Agent-Triggered
 
 The agent can run workers via MCP whenever it judges the time is right:
 

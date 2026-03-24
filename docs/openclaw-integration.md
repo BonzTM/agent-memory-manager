@@ -114,26 +114,27 @@ That gives you a real OpenClaw integration without coupling amm to undocumented 
 
 ## Worker Strategy
 
-amm background jobs stay external. The repo example uses a split strategy:
+amm background jobs stay external. Because SQLite supports only one writer at a time, we recommend running the **conservative baseline** maintenance jobs sequentially:
 
-- **Warm path**: the `command:stop` hook runs `reflect`, `compress_history`, and `consolidate_sessions`
-- **Cold path**: host cron or systemd runs the heavier maintenance via `examples/scripts/run-workers.sh`
+- **Warm path**: the `command:stop` hook runs `reflect`, `compress_history`, and `consolidate_sessions` serially
+- **Cold path**: host cron or systemd runs the full **baseline** maintenance sequence via `examples/scripts/run-workers.sh`
 
-The jobs themselves do not change:
+The sequence runs the baseline jobs in a deterministic order:
 
 ```bash
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run reflect
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run compress_history
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run consolidate_sessions
+# Recommended: Serialized Baseline Runner
+/path/to/agent-memory-manager/examples/scripts/run-workers.sh
 ```
+
+Aggressive maintenance (`decay_stale_memory`, `merge_duplicates`) or low-cadence repairs (`rebuild_indexes`) should be run separately on a slower schedule. Structural repairs like `repair_links` should only be run via `amm repair --fix links`.
 
 For a shared baseline, reuse [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh).
 
 That means you can choose any of these operational patterns:
 
-- a host-level cron or systemd timer that invokes the shared runner directly
-- an OpenClaw-owned background process or native plugin service that shells out to `amm jobs run ...`
-- an OpenClaw cron task that tells an isolated agent turn to call `amm_jobs_run` explicitly
+- a host-level cron or systemd timer that invokes the serialized runner directly
+- an OpenClaw-owned background process or native plugin service that shells out to `amm jobs run ...` sequentially
+- an OpenClaw cron task that tells an isolated agent turn to call `amm_jobs_run` for a single job kind
 
 The shipped example prefers the first host-level option for deterministic execution.
 
@@ -159,7 +160,7 @@ If you want an OpenClaw-oriented instructions block, use something like this:
 - the OpenClaw runtime can call `amm_recall` successfully
 - the `amm-memory-capture` hook can ingest inbound and outbound message events into amm history
 - explicit `amm_recall` returns thin hints when the agent requests them
-- session-end or scheduled jobs can run `reflect` and `compress_history`
+- session-end or scheduled jobs can run the serialized warm-path jobs (`reflect`, `compress_history`, `consolidate_sessions`)
 - the same `AMM_DB_PATH` is visible to every OpenClaw-owned subprocess that calls amm
 
 ## What This Repo Does Not Promise

@@ -44,23 +44,17 @@ internal/
 
 ## Task Loop
 
-For non-trivial work (multi-step, multi-file, or governed), follow the ACM task loop:
+For non-trivial work (multi-step, multi-file, or governed changes), follow this loop. Trivial single-file fixes can skip the ACM ceremony.
 
 1. Read this file and the human task.
-2. Run `acm context` before opening or editing project files.
-3. Follow all hard rules returned in the receipt.
-4. Use `fetch` only for the pointers, plans, and task keys needed for the current step.
-5. When a task spans multiple steps, multiple files, or a likely handoff, create or update `work`.
-6. If code, config, schema, or other executable behavior changes, run `verify` before `done`.
-7. If `.acm/acm-workflows.yaml` requires review task keys, satisfy them before `done`.
-8. End the task with `done`, including every changed file for file-backed work.
+2. Run `acm context --task-text "<current task>" --phase <plan|execute|review>`.
+3. Read the returned hard rules and fetch only the keys needed for the current step.
+4. If the task spans multiple steps, multiple files, or likely handoff, create or update ACM work with `acm work ...`.
+5. For code, config, schema, or behavior changes, run `acm verify ...` before completion.
+6. If `.acm/acm-workflows.yaml` requires a review task such as `review:cross-llm`, satisfy it with `acm review --run --receipt-id <receipt-id>` when the task defines a `run` block; otherwise use manual review fields or `acm work`.
+7. Close the task with `acm done ...`. Changed files must stay within the active receipt scope.
 
-Trivial single-file fixes can skip the ACM ceremony entirely.
-
-When the task changes rules, tags, tests, workflows, or tool-surface behavior, refresh with `acm sync --mode working_tree --insert-new-candidates` and then run `acm health --include-details` before `done`.
-
-If you need to resume after compaction, use `acm history` for discovery then `acm fetch` the returned keys.
-If you need to debug project setup, use `acm status`.
+See [.acm/acm-work-loop.md](.acm/acm-work-loop.md) for the full ACM command reference (CLI and MCP).
 
 ## Memory (AMM)
 

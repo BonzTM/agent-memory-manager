@@ -46,18 +46,19 @@ openclaw hooks check
 
 ## Worker Scheduling
 
-The example uses a split maintenance model:
+The example uses a split maintenance model designed for SQLite's single-writer constraint:
 
-- **Warm path**: `hooks/amm-session-maintenance` runs light jobs on `command:stop`
-- **Cold path**: use a host-level cron or systemd timer to run `examples/scripts/run-workers.sh`
+- **Warm path**: `hooks/amm-session-maintenance` runs `reflect`, `compress_history`, and `consolidate_sessions` serially on `command:stop`
+- **Cold path**: use a host-level cron or systemd timer to run the **serialized baseline sequence** via `examples/scripts/run-workers.sh`
 
 Example host cron entry:
 
 ```cron
+# Baseline maintenance sequence
 */30 * * * * AMM_DB_PATH=/home/you/.amm/amm.db /home/you/src/agent-memory-manager/examples/scripts/run-workers.sh
 ```
 
-If you want OpenClaw-owned scheduling, use its built-in cron to schedule an isolated agent turn that explicitly calls `amm_jobs_run`. This repo does not ship that flow as the primary example because it is agent-mediated rather than a direct shell-execution scheduler.
+Aggressive maintenance (`decay_stale_memory`, `merge_duplicates`) or low-cadence repairs (`rebuild_indexes`) should be run separately on a slower schedule. Structural repairs like `repair_links` should only be run via `amm repair --fix links`.
 
 The smallest optional variant is [`cron.add.reflect.json`](./cron.add.reflect.json). It creates a recurring isolated turn that asks the agent to call `amm_jobs_run` with `{"kind":"reflect"}` and sets `delivery.mode` to `none`, so the run stays internal unless the turn itself fails.
 
