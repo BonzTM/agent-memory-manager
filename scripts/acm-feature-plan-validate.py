@@ -20,6 +20,7 @@ STAGE_CHILD_PREFIXES = {
     "stage:refined-spec": ("refine:",),
     "stage:implementation-plan": ("impl:", "tdd:"),
 }
+SUPERSEDED_STATUSES = {"superseded"}
 LEAF_TASK_EXEMPT_KEYS = {"verify:tests"}
 CATCH_ALL_LEAF_SUMMARIES = {
     "cleanup",
@@ -164,6 +165,8 @@ def index_tasks(plan, errors):
             continue
         if task_key in tasks_by_key:
             errors.append(f"{plan['__plan_key']}: duplicate task key {task_key}")
+            continue
+        if trimmed(task.get("status")) in SUPERSEDED_STATUSES:
             continue
         tasks_by_key[task_key] = task
 

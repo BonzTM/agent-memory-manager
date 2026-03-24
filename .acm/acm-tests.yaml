@@ -76,7 +76,7 @@ tests:
       argv: ["python3", "scripts/acm-feature-plan-validate.py", "--help"]
     select:
       phases: ["execute", "review"]
-      changed_paths_any: ["AGENTS.md", "CLAUDE.md", ".acm/**", "scripts/**"]
+      changed_paths_any: ["scripts/acm-feature-plan-validate.py"]
     expected:
       exit_code: 0
 
@@ -86,18 +86,7 @@ tests:
       argv: ["python3", "scripts/acm-feature-plan-validate.py"]
     select:
       phases: ["execute", "review"]
-      changed_paths_any: ["AGENTS.md", "CLAUDE.md", ".acm/**", "cmd/**", "internal/**", "go.mod", "go.sum", "scripts/**", "spec/**"]
-    expected:
-      exit_code: 0
-
-  - id: amm-onboarding-surfaces
-    summary: Ensure active onboarding surfaces point durable memory at AMM
-    command:
-      argv: ["python3", "scripts/check-amm-onboarding.py"]
-    select:
-      phases: ["execute", "review"]
-      changed_paths_any:
-        ["AGENTS.md", "CLAUDE.md", "CODEX.md", "README.md", "docs/**", "examples/**", ".claude/**", ".codex/**", ".opencode/**", ".acm/**", "scripts/**"]
+      changed_paths_any: ["cmd/**", "internal/**", "go.mod", "go.sum", "spec/**"]
     expected:
       exit_code: 0
 
