@@ -11,6 +11,9 @@ const (
 	CmdHistory          = "history"
 	CmdGetMemory        = "get_memory"
 	CmdUpdateMemory     = "update_memory"
+	CmdPolicyList       = "policy_list"
+	CmdPolicyAdd        = "policy_add"
+	CmdPolicyRemove     = "policy_remove"
 	CmdRunJob           = "run_job"
 	CmdRepair           = "repair"
 	CmdExplainRecall    = "explain_recall"
@@ -60,6 +63,18 @@ var CommandRegistry = map[string]CommandInfo{
 	CmdUpdateMemory: {
 		Name:        CmdUpdateMemory,
 		Description: "Update an existing memory.",
+	},
+	CmdPolicyList: {
+		Name:        CmdPolicyList,
+		Description: "List ingestion policies.",
+	},
+	CmdPolicyAdd: {
+		Name:        CmdPolicyAdd,
+		Description: "Add an ingestion policy.",
+	},
+	CmdPolicyRemove: {
+		Name:        CmdPolicyRemove,
+		Description: "Remove an ingestion policy by ID.",
 	},
 	CmdRunJob: {
 		Name:        CmdRunJob,

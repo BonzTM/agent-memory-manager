@@ -112,50 +112,50 @@ type SourceSpan struct {
 
 // Memory is a canonical typed durable memory record.
 type Memory struct {
-	ID               string            `json:"id"`
-	Type             MemoryType        `json:"type"`
-	Scope            Scope             `json:"scope"`
-	ProjectID        string            `json:"project_id,omitempty"`
-	SessionID        string            `json:"session_id,omitempty"`
-	AgentID          string            `json:"agent_id,omitempty"`
-	Subject          string            `json:"subject,omitempty"`
-	Body             string            `json:"body"`
-	TightDescription string            `json:"tight_description"`
-	Confidence       float64           `json:"confidence"`
-	Importance       float64           `json:"importance"`
-	PrivacyLevel     PrivacyLevel      `json:"privacy_level"`
-	Status           MemoryStatus      `json:"status"`
-	ObservedAt       *time.Time        `json:"observed_at,omitempty"`
-	CreatedAt        time.Time         `json:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at"`
-	ValidFrom        *time.Time        `json:"valid_from,omitempty"`
-	ValidTo          *time.Time        `json:"valid_to,omitempty"`
-	LastConfirmedAt  *time.Time        `json:"last_confirmed_at,omitempty"`
-	Supersedes       string            `json:"supersedes,omitempty"`
-	SupersededBy     string            `json:"superseded_by,omitempty"`
-	SupersededAt     *time.Time        `json:"superseded_at,omitempty"`
-	SourceEventIDs   []string          `json:"source_event_ids,omitempty"`
-	SourceSummaryIDs []string          `json:"source_summary_ids,omitempty"`
-	SourceArtifactIDs []string         `json:"source_artifact_ids,omitempty"`
-	Tags             []string          `json:"tags,omitempty"`
-	Metadata         map[string]string `json:"metadata,omitempty"`
-	Freshness        float64           `json:"freshness,omitempty"` // computed at query time
+	ID                string            `json:"id"`
+	Type              MemoryType        `json:"type"`
+	Scope             Scope             `json:"scope"`
+	ProjectID         string            `json:"project_id,omitempty"`
+	SessionID         string            `json:"session_id,omitempty"`
+	AgentID           string            `json:"agent_id,omitempty"`
+	Subject           string            `json:"subject,omitempty"`
+	Body              string            `json:"body"`
+	TightDescription  string            `json:"tight_description"`
+	Confidence        float64           `json:"confidence"`
+	Importance        float64           `json:"importance"`
+	PrivacyLevel      PrivacyLevel      `json:"privacy_level"`
+	Status            MemoryStatus      `json:"status"`
+	ObservedAt        *time.Time        `json:"observed_at,omitempty"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
+	ValidFrom         *time.Time        `json:"valid_from,omitempty"`
+	ValidTo           *time.Time        `json:"valid_to,omitempty"`
+	LastConfirmedAt   *time.Time        `json:"last_confirmed_at,omitempty"`
+	Supersedes        string            `json:"supersedes,omitempty"`
+	SupersededBy      string            `json:"superseded_by,omitempty"`
+	SupersededAt      *time.Time        `json:"superseded_at,omitempty"`
+	SourceEventIDs    []string          `json:"source_event_ids,omitempty"`
+	SourceSummaryIDs  []string          `json:"source_summary_ids,omitempty"`
+	SourceArtifactIDs []string          `json:"source_artifact_ids,omitempty"`
+	Tags              []string          `json:"tags,omitempty"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
+	Freshness         float64           `json:"freshness,omitempty"` // computed at query time
 }
 
 // Claim is a structured atomic assertion linked to a memory.
 type Claim struct {
-	ID              string     `json:"id"`
-	MemoryID        string     `json:"memory_id"`
-	SubjectEntityID string     `json:"subject_entity_id,omitempty"`
-	Predicate       string     `json:"predicate"`
-	ObjectValue     string     `json:"object_value,omitempty"`
-	ObjectEntityID  string     `json:"object_entity_id,omitempty"`
-	Confidence      float64    `json:"confidence"`
-	SourceEventID   string     `json:"source_event_id,omitempty"`
-	SourceSummaryID string     `json:"source_summary_id,omitempty"`
-	ObservedAt      *time.Time `json:"observed_at,omitempty"`
-	ValidFrom       *time.Time `json:"valid_from,omitempty"`
-	ValidTo         *time.Time `json:"valid_to,omitempty"`
+	ID              string            `json:"id"`
+	MemoryID        string            `json:"memory_id"`
+	SubjectEntityID string            `json:"subject_entity_id,omitempty"`
+	Predicate       string            `json:"predicate"`
+	ObjectValue     string            `json:"object_value,omitempty"`
+	ObjectEntityID  string            `json:"object_entity_id,omitempty"`
+	Confidence      float64           `json:"confidence"`
+	SourceEventID   string            `json:"source_event_id,omitempty"`
+	SourceSummaryID string            `json:"source_summary_id,omitempty"`
+	ObservedAt      *time.Time        `json:"observed_at,omitempty"`
+	ValidFrom       *time.Time        `json:"valid_from,omitempty"`
+	ValidTo         *time.Time        `json:"valid_to,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
 }
 
@@ -279,19 +279,19 @@ type DescribeResult struct {
 
 // RepairReport contains results from an integrity check or repair.
 type RepairReport struct {
-	Checked   int      `json:"checked"`
-	Issues    int      `json:"issues"`
-	Fixed     int      `json:"fixed"`
-	Details   []string `json:"details,omitempty"`
+	Checked int      `json:"checked"`
+	Issues  int      `json:"issues"`
+	Fixed   int      `json:"fixed"`
+	Details []string `json:"details,omitempty"`
 }
 
 // StatusResult contains system status information.
 type StatusResult struct {
-	DBPath      string `json:"db_path"`
-	Initialized bool   `json:"initialized"`
-	EventCount  int64  `json:"event_count"`
-	MemoryCount int64  `json:"memory_count"`
-	SummaryCount int64 `json:"summary_count"`
-	EpisodeCount int64 `json:"episode_count"`
-	EntityCount  int64 `json:"entity_count"`
+	DBPath       string `json:"db_path"`
+	Initialized  bool   `json:"initialized"`
+	EventCount   int64  `json:"event_count"`
+	MemoryCount  int64  `json:"memory_count"`
+	SummaryCount int64  `json:"summary_count"`
+	EpisodeCount int64  `json:"episode_count"`
+	EntityCount  int64  `json:"entity_count"`
 }

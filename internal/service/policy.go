@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/joshd-04/agent-memory-manager/internal/core"
 )
@@ -35,6 +37,33 @@ func (s *AMMService) CheckIngestionPolicy(ctx context.Context, event *core.Event
 	}
 
 	return "full", nil
+}
+
+func (s *AMMService) ListPolicies(ctx context.Context) ([]core.IngestionPolicy, error) {
+	return s.repo.ListIngestionPolicies(ctx)
+}
+
+func (s *AMMService) AddPolicy(ctx context.Context, policy *core.IngestionPolicy) (*core.IngestionPolicy, error) {
+	if policy.ID == "" {
+		policy.ID = generateID("pol_")
+	}
+	now := time.Now().UTC()
+	if policy.CreatedAt.IsZero() {
+		policy.CreatedAt = now
+	}
+	policy.UpdatedAt = now
+
+	if err := s.repo.InsertIngestionPolicy(ctx, policy); err != nil {
+		return nil, fmt.Errorf("insert ingestion policy: %w", err)
+	}
+	return policy, nil
+}
+
+func (s *AMMService) RemovePolicy(ctx context.Context, id string) error {
+	if err := s.repo.DeleteIngestionPolicy(ctx, id); err != nil {
+		return fmt.Errorf("delete ingestion policy: %w", err)
+	}
+	return nil
 }
 
 // ShouldIngest returns whether the event should be written and whether it should trigger

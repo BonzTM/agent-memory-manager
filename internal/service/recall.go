@@ -113,7 +113,10 @@ func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.
 	limit := opts.Limit
 	var candidates []ScoringCandidate
 
-	memories, _ := s.repo.SearchMemories(ctx, query, limit*2)
+	memories, err := s.repo.SearchMemories(ctx, query, limit*2)
+	if err != nil {
+		return nil, fmt.Errorf("search memories: %w", err)
+	}
 	for i, m := range memories {
 		if m.Status == core.MemoryStatusSuperseded {
 			continue
@@ -121,12 +124,18 @@ func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.
 		candidates = append(candidates, MemoryToCandidate(m, i))
 	}
 
-	summaries, _ := s.repo.SearchSummaries(ctx, query, limit)
+	summaries, err := s.repo.SearchSummaries(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search summaries: %w", err)
+	}
 	for i, sm := range summaries {
 		candidates = append(candidates, SummaryToCandidate(sm, i))
 	}
 
-	episodes, _ := s.repo.SearchEpisodes(ctx, query, limit)
+	episodes, err := s.repo.SearchEpisodes(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search episodes: %w", err)
+	}
 	for i, ep := range episodes {
 		candidates = append(candidates, EpisodeToCandidate(ep, i))
 	}
@@ -186,7 +195,10 @@ func (s *AMMService) recallProject(ctx context.Context, query string, opts core.
 func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.RecallOptions, sctx ScoringContext) ([]core.RecallItem, error) {
 	var candidates []ScoringCandidate
 
-	memories, _ := s.repo.SearchMemories(ctx, query, opts.Limit*2)
+	memories, err := s.repo.SearchMemories(ctx, query, opts.Limit*2)
+	if err != nil {
+		return nil, fmt.Errorf("search memories: %w", err)
+	}
 	for i, m := range memories {
 		if m.Status == core.MemoryStatusSuperseded {
 			continue
@@ -194,19 +206,19 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 		candidates = append(candidates, MemoryToCandidate(m, i))
 	}
 
-	// Also search entities and return them directly.
 	items := scoreAndConvert(candidates, sctx)
 	entities, err := s.repo.SearchEntities(ctx, query, opts.Limit)
-	if err == nil {
-		for i, ent := range entities {
-			items = append(items, core.RecallItem{
-				ID:               ent.ID,
-				Kind:             "entity",
-				Type:             ent.Type,
-				Score:            positionScore(i),
-				TightDescription: ent.Description,
-			})
-		}
+	if err != nil {
+		return nil, fmt.Errorf("search entities: %w", err)
+	}
+	for i, ent := range entities {
+		items = append(items, core.RecallItem{
+			ID:               ent.ID,
+			Kind:             "entity",
+			Type:             ent.Type,
+			Score:            positionScore(i),
+			TightDescription: ent.Description,
+		})
 	}
 	return items, nil
 }
@@ -229,7 +241,10 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 	perType := opts.Limit
 	var candidates []ScoringCandidate
 
-	memories, _ := s.repo.SearchMemories(ctx, query, perType*2)
+	memories, err := s.repo.SearchMemories(ctx, query, perType*2)
+	if err != nil {
+		return nil, fmt.Errorf("search memories: %w", err)
+	}
 	for i, m := range memories {
 		if m.Status == core.MemoryStatusSuperseded {
 			continue
@@ -237,17 +252,26 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 		candidates = append(candidates, MemoryToCandidate(m, i))
 	}
 
-	summaries, _ := s.repo.SearchSummaries(ctx, query, perType)
+	summaries, err := s.repo.SearchSummaries(ctx, query, perType)
+	if err != nil {
+		return nil, fmt.Errorf("search summaries: %w", err)
+	}
 	for i, sm := range summaries {
 		candidates = append(candidates, SummaryToCandidate(sm, i))
 	}
 
-	episodes, _ := s.repo.SearchEpisodes(ctx, query, perType)
+	episodes, err := s.repo.SearchEpisodes(ctx, query, perType)
+	if err != nil {
+		return nil, fmt.Errorf("search episodes: %w", err)
+	}
 	for i, ep := range episodes {
 		candidates = append(candidates, EpisodeToCandidate(ep, i))
 	}
 
-	events, _ := s.repo.SearchEvents(ctx, query, perType)
+	events, err := s.repo.SearchEvents(ctx, query, perType)
+	if err != nil {
+		return nil, fmt.Errorf("search events: %w", err)
+	}
 	for i, evt := range events {
 		candidates = append(candidates, EventToCandidate(evt, i))
 	}

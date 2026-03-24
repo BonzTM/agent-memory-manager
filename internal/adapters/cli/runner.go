@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
 	v1 "github.com/joshd-04/agent-memory-manager/internal/contracts/v1"
+	"github.com/joshd-04/agent-memory-manager/internal/core"
 	"github.com/joshd-04/agent-memory-manager/internal/runtime"
 )
 
@@ -90,10 +90,29 @@ func Run(args []string) error {
 	case "history":
 		return runHistory(cmdArgs)
 	case "memory":
-		if len(cmdArgs) > 0 && cmdArgs[0] == "show" {
-			return runGetMemory(cmdArgs[1:])
+		if len(cmdArgs) > 0 {
+			switch cmdArgs[0] {
+			case "show":
+				return runGetMemory(cmdArgs[1:])
+			case "update":
+				return runUpdateMemory(cmdArgs[1:])
+			}
 		}
 		return runGetMemory(cmdArgs)
+	case "policy":
+		if len(cmdArgs) == 0 {
+			return fmt.Errorf("policy requires subcommand: list, add, remove")
+		}
+		switch cmdArgs[0] {
+		case "list":
+			return runPolicyList(cmdArgs[1:])
+		case "add":
+			return runPolicyAdd(cmdArgs[1:])
+		case "remove":
+			return runPolicyRemove(cmdArgs[1:])
+		default:
+			return fmt.Errorf("unknown policy subcommand: %s", cmdArgs[0])
+		}
 	case "jobs":
 		if len(cmdArgs) > 0 && cmdArgs[0] == "run" {
 			return runJob(cmdArgs[1:])
@@ -131,7 +150,9 @@ func parseFlags(args []string) map[string]string {
 	for i := 0; i < len(args); i++ {
 		if strings.HasPrefix(args[i], "--") {
 			key := strings.TrimPrefix(args[i], "--")
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+			if boolFlags[key] {
+				flags[key] = "true"
+			} else if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
 				flags[key] = args[i+1]
 				i++
 			} else {
@@ -142,11 +163,19 @@ func parseFlags(args []string) map[string]string {
 	return flags
 }
 
+var boolFlags = map[string]bool{
+	"json":  true,
+	"check": true,
+}
+
 func positionalArgs(args []string) []string {
 	var pos []string
 	for i := 0; i < len(args); i++ {
 		if strings.HasPrefix(args[i], "--") {
-			i++ // skip value
+			key := strings.TrimPrefix(args[i], "--")
+			if !boolFlags[key] && i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+				i++
+			}
 			continue
 		}
 		pos = append(pos, args[i])
@@ -168,7 +197,11 @@ Commands:
   describe                Describe items
   expand                  Expand an item
   history                 Query raw history
-  memory [show] <id>      Show a memory
+	memory [show] <id>      Show a memory
+	memory update <id>      Update a memory
+	policy list             List ingestion policies
+	policy add              Add an ingestion policy
+	policy remove <id>      Remove an ingestion policy
   jobs run <kind>         Run a maintenance job
   explain-recall          Explain why something surfaced
   repair                  Run integrity checks/repairs
@@ -510,6 +543,140 @@ func runGetMemory(args []string) error {
 		return err
 	}
 	success("memory", mem)
+	return nil
+}
+
+func runUpdateMemory(args []string) error {
+	flags := parseFlags(args)
+	pos := positionalArgs(args)
+	if len(pos) == 0 {
+		fail("memory_update", "VALIDATION_ERROR", "memory ID required")
+		return fmt.Errorf("memory ID required")
+	}
+
+	if err := v1.ValidateUpdateMemory(&v1.UpdateMemoryRequest{
+		ID:               pos[0],
+		Body:             flags["body"],
+		TightDescription: flags["tight"],
+		Type:             flags["type"],
+		Scope:            flags["scope"],
+		Status:           flags["status"],
+	}); err != nil {
+		fail("memory_update", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		fail("memory_update", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	existing, err := svc.GetMemory(ctx, pos[0])
+	if err != nil {
+		fail("memory_update", "GET_ERROR", err.Error())
+		return err
+	}
+
+	if v := flags["body"]; v != "" {
+		existing.Body = v
+	}
+	if v := flags["tight"]; v != "" {
+		existing.TightDescription = v
+	}
+	if v := flags["status"]; v != "" {
+		existing.Status = core.MemoryStatus(v)
+	}
+	if v := flags["type"]; v != "" {
+		existing.Type = core.MemoryType(v)
+	}
+	if v := flags["scope"]; v != "" {
+		existing.Scope = core.Scope(v)
+	}
+
+	updated, err := svc.UpdateMemory(ctx, existing)
+	if err != nil {
+		fail("memory_update", "UPDATE_ERROR", err.Error())
+		return err
+	}
+	success("memory_update", updated)
+	return nil
+}
+
+func runPolicyList(_ []string) error {
+	svc, cleanup, err := getService()
+	if err != nil {
+		fail("policy_list", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	policies, err := svc.ListPolicies(ctx)
+	if err != nil {
+		fail("policy_list", "LIST_ERROR", err.Error())
+		return err
+	}
+	success("policy_list", policies)
+	return nil
+}
+
+func runPolicyAdd(args []string) error {
+	flags := parseFlags(args)
+
+	req := &v1.PolicyAddRequest{
+		PatternType: flags["pattern-type"],
+		Pattern:     flags["pattern"],
+		Mode:        flags["mode"],
+	}
+	if err := v1.ValidatePolicyAdd(req); err != nil {
+		fail("policy_add", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		fail("policy_add", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	result, err := svc.AddPolicy(ctx, &core.IngestionPolicy{
+		PatternType: req.PatternType,
+		Pattern:     req.Pattern,
+		Mode:        req.Mode,
+	})
+	if err != nil {
+		fail("policy_add", "ADD_ERROR", err.Error())
+		return err
+	}
+	success("policy_add", result)
+	return nil
+}
+
+func runPolicyRemove(args []string) error {
+	pos := positionalArgs(args)
+	if len(pos) == 0 {
+		fail("policy_remove", "VALIDATION_ERROR", "policy ID required")
+		return fmt.Errorf("policy ID required")
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		fail("policy_remove", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	if err := svc.RemovePolicy(ctx, pos[0]); err != nil {
+		fail("policy_remove", "REMOVE_ERROR", err.Error())
+		return err
+	}
+	success("policy_remove", map[string]string{"id": pos[0], "status": "removed"})
 	return nil
 }
 

@@ -506,6 +506,162 @@ func TestRebuildFTSIndexes(t *testing.T) {
 	}
 }
 
+func TestSearchMemories_FTS5SpecialCharacters(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := repo.InsertMemory(ctx, &core.Memory{
+		ID: "mem_fts_special", Type: core.MemoryTypeFact, Scope: core.ScopeGlobal,
+		Body: "Josh prefers concise replies by default", TightDescription: "Prefers concise replies",
+		Confidence: 0.9, Importance: 0.7, PrivacyLevel: core.PrivacyPrivate,
+		Status: core.MemoryStatusActive, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	queries := []struct {
+		name  string
+		query string
+	}{
+		{"double quotes", `"concise replies"`},
+		{"parentheses", "concise (replies)"},
+		{"asterisk", "concise*"},
+		{"hyphen as operator", "concise -replies"},
+		{"caret", "concise ^replies"},
+		{"plus", "concise + replies"},
+		{"colon column filter", "body:concise"},
+		{"curly braces", "{concise}"},
+		{"brackets", "[concise]"},
+		{"pipe", "concise | replies"},
+		{"bare NOT", "concise NOT replies"},
+		{"bare OR", "concise OR replies"},
+		{"bare AND", "concise AND replies"},
+		{"empty string", ""},
+		{"only spaces", "   "},
+		{"single special char", "*"},
+		{"mixed special", `he said "hello" (world) -test`},
+	}
+
+	for _, tt := range queries {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := repo.SearchMemories(ctx, tt.query, 10)
+			if err != nil {
+				t.Errorf("SearchMemories(%q) returned error: %v", tt.query, err)
+			}
+		})
+	}
+
+	results, err := repo.SearchMemories(ctx, "concise replies", 10)
+	if err != nil {
+		t.Fatalf("SearchMemories(clean query) error: %v", err)
+	}
+	if len(results) == 0 {
+		t.Error("expected at least one result for 'concise replies'")
+	}
+}
+
+func TestSearchEvents_FTS5SpecialCharacters(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := repo.InsertEvent(ctx, &core.Event{
+		ID: "evt_fts_special", Kind: "message_user", SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate, Content: "discussing memory architecture",
+		OccurredAt: now, IngestedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, q := range []string{`"memory"`, "memory (arch)", "memory*", "", "   "} {
+		_, err := repo.SearchEvents(ctx, q, 10)
+		if err != nil {
+			t.Errorf("SearchEvents(%q) returned error: %v", q, err)
+		}
+	}
+}
+
+func TestSearchSummaries_FTS5SpecialCharacters(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := repo.InsertSummary(ctx, &core.Summary{
+		ID: "sum_fts_special", Kind: "leaf", Scope: core.ScopeGlobal,
+		Body: "summary about deployment", TightDescription: "Deployment summary",
+		PrivacyLevel: core.PrivacyPrivate, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, q := range []string{`"deployment"`, "deploy*", "(summary)", "", "   "} {
+		_, err := repo.SearchSummaries(ctx, q, 10)
+		if err != nil {
+			t.Errorf("SearchSummaries(%q) returned error: %v", q, err)
+		}
+	}
+}
+
+func TestSearchEpisodes_FTS5SpecialCharacters(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := repo.InsertEpisode(ctx, &core.Episode{
+		ID: "epi_fts_special", Title: "Auth Debugging", Summary: "Debugged auth module",
+		TightDescription: "Auth debugging session", Scope: core.ScopeGlobal,
+		Importance: 0.5, PrivacyLevel: core.PrivacyPrivate, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, q := range []string{`"auth"`, "auth*", "(debugging)", "", "   "} {
+		_, err := repo.SearchEpisodes(ctx, q, 10)
+		if err != nil {
+			t.Errorf("SearchEpisodes(%q) returned error: %v", q, err)
+		}
+	}
+}
+
+func TestSanitizeFTS5Query(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"simple query", "simple query"},
+		{"", ""},
+		{"   ", ""},
+		{`"quoted"`, "quoted"},
+		{"paren(thesis)", "paren thesis"},
+		{"ast*risk", "ast risk"},
+		{"hy-phen", "hy phen"},
+		{"col:on", "col on"},
+		{"ca^ret", "ca ret"},
+		{"{curly}", "curly"},
+		{"[bracket]", "bracket"},
+		{"pi|pe", "pi pe"},
+		{"pl+us", "pl us"},
+		{"NOT bare", "bare"},
+		{"OR bare", "bare"},
+		{"AND bare", "bare"},
+		{"concise NOT replies", "concise replies"},
+		{"hello OR world", "hello world"},
+		{"a AND b", "a b"},
+		{"NOTIFY me", "NOTIFY me"},
+		{"   extra   spaces   ", "extra spaces"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := sanitizeFTS5Query(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeFTS5Query(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRecallHistory(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
@@ -546,4 +702,82 @@ func TestRecallHistory(t *testing.T) {
 	}
 	// Regardless of exact cleanup count, the function should work without error.
 	_ = remaining
+}
+
+func TestListIngestionPolicies(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	policies := []*core.IngestionPolicy{
+		{
+			ID:          "pol_list1",
+			PatternType: "source",
+			Pattern:     "svc-*",
+			Mode:        "full",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		{
+			ID:          "pol_list2",
+			PatternType: "session",
+			Pattern:     "sess-*",
+			Mode:        "read_only",
+			CreatedAt:   now.Add(time.Second),
+			UpdatedAt:   now.Add(time.Second),
+		},
+	}
+
+	for _, policy := range policies {
+		if err := repo.InsertIngestionPolicy(ctx, policy); err != nil {
+			t.Fatalf("insert policy %s: %v", policy.ID, err)
+		}
+	}
+
+	got, err := repo.ListIngestionPolicies(ctx)
+	if err != nil {
+		t.Fatalf("list ingestion policies: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 policies, got %d", len(got))
+	}
+
+	idSet := map[string]bool{}
+	for _, p := range got {
+		idSet[p.ID] = true
+	}
+	if !idSet["pol_list1"] || !idSet["pol_list2"] {
+		t.Fatalf("expected both policies returned, got ids=%v", idSet)
+	}
+}
+
+func TestDeleteIngestionPolicy(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	policy := &core.IngestionPolicy{
+		ID:          "pol_delete1",
+		PatternType: "source",
+		Pattern:     "noisy-*",
+		Mode:        "ignore",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	if err := repo.InsertIngestionPolicy(ctx, policy); err != nil {
+		t.Fatalf("insert policy: %v", err)
+	}
+	if err := repo.DeleteIngestionPolicy(ctx, policy.ID); err != nil {
+		t.Fatalf("delete policy: %v", err)
+	}
+
+	_, err := repo.GetIngestionPolicy(ctx, policy.ID)
+	if err == nil {
+		t.Fatal("expected get ingestion policy to fail after delete")
+	}
+
+	if err := repo.DeleteIngestionPolicy(ctx, "pol_missing"); err == nil {
+		t.Fatal("expected deleting missing ingestion policy to fail")
+	}
 }

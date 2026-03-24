@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	v1 "github.com/joshd-04/agent-memory-manager/internal/contracts/v1"
 	"github.com/joshd-04/agent-memory-manager/internal/core"
 	"github.com/joshd-04/agent-memory-manager/internal/runtime"
 )
@@ -56,6 +57,9 @@ func tools() []Tool {
 		{Name: "amm_status", Description: "Get system status", InputSchema: emptySchema()},
 		{Name: "amm_ingest_transcript", Description: "Bulk ingest a sequence of events", InputSchema: transcriptSchema()},
 		{Name: "amm_update_memory", Description: "Update an existing memory", InputSchema: updateMemorySchema()},
+		{Name: "amm_policy_list", Description: "List all ingestion policies", InputSchema: policyListSchema()},
+		{Name: "amm_policy_add", Description: "Add an ingestion policy", InputSchema: policyAddSchema()},
+		{Name: "amm_policy_remove", Description: "Remove an ingestion policy by ID", InputSchema: policyRemoveSchema()},
 	}
 }
 
@@ -227,6 +231,36 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
 		}
 		result, callErr = svc.UpdateMemory(ctx, &mem)
+
+	case "amm_policy_list":
+		result, callErr = svc.ListPolicies(ctx)
+
+	case "amm_policy_add":
+		var policy core.IngestionPolicy
+		if err := json.Unmarshal(params.Arguments, &policy); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
+		if err := v1.ValidatePolicyAdd(&v1.PolicyAddRequest{
+			PatternType: policy.PatternType,
+			Pattern:     policy.Pattern,
+			Mode:        policy.Mode,
+			Metadata:    policy.Metadata,
+		}); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
+		result, callErr = svc.AddPolicy(ctx, &policy)
+
+	case "amm_policy_remove":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+		}
+		callErr = svc.RemovePolicy(ctx, args.ID)
+		if callErr == nil {
+			result = map[string]string{"id": args.ID, "status": "removed"}
+		}
 
 	case "amm_jobs_run":
 		var args struct {
@@ -454,6 +488,32 @@ func updateMemorySchema() map[string]interface{} {
 			"body":              map[string]string{"type": "string", "description": "Updated memory body"},
 			"tight_description": map[string]string{"type": "string", "description": "Updated one-line summary"},
 			"status":            map[string]string{"type": "string", "description": "Memory status: active, superseded, archived, retracted"},
+		},
+		"required": []string{"id"},
+	}
+}
+
+func policyListSchema() map[string]interface{} {
+	return emptySchema()
+}
+
+func policyAddSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"pattern_type": map[string]string{"type": "string", "description": "Pattern type: session, source, surface, agent, project, runtime"},
+			"pattern":      map[string]string{"type": "string", "description": "Glob pattern"},
+			"mode":         map[string]string{"type": "string", "description": "Ingestion mode: full, read_only, ignore"},
+		},
+		"required": []string{"pattern_type", "pattern", "mode"},
+	}
+}
+
+func policyRemoveSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"id": map[string]string{"type": "string", "description": "Policy ID to remove"},
 		},
 		"required": []string{"id"},
 	}

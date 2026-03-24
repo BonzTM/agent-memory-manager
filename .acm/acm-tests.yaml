@@ -17,7 +17,7 @@ tests:
   - id: go-build
     summary: Ensure both CLI entrypoints build
     command:
-      argv: ["go", "build", "-tags", "fts5", "./cmd/amm", "./cmd/amm-mcp"]
+      argv: ["/usr/local/go/bin/go", "build", "-tags", "fts5", "./cmd/amm", "./cmd/amm-mcp"]
       env:
         CGO_ENABLED: "1"
         GOCACHE: "/tmp/agent-memory-manager-gocache"
@@ -31,7 +31,7 @@ tests:
   - id: go-test-smoke
     summary: Run core and runtime tests on every verification pass
     command:
-      argv: ["go", "test", "-tags", "fts5", "./internal/core/...", "./internal/runtime/...", "-count=1"]
+      argv: ["/usr/local/go/bin/go", "test", "-tags", "fts5", "./internal/core/...", "./internal/runtime/...", "-count=1"]
       env:
         CGO_ENABLED: "1"
         GOCACHE: "/tmp/agent-memory-manager-gocache"
@@ -44,7 +44,7 @@ tests:
   - id: go-test-changed
     summary: Run go test for packages touched by the current verify diff
     command:
-      argv: ["go", "test", "-tags", "fts5", "./...", "-count=1", "-short"]
+      argv: ["/usr/local/go/bin/go", "test", "-tags", "fts5", "./...", "-count=1", "-short"]
       env:
         CGO_ENABLED: "1"
         GOCACHE: "/tmp/agent-memory-manager-gocache"
@@ -58,7 +58,7 @@ tests:
   - id: go-test-full
     summary: Run the full Go test suite for product changes
     command:
-      argv: ["go", "test", "-tags", "fts5", "./..."]
+      argv: ["/usr/local/go/bin/go", "test", "-tags", "fts5", "./..."]
       env:
         CGO_ENABLED: "1"
         GOFLAGS: "-count=1"
@@ -87,6 +87,20 @@ tests:
     select:
       phases: ["execute", "review"]
       changed_paths_any: ["cmd/**", "internal/**", "go.mod", "go.sum", "spec/**"]
+    expected:
+      exit_code: 0
+
+  - id: go-coverage-gate
+    summary: Enforce minimum 85% test coverage across all testable packages
+    command:
+      argv: ["bash", "-c", "scripts/coverage-gate.sh"]
+      env:
+        CGO_ENABLED: "1"
+        GOCACHE: "/tmp/agent-memory-manager-gocache"
+        GOMODCACHE: "/tmp/agent-memory-manager-gomodcache"
+    select:
+      phases: ["review"]
+      changed_paths_any: ["cmd/**", "internal/**", "go.mod", "go.sum"]
     expected:
       exit_code: 0
 

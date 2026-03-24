@@ -64,6 +64,8 @@ type Repository interface {
 	// Ingestion Policies
 	InsertIngestionPolicy(ctx context.Context, policy *IngestionPolicy) error
 	GetIngestionPolicy(ctx context.Context, id string) (*IngestionPolicy, error)
+	ListIngestionPolicies(ctx context.Context) ([]IngestionPolicy, error)
+	DeleteIngestionPolicy(ctx context.Context, id string) error
 	MatchIngestionPolicy(ctx context.Context, patternType, value string) (*IngestionPolicy, error)
 
 	// Recall History (for repetition suppression)

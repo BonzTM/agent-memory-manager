@@ -3,16 +3,17 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/joshd-04/agent-memory-manager/internal/core"
 )
 
 const (
-	compressChunkSize     = 10
-	compressMaxEvents     = 200
-	leafBodyMaxChars      = 1000
-	sessionBodyMaxChars   = 2000
+	compressChunkSize   = 10
+	compressMaxEvents   = 200
+	leafBodyMaxChars    = 1000
+	sessionBodyMaxChars = 2000
 )
 
 // CompressHistory creates leaf summaries over recent event spans.
@@ -65,17 +66,18 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 
 		// Collect event IDs and build body.
 		eventIDs := make([]string, 0, len(chunk))
-		var bodyBuilder []byte
+		var bodyBuilder strings.Builder
 		for _, evt := range chunk {
 			eventIDs = append(eventIDs, evt.ID)
-			if len(bodyBuilder) > 0 {
-				bodyBuilder = append(bodyBuilder, '\n')
+			if bodyBuilder.Len() > 0 {
+				bodyBuilder.WriteByte('\n')
 			}
-			bodyBuilder = append(bodyBuilder, evt.Content...)
-			if len(bodyBuilder) > leafBodyMaxChars {
-				bodyBuilder = bodyBuilder[:leafBodyMaxChars]
-				break
-			}
+			bodyBuilder.WriteString(evt.Content)
+		}
+
+		body, err := s.summarizer.Summarize(ctx, bodyBuilder.String(), leafBodyMaxChars)
+		if err != nil {
+			return created, fmt.Errorf("summarize leaf body: %w", err)
 		}
 
 		// Determine scope.
@@ -86,12 +88,12 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 
 		now := time.Now().UTC()
 		summary := &core.Summary{
-			ID:    generateID("sum_"),
-			Kind:  "leaf",
-			Scope: scope,
-			ProjectID:    projectID,
+			ID:               generateID("sum_"),
+			Kind:             "leaf",
+			Scope:            scope,
+			ProjectID:        projectID,
 			Title:            fmt.Sprintf("Events %s to %s", firstTime, lastTime),
-			Body:             string(bodyBuilder),
+			Body:             body,
 			TightDescription: fmt.Sprintf("Summary of %d events from %s to %s", len(chunk), firstTime, lastTime),
 			PrivacyLevel:     core.PrivacyPrivate,
 			SourceSpan: core.SourceSpan{

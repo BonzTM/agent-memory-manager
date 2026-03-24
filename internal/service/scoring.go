@@ -19,15 +19,15 @@ import (
 // We scale each positive weight by 0.75/0.57 ≈ 1.3158 so they sum to ~0.75.
 // The penalty stays at -0.10 (not renormalized — it is a deduction, not a share).
 const (
-	wLexical             = 0.25 * (0.75 / 0.57)  // ~0.3289
-	wEntityOverlap       = 0.18 * (0.75 / 0.57)  // ~0.2368
-	wScopeFit            = 0.10 * (0.75 / 0.57)  // ~0.1316
-	wRecency             = 0.08 * (0.75 / 0.57)  // ~0.1053
-	wImportance          = 0.07 * (0.75 / 0.57)  // ~0.0921
-	wTemporalValidity    = 0.05 * (0.75 / 0.57)  // ~0.0658
-	wStructuralProximity = 0.05 * (0.75 / 0.57)  // ~0.0658
-	wFreshness           = 0.04 * (0.75 / 0.57)  // ~0.0526
-	wRepetitionPenalty   = 0.10                    // deducted
+	wLexical             = 0.25 * (0.75 / 0.57) // ~0.3289
+	wEntityOverlap       = 0.18 * (0.75 / 0.57) // ~0.2368
+	wScopeFit            = 0.10 * (0.75 / 0.57) // ~0.1316
+	wRecency             = 0.08 * (0.75 / 0.57) // ~0.1053
+	wImportance          = 0.07 * (0.75 / 0.57) // ~0.0921
+	wTemporalValidity    = 0.05 * (0.75 / 0.57) // ~0.0658
+	wStructuralProximity = 0.05 * (0.75 / 0.57) // ~0.0658
+	wFreshness           = 0.04 * (0.75 / 0.57) // ~0.0526
+	wRepetitionPenalty   = 0.10                 // deducted
 )
 
 // recencyHalfLifeDays controls exponential decay for the recency signal.
@@ -36,10 +36,10 @@ const recencyHalfLifeDays = 14.0
 // ScoringContext holds the query context for scoring.
 type ScoringContext struct {
 	Query         string
-	QueryEntities []string          // extracted from query
+	QueryEntities []string // extracted from query
 	ProjectID     string
 	SessionID     string
-	RecentRecalls map[string]bool   // item IDs shown recently
+	RecentRecalls map[string]bool // item IDs shown recently
 	Now           time.Time
 }
 

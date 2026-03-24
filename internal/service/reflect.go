@@ -9,35 +9,6 @@ import (
 	"github.com/joshd-04/agent-memory-manager/internal/core"
 )
 
-// phraseCue maps a memory type to case-insensitive trigger phrases.
-type phraseCue struct {
-	memType core.MemoryType
-	phrases []string
-}
-
-var phraseCues = []phraseCue{
-	{
-		memType: core.MemoryTypePreference,
-		phrases: []string{"prefer", "always use", "don't like", "i like", "i want", "default to", "rather than"},
-	},
-	{
-		memType: core.MemoryTypeDecision,
-		phrases: []string{"decided", "we agreed", "going with", "chosen", "settled on", "will use", "switching to"},
-	},
-	{
-		memType: core.MemoryTypeFact,
-		phrases: []string{"is a", "works by", "uses", "requires", "depends on", "supports", "runs on"},
-	},
-	{
-		memType: core.MemoryTypeOpenLoop,
-		phrases: []string{"todo", "need to", "should look into", "haven't figured out", "remains", "still need", "tbd", "unresolved"},
-	},
-	{
-		memType: core.MemoryTypeConstraint,
-		phrases: []string{"must not", "never", "always must", "required to", "cannot", "forbidden"},
-	},
-}
-
 // Reflect scans unprocessed events and creates candidate durable memories.
 // Returns the number of memories created.
 func (s *AMMService) Reflect(ctx context.Context) (int, error) {
@@ -101,25 +72,14 @@ func (s *AMMService) Reflect(ctx context.Context) (int, error) {
 			continue
 		}
 
-		contentLower := strings.ToLower(evt.Content)
-
-		// Find the first matching cue type.
-		var matchedType core.MemoryType
-		for _, cue := range phraseCues {
-			for _, phrase := range cue.phrases {
-				if strings.Contains(contentLower, phrase) {
-					matchedType = cue.memType
-					break
-				}
-			}
-			if matchedType != "" {
-				break
-			}
+		candidates, err := s.summarizer.ExtractMemoryCandidate(ctx, evt.Content)
+		if err != nil {
+			return created, fmt.Errorf("extract memory candidate: %w", err)
 		}
-
-		if matchedType == "" {
+		if len(candidates) == 0 {
 			continue
 		}
+		candidate := candidates[0]
 
 		// Determine scope from event.
 		scope := core.ScopeGlobal
@@ -129,24 +89,15 @@ func (s *AMMService) Reflect(ctx context.Context) (int, error) {
 			projectID = evt.ProjectID
 		}
 
-		// Build body: truncate to 500 chars.
-		body := evt.Content
-		if len(body) > 500 {
-			body = body[:500]
-		}
-
-		// Build tight description: first sentence or first 100 chars.
-		tight := extractTightDescription(evt.Content, 100)
-
 		now := time.Now().UTC()
 		mem := &core.Memory{
 			ID:               generateID("mem_"),
-			Type:             matchedType,
+			Type:             candidate.Type,
 			Scope:            scope,
 			ProjectID:        projectID,
-			Body:             body,
-			TightDescription: tight,
-			Confidence:       0.6,
+			Body:             candidate.Body,
+			TightDescription: candidate.TightDescription,
+			Confidence:       candidate.Confidence,
 			Importance:       0.5,
 			PrivacyLevel:     core.PrivacyPrivate,
 			Status:           core.MemoryStatusActive,
@@ -158,6 +109,11 @@ func (s *AMMService) Reflect(ctx context.Context) (int, error) {
 		if err := s.repo.InsertMemory(ctx, mem); err != nil {
 			return created, fmt.Errorf("insert reflected memory: %w", err)
 		}
+
+		if err := s.linkEntitiesToMemory(ctx, mem.ID, evt.Content); err != nil {
+			return created, fmt.Errorf("link reflected entities: %w", err)
+		}
+
 		created++
 	}
 
@@ -178,6 +134,49 @@ func (s *AMMService) Reflect(ctx context.Context) (int, error) {
 	}
 
 	return created, nil
+}
+
+func (s *AMMService) linkEntitiesToMemory(ctx context.Context, memoryID, content string) error {
+	names := ExtractEntities(content)
+	for _, name := range names {
+		entity, err := s.findOrCreateEntity(ctx, name)
+		if err != nil {
+			return err
+		}
+		if entity == nil {
+			continue
+		}
+		if err := s.repo.LinkMemoryEntity(ctx, memoryID, entity.ID, "mentioned"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *AMMService) findOrCreateEntity(ctx context.Context, canonicalName string) (*core.Entity, error) {
+	existing, err := s.repo.SearchEntities(ctx, canonicalName, 50)
+	if err != nil {
+		return nil, err
+	}
+	for i := range existing {
+		if strings.EqualFold(existing[i].CanonicalName, canonicalName) {
+			entity := existing[i]
+			return &entity, nil
+		}
+	}
+
+	now := time.Now().UTC()
+	entity := &core.Entity{
+		ID:            generateID("ent_"),
+		Type:          "topic",
+		CanonicalName: canonicalName,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := s.repo.InsertEntity(ctx, entity); err != nil {
+		return nil, err
+	}
+	return entity, nil
 }
 
 // extractTightDescription returns the first sentence or first maxLen characters

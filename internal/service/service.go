@@ -25,16 +25,21 @@ func generateID(prefix string) string {
 
 // AMMService implements core.Service with business logic on top of a Repository.
 type AMMService struct {
-	repo   core.Repository
-	dbPath string
+	repo       core.Repository
+	dbPath     string
+	summarizer core.Summarizer
 }
 
 // Compile-time check that AMMService implements core.Service.
 var _ core.Service = (*AMMService)(nil)
 
 // New creates a new AMMService backed by the given repository.
-func New(repo core.Repository, dbPath string) *AMMService {
-	return &AMMService{repo: repo, dbPath: dbPath}
+func New(repo core.Repository, dbPath string, summarizer ...core.Summarizer) *AMMService {
+	selected := core.Summarizer(&HeuristicSummarizer{})
+	if len(summarizer) > 0 && summarizer[0] != nil {
+		selected = summarizer[0]
+	}
+	return &AMMService{repo: repo, dbPath: dbPath, summarizer: selected}
 }
 
 // Init initializes the database: creates the parent directory, opens the DB,

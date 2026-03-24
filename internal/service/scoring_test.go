@@ -228,8 +228,8 @@ func TestScoreItem_Importance(t *testing.T) {
 		{0.7, 0.7},
 		{0.0, 0.0},
 		{1.0, 1.0},
-		{-0.5, 0.0},  // clamped
-		{1.5, 1.0},   // clamped
+		{-0.5, 0.0}, // clamped
+		{1.5, 1.0},  // clamped
 	}
 	for _, tc := range tests {
 		item := ScoringCandidate{Importance: tc.input}
@@ -302,15 +302,15 @@ func TestScoreItem_FinalScore(t *testing.T) {
 	}
 
 	item := ScoringCandidate{
-		ID:         "item_1",
-		Kind:       "memory",
-		Subject:    "Alice project notes",
-		Body:       "Alice mentioned something important",
-		Importance: 0.7,
-		ProjectID:  "proj_1",
-		Scope:      core.ScopeProject,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:          "item_1",
+		Kind:        "memory",
+		Subject:     "Alice project notes",
+		Body:        "Alice mentioned something important",
+		Importance:  0.7,
+		ProjectID:   "proj_1",
+		Scope:       core.ScopeProject,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 		FTSPosition: 0,
 	}
 

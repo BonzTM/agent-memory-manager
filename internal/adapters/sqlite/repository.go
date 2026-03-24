@@ -13,9 +13,31 @@ import (
 	"github.com/joshd-04/agent-memory-manager/internal/core"
 )
 
-// generateID creates a prefixed random hex ID (e.g., "evt_" + 12 random hex chars).
-// Panics if crypto/rand fails, which only happens when the OS entropy source
-// is broken — an unrecoverable condition where continuing would be unsafe.
+// sanitizeFTS5Query strips FTS5 operators and special characters from user input
+// so it can be safely passed to a MATCH clause. Returns plain space-separated tokens.
+func sanitizeFTS5Query(query string) string {
+	var cleaned strings.Builder
+	for _, r := range query {
+		switch r {
+		case '"', '(', ')', '*', '-', '^', '{', '}', '[', ']', '|', '+', ':':
+			cleaned.WriteRune(' ')
+		default:
+			cleaned.WriteRune(r)
+		}
+	}
+
+	words := strings.Fields(cleaned.String())
+	var filtered []string
+	for _, w := range words {
+		upper := strings.ToUpper(w)
+		if upper == "NOT" || upper == "OR" || upper == "AND" || upper == "NEAR" {
+			continue
+		}
+		filtered = append(filtered, w)
+	}
+	return strings.Join(filtered, " ")
+}
+
 func generateID(prefix string) string {
 	b := make([]byte, 6)
 	if _, err := rand.Read(b); err != nil {
@@ -255,6 +277,10 @@ func (r *SQLiteRepository) ListEvents(ctx context.Context, opts core.ListEventsO
 }
 
 func (r *SQLiteRepository) SearchEvents(ctx context.Context, query string, limit int) ([]core.Event, error) {
+	q := sanitizeFTS5Query(query)
+	if q == "" {
+		return nil, nil
+	}
 	rows, err := r.QueryContext(ctx, `
 		SELECT e.id, e.kind, e.source_system, COALESCE(e.surface,''), COALESCE(e.session_id,''),
 			COALESCE(e.project_id,''), COALESCE(e.agent_id,''), COALESCE(e.actor_type,''),
@@ -263,7 +289,7 @@ func (r *SQLiteRepository) SearchEvents(ctx context.Context, query string, limit
 		FROM events_fts f JOIN events e ON f.id = e.id
 		WHERE events_fts MATCH ?
 		ORDER BY rank
-		LIMIT ?`, query, defaultLimit(limit))
+		LIMIT ?`, q, defaultLimit(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -383,6 +409,10 @@ func (r *SQLiteRepository) ListSummaries(ctx context.Context, opts core.ListSumm
 }
 
 func (r *SQLiteRepository) SearchSummaries(ctx context.Context, query string, limit int) ([]core.Summary, error) {
+	q := sanitizeFTS5Query(query)
+	if q == "" {
+		return nil, nil
+	}
 	rows, err := r.QueryContext(ctx, `
 		SELECT s.id, s.kind, s.scope, COALESCE(s.project_id,''), COALESCE(s.session_id,''),
 			COALESCE(s.agent_id,''), COALESCE(s.title,''), s.body, s.tight_description,
@@ -390,7 +420,7 @@ func (r *SQLiteRepository) SearchSummaries(ctx context.Context, query string, li
 		FROM summaries_fts f JOIN summaries s ON f.id = s.id
 		WHERE summaries_fts MATCH ?
 		ORDER BY rank
-		LIMIT ?`, query, defaultLimit(limit))
+		LIMIT ?`, q, defaultLimit(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -604,12 +634,16 @@ func (r *SQLiteRepository) ListMemories(ctx context.Context, opts core.ListMemor
 }
 
 func (r *SQLiteRepository) SearchMemories(ctx context.Context, query string, limit int) ([]core.Memory, error) {
+	sq := sanitizeFTS5Query(query)
+	if sq == "" {
+		return nil, nil
+	}
 	q := "SELECT " + prefixCols("m", memoryCols) + `
 		FROM memories_fts f JOIN memories m ON f.id = m.id
 		WHERE memories_fts MATCH ?
 		ORDER BY rank
 		LIMIT ?`
-	rows, err := r.QueryContext(ctx, q, query, defaultLimit(limit))
+	rows, err := r.QueryContext(ctx, q, sq, defaultLimit(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -1004,12 +1038,16 @@ func (r *SQLiteRepository) ListEpisodes(ctx context.Context, opts core.ListEpiso
 }
 
 func (r *SQLiteRepository) SearchEpisodes(ctx context.Context, query string, limit int) ([]core.Episode, error) {
+	sq := sanitizeFTS5Query(query)
+	if sq == "" {
+		return nil, nil
+	}
 	q := "SELECT " + prefixCols("e", episodeCols) + `
 		FROM episodes_fts f JOIN episodes e ON f.id = e.id
 		WHERE episodes_fts MATCH ?
 		ORDER BY rank
 		LIMIT ?`
-	rows, err := r.QueryContext(ctx, q, query, defaultLimit(limit))
+	rows, err := r.QueryContext(ctx, q, sq, defaultLimit(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -1207,6 +1245,46 @@ func (r *SQLiteRepository) GetIngestionPolicy(ctx context.Context, id string) (*
 	p.CreatedAt = strToTime(createdAt)
 	p.UpdatedAt = strToTime(updatedAt)
 	return &p, nil
+}
+
+func (r *SQLiteRepository) ListIngestionPolicies(ctx context.Context) ([]core.IngestionPolicy, error) {
+	rows, err := r.QueryContext(ctx, `
+		SELECT id, pattern_type, pattern, mode, metadata_json, created_at, updated_at
+		FROM ingestion_policies
+		ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var policies []core.IngestionPolicy
+	for rows.Next() {
+		var p core.IngestionPolicy
+		var metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&p.ID, &p.PatternType, &p.Pattern, &p.Mode, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		p.Metadata = unmarshalMap(metaJSON)
+		p.CreatedAt = strToTime(createdAt)
+		p.UpdatedAt = strToTime(updatedAt)
+		policies = append(policies, p)
+	}
+	return policies, rows.Err()
+}
+
+func (r *SQLiteRepository) DeleteIngestionPolicy(ctx context.Context, id string) error {
+	res, err := r.ExecContext(ctx, `DELETE FROM ingestion_policies WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("ingestion policy not found: %s", id)
+	}
+	return nil
 }
 
 func (r *SQLiteRepository) MatchIngestionPolicy(ctx context.Context, patternType, value string) (*core.IngestionPolicy, error) {

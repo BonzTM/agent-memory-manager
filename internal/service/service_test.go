@@ -416,3 +416,73 @@ func TestRepairFixIndexes(t *testing.T) {
 		t.Error("expected recall results after FTS index rebuild")
 	}
 }
+
+func TestAddPolicy(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	policy := &core.IngestionPolicy{
+		PatternType: "source",
+		Pattern:     "svc-*",
+		Mode:        "full",
+	}
+
+	created, err := svc.AddPolicy(ctx, policy)
+	if err != nil {
+		t.Fatalf("AddPolicy: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatal("expected AddPolicy to generate ID")
+	}
+	if created.CreatedAt.IsZero() || created.UpdatedAt.IsZero() {
+		t.Fatal("expected AddPolicy to set timestamps")
+	}
+}
+
+func TestListPolicies(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	_, err := svc.AddPolicy(ctx, &core.IngestionPolicy{PatternType: "source", Pattern: "svc-*", Mode: "full"})
+	if err != nil {
+		t.Fatalf("AddPolicy 1: %v", err)
+	}
+	_, err = svc.AddPolicy(ctx, &core.IngestionPolicy{PatternType: "session", Pattern: "sess-*", Mode: "read_only"})
+	if err != nil {
+		t.Fatalf("AddPolicy 2: %v", err)
+	}
+
+	policies, err := svc.ListPolicies(ctx)
+	if err != nil {
+		t.Fatalf("ListPolicies: %v", err)
+	}
+	if len(policies) != 2 {
+		t.Fatalf("expected 2 policies, got %d", len(policies))
+	}
+}
+
+func TestRemovePolicy(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	created, err := svc.AddPolicy(ctx, &core.IngestionPolicy{PatternType: "source", Pattern: "noisy-*", Mode: "ignore"})
+	if err != nil {
+		t.Fatalf("AddPolicy: %v", err)
+	}
+
+	if err := svc.RemovePolicy(ctx, created.ID); err != nil {
+		t.Fatalf("RemovePolicy: %v", err)
+	}
+
+	policies, err := svc.ListPolicies(ctx)
+	if err != nil {
+		t.Fatalf("ListPolicies: %v", err)
+	}
+	if len(policies) != 0 {
+		t.Fatalf("expected 0 policies after remove, got %d", len(policies))
+	}
+
+	if err := svc.RemovePolicy(ctx, "pol_missing"); err == nil {
+		t.Fatal("expected RemovePolicy on missing id to fail")
+	}
+}

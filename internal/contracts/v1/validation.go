@@ -69,6 +69,21 @@ var (
 		"merge_duplicates":       true,
 		"cleanup_recall_history": true,
 	}
+
+	validPolicyPatternTypes = map[string]bool{
+		"session": true,
+		"source":  true,
+		"surface": true,
+		"agent":   true,
+		"project": true,
+		"runtime": true,
+	}
+
+	validPolicyModes = map[string]bool{
+		"full":      true,
+		"read_only": true,
+		"ignore":    true,
+	}
 )
 
 // ValidateIngestEvent validates an IngestEventRequest.
@@ -257,8 +272,36 @@ func ValidateUpdateMemory(req *UpdateMemoryRequest) error {
 	if strings.TrimSpace(req.ID) == "" {
 		return fmt.Errorf("id is required")
 	}
+	if req.Type != "" && !validMemoryTypes[req.Type] {
+		return fmt.Errorf("invalid type %q: must be one of identity, preference, fact, decision, episode, todo, relationship, procedure, constraint, incident, artifact, summary, active_context, open_loop, assumption, contradiction", req.Type)
+	}
+	if req.Scope != "" && !validScopes[req.Scope] {
+		return fmt.Errorf("invalid scope %q: must be one of global, project, session", req.Scope)
+	}
 	if req.Status != "" && !validMemoryStatuses[req.Status] {
 		return fmt.Errorf("invalid status %q: must be one of active, superseded, archived, retracted", req.Status)
+	}
+	return nil
+}
+
+func ValidatePolicyAdd(req *PolicyAddRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.PatternType) == "" {
+		return fmt.Errorf("pattern_type is required")
+	}
+	if !validPolicyPatternTypes[req.PatternType] {
+		return fmt.Errorf("invalid pattern_type %q: must be one of session, source, surface, agent, project, runtime", req.PatternType)
+	}
+	if strings.TrimSpace(req.Pattern) == "" {
+		return fmt.Errorf("pattern is required")
+	}
+	if strings.TrimSpace(req.Mode) == "" {
+		return fmt.Errorf("mode is required")
+	}
+	if !validPolicyModes[req.Mode] {
+		return fmt.Errorf("invalid mode %q: must be one of full, read_only, ignore", req.Mode)
 	}
 	return nil
 }

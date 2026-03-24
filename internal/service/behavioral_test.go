@@ -6,10 +6,10 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-	"path/filepath"
 
 	"github.com/joshd-04/agent-memory-manager/internal/adapters/sqlite"
 	"github.com/joshd-04/agent-memory-manager/internal/core"
@@ -154,6 +154,82 @@ func TestReflect_SkipsDuplicates(t *testing.T) {
 	}
 	if second != 0 {
 		t.Errorf("expected second Reflect to create 0 (dedup), got %d", second)
+	}
+}
+
+func TestReflect_CreatesEntities(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	evt, err := svc.IngestEvent(ctx, &core.Event{
+		Kind:         "message",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "We decided Josh should own Kubernetes rollout planning.",
+		OccurredAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := svc.Reflect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created < 1 {
+		t.Fatalf("expected at least 1 memory, got %d", created)
+	}
+
+	entities, err := svc.repo.ListEntities(ctx, core.ListEntitiesOptions{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entityByName := make(map[string]core.Entity, len(entities))
+	for _, ent := range entities {
+		entityByName[strings.ToLower(ent.CanonicalName)] = ent
+	}
+
+	if _, ok := entityByName["josh"]; !ok {
+		t.Fatalf("expected entity Josh to be created; got entities=%v", entities)
+	}
+	if _, ok := entityByName["kubernetes"]; !ok {
+		t.Fatalf("expected entity Kubernetes to be created; got entities=%v", entities)
+	}
+
+	mems, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reflected *core.Memory
+	for i := range mems {
+		for _, srcID := range mems[i].SourceEventIDs {
+			if srcID == evt.ID {
+				reflected = &mems[i]
+				break
+			}
+		}
+		if reflected != nil {
+			break
+		}
+	}
+	if reflected == nil {
+		t.Fatal("expected reflected memory linked to ingested event")
+	}
+
+	linkedEntities, err := svc.repo.GetMemoryEntities(ctx, reflected.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkedNames := make(map[string]bool, len(linkedEntities))
+	for _, ent := range linkedEntities {
+		linkedNames[strings.ToLower(ent.CanonicalName)] = true
+	}
+	if !linkedNames["josh"] {
+		t.Fatalf("expected reflected memory to be linked to Josh; got linked=%v", linkedEntities)
+	}
+	if !linkedNames["kubernetes"] {
+		t.Fatalf("expected reflected memory to be linked to Kubernetes; got linked=%v", linkedEntities)
 	}
 }
 

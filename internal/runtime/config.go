@@ -39,9 +39,9 @@ type PrivacyConfig struct {
 
 // MaintenanceConfig controls automatic maintenance jobs.
 type MaintenanceConfig struct {
-	AutoReflect             bool `json:"auto_reflect"`
-	AutoCompress            bool `json:"auto_compress"`
-	AutoConsolidate         bool `json:"auto_consolidate"`
+	AutoReflect              bool `json:"auto_reflect"`
+	AutoCompress             bool `json:"auto_compress"`
+	AutoConsolidate          bool `json:"auto_consolidate"`
 	AutoDetectContradictions bool `json:"auto_detect_contradictions"`
 }
 
@@ -65,9 +65,9 @@ func DefaultConfig() Config {
 			DefaultPrivacy: "private",
 		},
 		Maintenance: MaintenanceConfig{
-			AutoReflect:             true,
-			AutoCompress:            true,
-			AutoConsolidate:         true,
+			AutoReflect:              true,
+			AutoCompress:             true,
+			AutoConsolidate:          true,
 			AutoDetectContradictions: true,
 		},
 	}

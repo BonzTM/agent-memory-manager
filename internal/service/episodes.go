@@ -92,11 +92,11 @@ func (s *AMMService) FormEpisodes(ctx context.Context) (int, error) {
 		// Timestamps: events come back from ListEvents in DESC order (newest first),
 		// so evts[0] is the newest and evts[len-1] is the oldest.
 		startedAt := evts[len(evts)-1].OccurredAt // oldest
-		endedAt := evts[0].OccurredAt              // newest
+		endedAt := evts[0].OccurredAt             // newest
 
 		episode := &core.Episode{
-			ID:    generateID("ep_"),
-			Title: fmt.Sprintf("Session %s", sessionID),
+			ID:      generateID("ep_"),
+			Title:   fmt.Sprintf("Session %s", sessionID),
 			Summary: summary,
 			TightDescription: fmt.Sprintf("Episode from session %s: %d events covering %s",
 				sessionID, len(evts), snippets),

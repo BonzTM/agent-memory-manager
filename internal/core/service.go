@@ -35,6 +35,12 @@ type Service interface {
 	// UpdateMemory updates an existing memory.
 	UpdateMemory(ctx context.Context, memory *Memory) (*Memory, error)
 
+	ListPolicies(ctx context.Context) ([]IngestionPolicy, error)
+
+	AddPolicy(ctx context.Context, policy *IngestionPolicy) (*IngestionPolicy, error)
+
+	RemovePolicy(ctx context.Context, id string) error
+
 	// GetSummary retrieves a single summary by ID.
 	GetSummary(ctx context.Context, id string) (*Summary, error)
 

@@ -221,9 +221,42 @@ type UpdateMemoryRequest struct {
 	ID               string            `json:"id"`
 	Body             string            `json:"body,omitempty"`
 	TightDescription string            `json:"tight_description,omitempty"`
+	Type             string            `json:"type,omitempty"`
+	Scope            string            `json:"scope,omitempty"`
 	Status           string            `json:"status,omitempty"`
 	Confidence       *float64          `json:"confidence,omitempty"`
 	Importance       *float64          `json:"importance,omitempty"`
 	Tags             []string          `json:"tags,omitempty"`
 	Metadata         map[string]string `json:"metadata,omitempty"`
+}
+
+type PolicyListRequest struct{}
+
+type PolicyListResponse struct {
+	Policies []PolicyResponse `json:"policies"`
+}
+
+type PolicyAddRequest struct {
+	PatternType string            `json:"pattern_type"`
+	Pattern     string            `json:"pattern"`
+	Mode        string            `json:"mode"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+type PolicyAddResponse struct {
+	ID string `json:"id"`
+}
+
+type PolicyRemoveRequest struct {
+	ID string `json:"id"`
+}
+
+type PolicyResponse struct {
+	ID          string            `json:"id"`
+	PatternType string            `json:"pattern_type"`
+	Pattern     string            `json:"pattern"`
+	Mode        string            `json:"mode"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	CreatedAt   string            `json:"created_at"`
+	UpdatedAt   string            `json:"updated_at"`
 }
