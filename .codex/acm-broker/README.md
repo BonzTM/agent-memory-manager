@@ -31,12 +31,11 @@ The template is documentation only. It does not add hidden hooks or special Code
 Codex can drive the full ACM workflow directly:
 
 1. `acm context`
-2. `acm fetch` only when you need to hydrate specific plan, task, memory, or pointer content
+2. `acm fetch` only when you need to hydrate specific plan, task, or pointer content
 3. `acm work` for multi-step tasks or when governed file scope expands through `plan.discovered_paths`
 4. `acm verify` for deterministic repo-defined checks
 5. `acm review` when a workflow gate needs one review record or runnable signoff gate
 6. `acm done`
-7. `acm memory`
 
 Keep the command boundary explicit:
 

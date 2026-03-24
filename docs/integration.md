@@ -25,6 +25,35 @@ Use this page for the shared model, then jump to the runtime-specific companion 
 
 ---
 
+## Runtime-Neutral Operating Contract
+
+Regardless of runtime, the default AMM operating loop is:
+
+1. **Recall on entry.** At task start, repo switch, or resume after interruption, ask AMM for a thin recall packet.
+2. **Expand only what matters.** Use `amm_expand` / `amm expand` only for the items needed to make the current decision.
+3. **Remember only durable knowledge.** Explicitly commit stable decisions, preferences, facts, and constraints. Let transient chat flow stay in history.
+4. **Keep capture truthful.** If a runtime cannot expose a hook or transcript surface, do not pretend it can; fall back to explicit recall and lightweight lifecycle markers.
+5. **Keep workers external.** `reflect`, `compress_history`, and heavier jobs stay outside the runtime boundary.
+
+If a repo also uses ACM, keep the responsibility split explicit: ACM governs task workflow (`context`, `work`, `verify`, `review`, `done`), while AMM governs durable memory (`recall`, `expand`, `remember`, `jobs run`).
+
+## Minimum Capture Contract
+
+Every runtime integration does not need perfect fidelity, but it should stay consistent about the fields it *does* produce:
+
+| Field | Why it matters | Fallback guidance |
+|---|---|---|
+| `source_system` | Distinguishes Claude, Codex, OpenCode, OpenClaw, etc. | Always set a truthful runtime identifier. |
+| `session_id` | Keeps recall and repetition penalties session-aware | Omit only when the runtime truly provides no stable session identity. |
+| `project_id` | Prevents project memory bleed | Set whenever the runtime knows the active repo/project. |
+| `occurred_at` | Preserves temporal ordering | Let AMM timestamp on ingest only when the runtime does not provide it. |
+| `content` | Stores the actual user/tool/assistant payload | Keep it thin and faithful to the exposed surface. |
+| `metadata` | Captures hook names, tool names, transcript provenance, or fallbacks | Prefer precise metadata over overloading `content`. |
+
+When a field is unavailable, document the fallback behavior in the runtime guide instead of inventing fake completeness.
+
+---
+
 ## The Capture Loop
 
 The ideal integration flow (per the spec, section 33.1):

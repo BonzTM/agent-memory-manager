@@ -90,6 +90,17 @@ tests:
     expected:
       exit_code: 0
 
+  - id: amm-onboarding-surfaces
+    summary: Ensure active onboarding surfaces point durable memory at AMM
+    command:
+      argv: ["python3", "scripts/check-amm-onboarding.py"]
+    select:
+      phases: ["execute", "review"]
+      changed_paths_any:
+        ["AGENTS.md", "CLAUDE.md", "CODEX.md", "README.md", "docs/**", "examples/**", ".claude/**", ".codex/**", ".opencode/**", ".acm/**", "scripts/**"]
+    expected:
+      exit_code: 0
+
   - id: repo-diff-check
     summary: Catch whitespace errors and unresolved merge markers in tracked changes
     command:

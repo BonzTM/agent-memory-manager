@@ -1,12 +1,12 @@
 # Claude Command Pack - acm-broker
 
 This folder provides Claude Code slash-command prompts that mirror the `acm-broker` workflow.
-The intended default story is the modular core loop: `context`, `work`, `verify`, `done`, and `memory`, with `fetch` and `review` as supporting surfaces.
+The intended default story is the modular core loop: `context`, `work`, `verify`, and `done`, with `fetch` and `review` as supporting surfaces.
 
 ## Commands
 
 - `/acm-context [phase] <task text>`
-  - requests `context` first, surfaces hard rules, and returns plans, memories, and any known initial scope.
+  - requests `context` first, surfaces hard rules, and returns plans and any known initial scope.
   - includes a `fetch` step with `receipt_id` shorthand (or explicit keys when needed).
 - `/acm-work <receipt_id-or-plan_key> <tasks-json> [plan-json]`
   - publishes plan/task updates through `work`; use `plan-json` when you need named-plan metadata such as `title` or `mode`.
@@ -19,10 +19,8 @@ The intended default story is the modular core loop: `context`, `work`, `verify`
 - `/acm-done <receipt_id-or-plan_key> [comma-separated files] -- <outcome summary>`
   - runs completion reporting after verification is satisfied and applies effective-scope plus configured completion-gate semantics. Omit the file segment to rely on the baseline-derived delta; if that detected delta is empty, the closeout is effectively no-file.
   - built-in governance files such as repo-root `AGENTS.md`, `CLAUDE.md`, and canonical `.acm/**` contract files are already treated as managed completion scope.
-- `/acm-memory {"receipt_id":"...","category":"gotcha","subject":"...","content":"...","evidence_paths":["path/to/file.go"],"evidence_keys":["project:path#anchor"]}`
-  - proposes durable memory in broker format and requires evidence through `evidence_paths` or `evidence_keys` inside effective scope.
 
-For compact rediscovery of archived plans, receipts, runs, and durable memories, use direct CLI `acm history`, setting `--entity work` when you need work-specific `--scope` or `--kind` filters, then `acm fetch` the returned `fetch_keys`. The default command pack does not add a dedicated `/acm-history` slash command.
+For compact rediscovery of archived plans, receipts, runs, and durable results, use direct CLI `acm history`, setting `--entity work` when you need work-specific `--scope` or `--kind` filters, then `acm fetch` the returned `fetch_keys`. The default command pack does not add a dedicated `/acm-history` slash command.
 For runtime and setup diagnostics, use direct CLI `acm status`. It reports active project/backend state, loaded ACM files, integrations, missing setup, and an optional simple `context` preview.
 For rendered ACM artifacts, use the backend-only `export` surface through `acm run --in assets/requests/export.json` or `acm-mcp invoke --tool export --in assets/requests/mcp_export.json`; the slash-command pack intentionally does not add `/acm-export`. For quick human-facing CLI output, `context`, `fetch`, `history`, and `status` also support `--format json|markdown` with optional `--out-file` / `--force`, and those flags lower to the same backend export path.
 When you change rules, tags, tests, workflows, onboarding, or tool-surface behavior, run direct CLI `acm sync --mode working_tree --insert-new-candidates` and `acm health --include-details` before `/acm-done`.

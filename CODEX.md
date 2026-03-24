@@ -1,38 +1,38 @@
-# CLAUDE.md
+# CODEX.md
 
-Claude companion for amm (Agent Memory Manager). Primary contract is `AGENTS.md`.
+Codex companion for amm (Agent Memory Manager). Primary contract is `AGENTS.md`.
 
 ## Source Of Truth
 
 - Follow `AGENTS.md` first.
-- Use this file only to map Claude's workflow to the repo contract.
+- Use this file only to map Codex's workflow to the repo contract.
 - If this file conflicts with `AGENTS.md`, `AGENTS.md` wins.
 
-## Claude Workflow
+## Codex Workflow
 
 For non-trivial work (multi-step, multi-file, or governed), use the ACM task loop:
 
-1. Start with `/acm-context [phase] <task>`.
+1. Start with `acm context ...`.
 2. Read the returned hard rules before touching files.
-3. Use `/acm-work ...` when the task is multi-step, spans multiple files, or needs durable state.
-4. Use `/acm-verify ...` before `/acm-done ...` for any code, config, schema, or executable behavior change.
-5. Use `/acm-done ...` to close the task; include changed files for file-backed work.
+3. Use `acm work ...` when the task is multi-step, spans multiple files, or needs durable state.
+4. Use `acm verify ...` before `acm done ...` for any code, config, schema, or executable behavior change.
+5. Use `acm done ...` to close the task; include changed files for file-backed work when practical, or let ACM derive the delta.
 
 Trivial single-file fixes can skip the ACM ceremony.
 
-If the task changes rules, tags, tests, workflows, or tool-surface behavior, run direct CLI `acm sync --mode working_tree --insert-new-candidates` and `acm health --include-details` before `/acm-done`.
+If the task changes rules, tags, tests, workflows, or tool-surface behavior, run direct CLI `acm sync --mode working_tree --insert-new-candidates` and `acm health --include-details` before `acm done`.
 
 If you need historical discovery after compaction, use direct CLI `acm history` then `acm fetch`.
 If you need runtime or setup diagnostics, use direct CLI `acm status`.
 
 ## Memory (AMM)
 
-AMM is available via MCP tools in this session. Query it early and often — see `AGENTS.md` § Memory for the full contract.
+AMM is available via MCP tools and CLI (`amm`). Query it early and often — see `AGENTS.md` § Memory for the full contract.
 
-- **At session start**, run `amm recall|amm_recall` with mode `ambient` to load relevant prior context.
-- **Before decisions or when uncertain**, query `amm recall|amm_recall` — don't guess when AMM might already know.
-- **After stable decisions or lessons learned**, commit them with `amm remember|amm_remember`.
-- Use `amm expand|amm_expand` to expand thin recall items when you need more detail.
+- **At session start**, run `amm recall --mode ambient` or `amm_recall` to load relevant prior context.
+- **Before decisions or when uncertain**, query AMM — don't guess when it might already know.
+- **After stable decisions or lessons learned**, commit them with `amm remember` or `amm_remember`.
+- Use `amm expand` / `amm_expand` to expand thin recall items when you need more detail.
 
 ## amm-Specific Notes
 

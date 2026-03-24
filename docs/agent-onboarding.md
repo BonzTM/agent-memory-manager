@@ -2,7 +2,7 @@
 
 This is a step-by-step guide designed to be handed to an AI agent so it can set up amm for its user with minimal human intervention.
 
-This onboarding guide is **Claude Code-first**, because this repo ships the most complete end-to-end reference hooks there. If you are wiring amm into another runtime, use the runtime-specific companions alongside this guide:
+Use Steps 1-2 for every runtime. After that, choose the runtime-specific path that matches the user's host. This repo still ships the richest end-to-end reference hooks for Claude Code, but the operating model is intentionally cross-runtime:
 
 - [Codex Integration](codex-integration.md)
 - [Hermes-Agent Integration](hermes-agent-integration.md)
@@ -10,6 +10,18 @@ This onboarding guide is **Claude Code-first**, because this repo ships the most
 - [OpenCode Integration](opencode-integration.md)
 
 In every runtime, the worker model stays the same: amm background jobs are external `amm jobs run <kind>` calls against the amm database, not a built-in scheduler.
+
+## Runtime-Neutral Operating Contract
+
+Once amm is installed, the agent should follow the same durable-memory rules regardless of runtime:
+
+1. **Recall first.** At task start, repo switch, or resume after interruption, query AMM with `amm_recall` or `amm recall --mode ambient`.
+2. **Expand on demand.** If AMM returns thin recall items, expand only the items needed for the current task.
+3. **Remember only stable knowledge.** Use `amm_remember` or `amm remember` for decisions, preferences, constraints, and other high-confidence facts that should survive the current session.
+4. **Let capture stay honest.** Hooks and plugins should capture what the runtime can really expose, not what we wish it exposed.
+5. **Keep workers external.** Reflection, compression, and heavier maintenance stay outside the runtime boundary as `amm jobs run <kind>` calls.
+
+If the repo also uses ACM, the agent should use ACM for task workflow and AMM for durable memory.
 
 ---
 
@@ -70,7 +82,23 @@ Expected output from `status` should show `initialized: true` with all counts at
 
 ---
 
-## Step 3: Configure for Claude Code
+## Choose Your Runtime Path
+
+After Steps 1-2, pick the path that matches the user's host:
+
+| Runtime | Start here | What you get |
+|---|---|---|
+| Claude Code | Continue below with Steps 3-7 | Full MCP + public hook reference implementation |
+| Codex | [Codex Integration](codex-integration.md) | MCP + Codex hooks + transcript-aware closeout |
+| OpenCode | [OpenCode Integration](opencode-integration.md) | MCP + local plugin glue + explicit recall |
+| OpenClaw | [OpenClaw Integration](openclaw-integration.md) | MCP sidecar + native hooks |
+| Hermes-Agent | [Hermes-Agent Integration](hermes-agent-integration.md) | MCP + sidecar/helper-script pattern |
+
+The Claude sections below remain the most detailed copy-paste walkthrough, but they are no longer the only mental model.
+
+---
+
+## Step 3: Configure for Claude Code (full reference path)
 
 ### 3a: Register the MCP Server
 
@@ -433,7 +461,7 @@ Run through this checklist to confirm everything is working:
 
 ## Troubleshooting
 
-**`amm: command not found`** -- Ensure `~/.local/bin` is on your PATH, or use the full path to the binary.
+**`amm: command not found`** -- Ensure the install location is on your PATH (for this guide, `/usr/local/bin`), or use the full path to the binary.
 
 **`database is locked`** -- SQLite allows only one writer at a time. If a hook and a cron job collide, one will briefly block. This is normal and resolves automatically. If it persists, check for zombie processes.
 

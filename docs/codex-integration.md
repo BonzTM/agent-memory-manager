@@ -17,6 +17,18 @@ Use four pieces together:
 3. **Repo instructions** for when the agent should consult or write memory deliberately
 4. **External worker scheduling** for `reflect`, `compress_history`, and the heavier maintenance jobs
 
+## Default operator contract
+
+Codex operators should keep the hot path simple:
+
+- ask AMM for ambient recall at task start, repo switch, or resume
+- expand only the items needed for the current task
+- explicitly remember only stable, high-confidence knowledge
+- let hooks capture prompts/session metadata/tool history where Codex actually exposes those surfaces
+- keep `amm jobs run <kind>` external to the Codex runtime
+
+If the repo also uses ACM, ACM owns task workflow and AMM owns durable memory.
+
 ## 1. Build and Initialize amm
 
 ```bash

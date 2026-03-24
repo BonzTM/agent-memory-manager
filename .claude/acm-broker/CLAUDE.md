@@ -4,15 +4,14 @@ Use this companion when running `acm-broker` workflow inside Claude Code.
 
 ## Required Order
 
-1. Run `/acm-context [phase] ...` first to request `context`.
+1. For non-trivial work, run `/acm-context [phase] ...` first to request `context`. Trivial single-file fixes can skip the ACM ceremony.
 2. Follow the returned `context` rules block (or rule pointers) as hard constraints.
-3. Use `fetch` with `receipt_id` shorthand (or explicit keys) only when a returned plan, task, memory, or pointer key actually needs to be hydrated.
+3. Use `fetch` with `receipt_id` shorthand (or explicit keys) only when a returned plan, task, or pointer key actually needs to be hydrated.
 4. Execute work; if the receipt is stale, too narrow, or the task changed materially, request `context` again with better task text.
 5. If plan tracking is active, post `work` updates using `/acm-work ...` with `receipt_id` or `plan_key`, plus optional `plan` metadata such as `title` when needed, and use `tasks`. For status checks, send zero tasks.
 6. When code changes are involved, run `/acm-verify ...` before completion reporting.
 7. Use `/acm-review ...` when a workflow gate needs a single review outcome such as `review:cross-llm`; prefer `{"run":true}` when the repo workflow defines a runnable review gate.
 8. On completion, run `/acm-done ...`. Include changed files for file-backed work when you know them; otherwise let ACM derive the delta from the receipt baseline. When that detected delta is empty, the closeout is effectively no-file.
-9. If a durable discovery was made, run `/acm-memory ...` with evidence from effective scope, preferring governed `evidence_paths` unless you already have exact fetched pointer keys.
 
 ## Contract Notes
 

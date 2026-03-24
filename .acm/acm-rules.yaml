@@ -7,8 +7,8 @@ rules:
   # --- Starter rules (from acm init) ---
 
   - id: rule_startup_context
-    summary: Start every task with context.
-    content: Retrieve context before reading or editing repo files, then follow every hard rule returned in the receipt.
+    summary: Start non-trivial work with context.
+    content: For multi-step, multi-file, or governed work, retrieve context before reading or editing repo files, then follow every hard rule returned in the receipt. Trivial single-file fixes can skip the ACM ceremony.
     enforcement: hard
     tags: [startup, context]
 
@@ -37,8 +37,8 @@ rules:
     tags: [verification, quality]
 
   - id: rule_done
-    summary: Finish every task with done.
-    content: Report every changed file for file-backed work when you know them and give a concise outcome summary. ACM can derive the task delta from the receipt baseline; when that detected delta is empty, the closeout is effectively no-file.
+    summary: Finish non-trivial work with done.
+    content: For work that used the ACM task loop, report every changed file for file-backed work when you know them and give a concise outcome summary. ACM can derive the task delta from the receipt baseline; when that detected delta is empty, the closeout is effectively no-file.
     enforcement: hard
     tags: [completion, audit]
 

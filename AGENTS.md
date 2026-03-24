@@ -42,7 +42,9 @@ internal/
 - **Contracts and schema stay in lockstep.** Changes to payloads or commands must update `internal/contracts/v1`, `spec/v1` schemas, and tests together.
 - **CLI and MCP expose the same commands.** Parity is mandatory.
 
-## Required Task Loop
+## Task Loop
+
+For non-trivial work (multi-step, multi-file, or governed), follow the ACM task loop:
 
 1. Read this file and the human task.
 2. Run `acm context` before opening or editing project files.
@@ -51,13 +53,32 @@ internal/
 5. When a task spans multiple steps, multiple files, or a likely handoff, create or update `work`.
 6. If code, config, schema, or other executable behavior changes, run `verify` before `done`.
 7. If `.acm/acm-workflows.yaml` requires review task keys, satisfy them before `done`.
-8. End every task with `done`, including every changed file for file-backed work.
-9. If you learn a reusable decision, gotcha, or preference, record it with `memory`.
+8. End the task with `done`, including every changed file for file-backed work.
+
+Trivial single-file fixes can skip the ACM ceremony entirely.
 
 When the task changes rules, tags, tests, workflows, or tool-surface behavior, refresh with `acm sync --mode working_tree --insert-new-candidates` and then run `acm health --include-details` before `done`.
 
 If you need to resume after compaction, use `acm history` for discovery then `acm fetch` the returned keys.
 If you need to debug project setup, use `acm status`.
+
+## Memory (AMM)
+
+This repo uses [AMM (Agent Memory Manager)](https://github.com/bonztm/agent-memory-manager) for durable memory. AMM is available via MCP tools (`amm_recall`, `amm_remember`, `amm_expand`) and CLI (`amm`).
+
+**When to query AMM:**
+- **Session start.** Run `amm recall|amm_recall` (mode `ambient`) at the beginning of every session to load relevant prior context about this project, the user, and past decisions.
+- **Before decisions.** When you encounter an architectural choice, a naming question, a pattern question, or anything where prior context might exist, query AMM before guessing.
+- **On uncertainty.** If you don't know something about the project, the user's preferences, or past work — ask AMM first.
+
+**When to write to AMM:**
+- **Stable decisions.** When a decision is made (architecture, naming, tooling choice), commit it with `amm remember|amm_remember`.
+- **User preferences.** When you learn how the user likes to work, record it.
+- **Gotchas and lessons.** When something surprising happens or a non-obvious fix is found, save it for next time.
+
+**When not to use AMM:**
+- Transient task state belongs in ACM `work` plans, not AMM.
+- Don't store information that's already in the code or git history.
 
 ## Working Rules
 
@@ -112,5 +133,5 @@ Governed multi-step work in this repo must use the staged plan contract:
 
 ## Tool-Specific Companions
 
-`CLAUDE.md` and other tool-specific files should stay thin and map their workflow back to this file.
+`CLAUDE.md`, `CODEX.md`, and other tool-specific files should stay thin and map their workflow back to this file.
 If they disagree with this file, this file is authoritative.

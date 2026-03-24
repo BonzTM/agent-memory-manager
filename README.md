@@ -54,6 +54,24 @@ echo '{"kind":"message_user","source_system":"claude-code","content":"Hello worl
 ./amm status
 ```
 
+## How agents should use amm
+
+The durable-memory loop is intentionally small:
+
+1. Connect `amm-mcp` or the `amm` CLI to the runtime.
+2. At task start, repo switch, or resume after interruption, ask AMM for thin recall (`ambient` is the default hot path).
+3. Expand only the memories, summaries, or episodes you actually need before acting.
+4. Commit only stable, high-confidence knowledge explicitly with `amm remember` / `amm_remember`; let hooks, plugins, and background workers capture the rest from history.
+5. Keep the runtime boundary honest. Use only the hook, plugin, or MCP surfaces the runtime actually documents, and keep maintenance jobs external.
+
+amm pairs well with [ACM](https://github.com/bonztm/agent-context-manager) for repos that also use governed task workflows — ACM handles task framing, verification, and closeout while amm handles durable memory.
+
+### Start here
+
+- Want the fastest end-to-end setup for a user? Start with [Agent Onboarding](docs/agent-onboarding.md).
+- Want the shared runtime model first? Read [Integration Guide](docs/integration.md).
+- Wiring a specific runtime? Jump straight to [Codex Integration](docs/codex-integration.md), [OpenCode Integration](docs/opencode-integration.md), [OpenClaw Integration](docs/openclaw-integration.md), or [Hermes-Agent Integration](docs/hermes-agent-integration.md).
+
 ## Architecture
 
 amm is a Go binary with a clean layered architecture. All business logic flows through a single `Service` interface -- CLI, MCP, and HTTP adapters are thin wrappers that call into it.

@@ -69,11 +69,35 @@ AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm jobs run consolidate_sessions
 
 Use host cron/systemd or the shared [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) for the cold path.
 
+## Default operator contract
+
+OpenCode operators should use the same durable-memory loop as every other runtime:
+
+- ask AMM for ambient recall at task start, repo switch, or resume
+- expand only the AMM items needed for the current decision
+- explicitly remember only stable, reusable knowledge
+- use the OpenCode plugin only for the stable capture surfaces it really exposes
+- keep heavier AMM jobs outside the OpenCode runtime
+
+If the repo also uses ACM, ACM owns task workflow and AMM owns durable memory.
+
 ## Suggested usage pattern
 
 - **Explicit memory**: OpenCode uses amm through MCP (`amm_recall`, `amm_expand`, `amm_remember`, `amm_jobs_run`)
 - **Plugin glue**: OpenCode injects amm env vars and records tool/lifecycle markers
 - **Background processing**: external worker invocations turn that event stream into summaries and memories
+
+## Suggested repo instructions snippet
+
+```md
+## amm memory usage
+
+- Treat amm as the durable memory system for this repository.
+- At task start, repo switch, or resume after interruption, consult amm via `amm_recall` or `amm recall --mode ambient`.
+- If amm returns thin recall items, expand only the items you actually need before acting.
+- Record only stable, high-confidence memories explicitly with `amm_remember`; let background workers extract the rest from history.
+- Do not assume amm runs its own scheduler. Maintenance jobs run externally via `amm jobs run <kind>`.
+```
 
 ## What this repo ships today
 
