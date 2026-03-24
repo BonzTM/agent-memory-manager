@@ -24,12 +24,12 @@ Direct CLI (`acm sync`, `acm health`, `acm history`, `acm status`) has no slash-
 
 ## Memory (AMM)
 
-AMM is available via MCP tools in this session. Query it early and often — see `AGENTS.md` § Memory for the full contract.
+AMM is available via MCP tools and CLI (`amm`). Query it early and often — see `AGENTS.md` § Memory for the full contract.
 
-- **At session start**, run `amm recall|amm_recall` with mode `ambient` to load relevant prior context.
-- **Before decisions or when uncertain**, query `amm recall|amm_recall` — don't guess when AMM might already know.
-- **After stable decisions or lessons learned**, commit them with `amm remember|amm_remember`.
-- Use `amm expand|amm_expand` to expand thin recall items when you need more detail.
+- **At session start**, run `amm recall --mode ambient` or `amm_recall` to load relevant prior context.
+- **Before decisions or when uncertain**, query AMM — don't guess when it might already know.
+- **After stable decisions or lessons learned**, commit them with `amm remember` or `amm_remember`.
+- Use `amm expand` / `amm_expand` to expand thin recall items when you need more detail.
 
 ## amm-Specific Notes
 

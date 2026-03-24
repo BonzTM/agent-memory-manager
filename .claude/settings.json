@@ -52,15 +52,5 @@
         "matcher": "Bash"
       }
     ]
-    // "Stop": [
-    //   {
-    //     "hooks": [
-    //       {
-    //         "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/acm-stop-guard.sh",
-    //         "type": "command"
-    //       }
-    //     ]
-    //   }
-    // ],
   }
 }
