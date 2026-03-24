@@ -8,11 +8,13 @@ Claude companion for amm (Agent Memory Manager). Primary contract is `AGENTS.md`
 - Use this file only to map Claude's workflow to the repo contract.
 - If this file conflicts with `AGENTS.md`, `AGENTS.md` wins.
 
-## ACM Workflow
+If ACM is available in your session, also follow [.acm/AGENTS-ACM.md](.acm/AGENTS-ACM.md).  If you are unaware or unsure of what ACM is, do not read the file.
+
+## ACM Workflow (when available)
 
 See [.acm/acm-work-loop.md](.acm/acm-work-loop.md) for the full command reference. Claude slash-command equivalents:
 
-| AGENTS.md step | Claude command |
+| AGENTS-ACM.md step | Claude command |
 |---|---|
 | `acm context` | `/acm-context [phase] <task>` |
 | `acm work` | `/acm-work` |
@@ -21,15 +23,6 @@ See [.acm/acm-work-loop.md](.acm/acm-work-loop.md) for the full command referenc
 | `acm done` | `/acm-done` |
 
 Direct CLI (`acm sync`, `acm health`, `acm history`, `acm status`) has no slash-command wrappers — call those directly.
-
-## Memory (AMM)
-
-AMM is available via MCP tools and CLI (`amm`). Query it early and often — see `AGENTS.md` § Memory for the full contract.
-
-- **At session start**, run `amm recall --mode ambient` or `amm_recall` to load relevant prior context.
-- **Before decisions or when uncertain**, query AMM — don't guess when it might already know.
-- **After stable decisions or lessons learned**, commit them with `amm remember` or `amm_remember`.
-- Use `amm expand` / `amm_expand` to expand thin recall items when you need more detail.
 
 ## amm-Specific Notes
 
@@ -40,7 +33,3 @@ AMM is available via MCP tools and CLI (`amm`). Query it early and often — see
 - CLI (`cmd/amm`) and MCP (`cmd/amm-mcp`) must expose the same commands.
 - Contract changes must update `internal/contracts/v1` and `spec/v1` together.
 - Go behavior changes need test coverage. Prefer targeted package tests before the full suite.
-
-## Ruleset Maintenance
-
-When `.acm/acm-rules.yaml`, `.acm/acm-tags.yaml`, `.acm/acm-tests.yaml`, or `.acm/acm-workflows.yaml` changes, refresh broker state with `acm sync` or `acm health --apply`, then run `acm health`.

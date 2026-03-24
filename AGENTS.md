@@ -2,13 +2,16 @@
 
 Operating contract for **amm (Agent Memory Manager)** — a Go, API-first, CLI/MCP-driven persistent memory substrate for agents.
 
+## Quick Start
+
+1. Read this file for repo rules, architecture, and change routing.
+2. If your agent runtime provides ACM, see [.acm/AGENTS-ACM.md](.acm/AGENTS-ACM.md) for the enhanced workflow.  If you are unaware or unsure of what ACM is, do not read the file.
+3. If using Claude, also read [CLAUDE.md](CLAUDE.md).
+
 ## Source Of Truth
 
 - Follow this file first.
 - Design intent lives in `refined-spec.md` (what amm is) and `technical-blueprint.md` (how to build it).
-- Keep canonical rules in `.acm/acm-rules.yaml`.
-- Keep canonical tags in `.acm/acm-tags.yaml` and executable checks in `.acm/acm-tests.yaml`.
-- Keep canonical completion workflow gates in `.acm/acm-workflows.yaml`.
 - If tool-specific instructions conflict with this file, this file wins unless a human explicitly says otherwise.
 
 ## Project Architecture
@@ -42,67 +45,11 @@ internal/
 - **Contracts and schema stay in lockstep.** Changes to payloads or commands must update `internal/contracts/v1`, `spec/v1` schemas, and tests together.
 - **CLI and MCP expose the same commands.** Parity is mandatory.
 
-## Task Loop
-
-For non-trivial work (multi-step, multi-file, or governed changes), follow this loop. Trivial single-file fixes can skip the ACM ceremony.
-
-1. Read this file and the human task.
-2. Run `acm context --task-text "<current task>" --phase <plan|execute|review>`.
-3. Read the returned hard rules and fetch only the keys needed for the current step.
-4. If the task spans multiple steps, multiple files, or likely handoff, create or update ACM work with `acm work ...`.
-5. For code, config, schema, or behavior changes, run `acm verify ...` before completion.
-6. If `.acm/acm-workflows.yaml` requires a review task such as `review:cross-llm`, satisfy it with `acm review --run --receipt-id <receipt-id>` when the task defines a `run` block; otherwise use manual review fields or `acm work`.
-7. Close the task with `acm done ...`. Changed files must stay within the active receipt scope.
-
-See [.acm/acm-work-loop.md](.acm/acm-work-loop.md) for the full ACM command reference (CLI and MCP).
-
 ## Working Rules
 
-- Do not silently expand governed file scope. Refresh context first.
 - Prefer small, reviewable changes over broad cleanup.
 - Do not invent product requirements or architectural decisions — surface the gap and wait.
 - If verification fails, fix the issue or report clearly. Do not claim the task is complete.
-- Keep work state current when you pause, hand off, or hit a blocker.
 - Implementation must stay aligned with `refined-spec.md` and `technical-blueprint.md`. Flag divergence.
 - Go behavior changes need test coverage or explicit exemption.
 - Schema changes must go through the migration system in `internal/adapters/sqlite/migrations.go`.
-
-## When To Use work
-
-Use `work` when any of the following are true:
-- the task will take more than one material step
-- more than one file or subsystem is involved
-- the task includes explicit planning, verification, or handoff
-- you need durable task state that should survive compaction or session reset
-
-For code changes, include a `verify:tests` task.
-
-## Staged Plan Contract
-
-Governed multi-step work in this repo must use the staged plan contract:
-
-- Create a root plan with `kind=feature|maintenance|governance`, explicit scope metadata (`objective`, `in_scope`, `out_of_scope`, `constraints`, `references`), and `plan.stages.spec_outline` / `refined_spec` / `implementation_plan`.
-- Create top-level `stage:*` tasks with child tasks linked through `parent_task_key`.
-- Leaf tasks are the atomic execution units and must include `acceptance_criteria` (at least 2: one output, one proof) and `references` (1-3 exact repo paths).
-- Use `kind=feature_stream` plus `parent_plan_key` for parallel execution streams under a feature root.
-- The schema is enforced through `scripts/acm-feature-plan-validate.py` via `acm verify`.
-
-### Leaf task rules
-- Each leaf must describe one deliverable with bounded scope.
-- Do not create catch-all tasks: `misc`, `polish`, `remaining`, `cleanup`, `wire the rest`.
-- Use real `depends_on` edges between tasks.
-- Gate tasks (`verify:tests`, `review:*`) are exempt from acceptance criteria requirements.
-
-### Orchestrator ownership
-- One orchestrator agent owns every multi-step plan: root plan, stage transitions, scope declarations, verification, review, and done.
-- Leaf tasks are execution units, not planning documents.
-- When the tool supports sub-agents, delegate bounded leaf tasks to keep the orchestrator's context narrow.
-
-### Thin plan exemption
-- Plans with a single non-gate task and no stages are exempt from the full staged plan schema. This covers simple bugfixes and single-step tasks.
-
-## Ruleset Maintenance
-
-1. Edit the canonical rules, tags, tests, or workflow files.
-2. Run `acm sync --mode working_tree --insert-new-candidates` or `acm health --apply`.
-3. Run `acm health --include-details` and resolve blocking findings.
