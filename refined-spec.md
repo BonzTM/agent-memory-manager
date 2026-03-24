@@ -1072,7 +1072,3 @@ amm may store them as history or canonical memory, depending on policy.
 17. Retrieval should follow find -> describe -> expand.
 18. Ingestion policy control is important.
 19. Repairability/integrity should be first-class.
-
----
-
-If you want, I can next do the same cleanup pass on the **technical blueprint** and give you a **v0.4 blueprint with zero ACM references** too.
