@@ -1,7 +1,3 @@
-Good. Here’s the cleaned **technical blueprint**, with the same correction applied: **amm stands on its own**.
-
----
-
 # amm v0 Technical Blueprint
 ## Agent Memory Manager
 ### Buildable first implementation plan
@@ -1150,10 +1146,3 @@ Start with:
 - explicit memory commits
 - repairable links
 - maintenance jobs
-
-That’s enough to make it real.
-
-If you want, next I can produce either:
-
-1. **actual SQL migration files and JSON schemas**, or
-2. a **repo/module layout and implementation plan** in Go, TypeScript, or Python.

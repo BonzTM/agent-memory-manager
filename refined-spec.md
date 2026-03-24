@@ -1,12 +1,3 @@
-Correct. That was bleed-over from the design conversation.
-
-If **amm is its own project**, the spec should not lean on ACM at all.
-At most, other systems can be mentioned generically as possible integrators, not as part of amm’s identity.
-
-Here’s the revised version, cleaned accordingly.
-
----
-
 # amm Specification Draft
 ## Agent Memory Manager
 ### A persistent, typed, temporal memory substrate for agents
@@ -1081,7 +1072,3 @@ amm may store them as history or canonical memory, depending on policy.
 17. Retrieval should follow find -> describe -> expand.
 18. Ingestion policy control is important.
 19. Repairability/integrity should be first-class.
-
----
-
-If you want, I can next do the same cleanup pass on the **technical blueprint** and give you a **v0.4 blueprint with zero ACM references** too.
