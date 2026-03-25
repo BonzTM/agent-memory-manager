@@ -16,6 +16,7 @@ type Repository interface {
 	GetEvent(ctx context.Context, id string) (*Event, error)
 	ListEvents(ctx context.Context, opts ListEventsOptions) ([]Event, error)
 	SearchEvents(ctx context.Context, query string, limit int) ([]Event, error)
+	MaxEventRowID(ctx context.Context) (int64, error)
 
 	// Summaries
 	InsertSummary(ctx context.Context, summary *Summary) error
@@ -103,12 +104,14 @@ type RecallHistoryEntry struct {
 // List option types for filtered queries.
 
 type ListEventsOptions struct {
-	SessionID string
-	ProjectID string
-	Kind      string
-	Limit     int
-	Before    string
-	After     string
+	SessionID   string
+	ProjectID   string
+	Kind        string
+	Limit       int
+	BeforeRowID int64
+	Before      string
+	AfterRowID  int64
+	After       string
 }
 
 type ListSummariesOptions struct {

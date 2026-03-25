@@ -199,7 +199,7 @@ func (r *SQLiteRepository) InsertEvent(ctx context.Context, event *core.Event) e
 
 func (r *SQLiteRepository) GetEvent(ctx context.Context, id string) (*core.Event, error) {
 	row := r.QueryRowContext(ctx, `
-		SELECT id, kind, source_system, COALESCE(surface,''), COALESCE(session_id,''),
+		SELECT rowid, id, kind, source_system, COALESCE(surface,''), COALESCE(session_id,''),
 			COALESCE(project_id,''), COALESCE(agent_id,''), COALESCE(actor_type,''),
 			COALESCE(actor_id,''), privacy_level, content, metadata_json,
 			COALESCE(hash,''), occurred_at, ingested_at
@@ -207,7 +207,7 @@ func (r *SQLiteRepository) GetEvent(ctx context.Context, id string) (*core.Event
 
 	var e core.Event
 	var metaJSON, occurredAt, ingestedAt string
-	err := row.Scan(&e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
+	err := row.Scan(&e.RowID, &e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
 		&e.ProjectID, &e.AgentID, &e.ActorType, &e.ActorID, &e.PrivacyLevel,
 		&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt)
 	if err != nil {
@@ -223,7 +223,7 @@ func (r *SQLiteRepository) GetEvent(ctx context.Context, id string) (*core.Event
 }
 
 func (r *SQLiteRepository) ListEvents(ctx context.Context, opts core.ListEventsOptions) ([]core.Event, error) {
-	query := `SELECT id, kind, source_system, COALESCE(surface,''), COALESCE(session_id,''),
+	query := `SELECT rowid, id, kind, source_system, COALESCE(surface,''), COALESCE(session_id,''),
 		COALESCE(project_id,''), COALESCE(agent_id,''), COALESCE(actor_type,''),
 		COALESCE(actor_id,''), privacy_level, content, metadata_json,
 		COALESCE(hash,''), occurred_at, ingested_at
@@ -246,11 +246,23 @@ func (r *SQLiteRepository) ListEvents(ctx context.Context, opts core.ListEventsO
 		query += " AND occurred_at < ?"
 		args = append(args, opts.Before)
 	}
+	if opts.BeforeRowID > 0 {
+		query += " AND rowid <= ?"
+		args = append(args, opts.BeforeRowID)
+	}
 	if opts.After != "" {
 		query += " AND occurred_at > ?"
 		args = append(args, opts.After)
 	}
-	query += " ORDER BY occurred_at DESC LIMIT ?"
+	if opts.AfterRowID > 0 {
+		query += " AND rowid > ?"
+		args = append(args, opts.AfterRowID)
+	}
+	if opts.AfterRowID > 0 || opts.BeforeRowID > 0 {
+		query += " ORDER BY rowid ASC LIMIT ?"
+	} else {
+		query += " ORDER BY occurred_at DESC, id DESC LIMIT ?"
+	}
 	args = append(args, defaultLimit(opts.Limit))
 
 	rows, err := r.QueryContext(ctx, query, args...)
@@ -263,7 +275,7 @@ func (r *SQLiteRepository) ListEvents(ctx context.Context, opts core.ListEventsO
 	for rows.Next() {
 		var e core.Event
 		var metaJSON, occurredAt, ingestedAt string
-		if err := rows.Scan(&e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
+		if err := rows.Scan(&e.RowID, &e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
 			&e.ProjectID, &e.AgentID, &e.ActorType, &e.ActorID, &e.PrivacyLevel,
 			&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt); err != nil {
 			return nil, err
@@ -282,7 +294,7 @@ func (r *SQLiteRepository) SearchEvents(ctx context.Context, query string, limit
 		return nil, nil
 	}
 	rows, err := r.QueryContext(ctx, `
-		SELECT e.id, e.kind, e.source_system, COALESCE(e.surface,''), COALESCE(e.session_id,''),
+		SELECT e.rowid, e.id, e.kind, e.source_system, COALESCE(e.surface,''), COALESCE(e.session_id,''),
 			COALESCE(e.project_id,''), COALESCE(e.agent_id,''), COALESCE(e.actor_type,''),
 			COALESCE(e.actor_id,''), e.privacy_level, e.content, e.metadata_json,
 			COALESCE(e.hash,''), e.occurred_at, e.ingested_at
@@ -299,7 +311,7 @@ func (r *SQLiteRepository) SearchEvents(ctx context.Context, query string, limit
 	for rows.Next() {
 		var e core.Event
 		var metaJSON, occurredAt, ingestedAt string
-		if err := rows.Scan(&e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
+		if err := rows.Scan(&e.RowID, &e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
 			&e.ProjectID, &e.AgentID, &e.ActorType, &e.ActorID, &e.PrivacyLevel,
 			&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt); err != nil {
 			return nil, err
@@ -310,6 +322,15 @@ func (r *SQLiteRepository) SearchEvents(ctx context.Context, query string, limit
 		events = append(events, e)
 	}
 	return events, rows.Err()
+}
+
+func (r *SQLiteRepository) MaxEventRowID(ctx context.Context) (int64, error) {
+	row := r.QueryRowContext(ctx, `SELECT COALESCE(MAX(rowid), 0) FROM events`)
+	var maxRowID int64
+	if err := row.Scan(&maxRowID); err != nil {
+		return 0, err
+	}
+	return maxRowID, nil
 }
 
 // ---------- Summaries ----------
