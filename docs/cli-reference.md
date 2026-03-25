@@ -423,11 +423,25 @@ amm jobs run <kind>
 
 The job kind is positional.
 
-**Available job kinds (10):**
+For reprocessing flows, you can use either positional kinds or convenience flags:
+
+```bash
+# Equivalent
+amm jobs run reprocess
+amm jobs run --reprocess
+
+# Equivalent
+amm jobs run reprocess_all
+amm jobs run --reprocess-all
+```
+
+Do not combine a positional job kind with `--reprocess` or `--reprocess-all`.
+
+**Available job kinds (12):**
 
 | Kind | Description |
 |---|---|
-| `reflect` | Reflect on recent history to extract insights |
+| `reflect` | Extract candidate durable memories from recent events |
 | `compress_history` | Compress raw history into summaries |
 | `consolidate_sessions` | Merge session-level summaries |
 | `extract_claims` | Extract structured claims from memories |
@@ -437,6 +451,8 @@ The job kind is positional.
 | `merge_duplicates` | Merge duplicate memories |
 | `rebuild_indexes` | Rebuild FTS and derived indexes |
 | `cleanup_recall_history` | Clean up recall history tracking data |
+| `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM |
+| `reprocess_all` | Batch re-extract all memories unconditionally, superseding both heuristic and LLM results |
 
 **Example:**
 

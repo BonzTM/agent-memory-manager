@@ -27,6 +27,10 @@ If a config file does not exist, amm silently uses defaults. JSON is auto-detect
 | `AMM_AUTO_COMPRESS` | Automatically run compress_history worker | `true` |
 | `AMM_AUTO_CONSOLIDATE` | Automatically run consolidate_sessions worker | `true` |
 | `AMM_AUTO_DETECT_CONTRADICTIONS` | Automatically run contradiction detection | `true` |
+| `AMM_LLM_ENDPOINT` | Base URL for OpenAI-compatible chat completions API | _(unset)_ |
+| `AMM_LLM_API_KEY` | API key for the LLM endpoint | _(unset)_ |
+| `AMM_LLM_MODEL` | Model name to use for extraction and summarization | `gpt-4o-mini` |
+| `AMM_LLM_BATCH_SIZE` | Number of events per LLM call during `reprocess`/`reprocess_all` jobs | `20` |
 
 Environment variables accept the same value types as their config file equivalents. Boolean variables accept `true`, `false`, `1`, `0`, `t`, `f` (parsed by Go's `strconv.ParseBool`).
 
@@ -53,6 +57,12 @@ Environment variables accept the same value types as their config file equivalen
     "auto_compress": true,
     "auto_consolidate": true,
     "auto_detect_contradictions": true
+  },
+  "llm": {
+    "endpoint": "https://api.openai.com/v1",
+    "api_key": "",
+    "model": "gpt-4o-mini",
+    "batch_size": 20
   }
 }
 ```
@@ -79,6 +89,12 @@ auto_reflect = true
 auto_compress = true
 auto_consolidate = true
 auto_detect_contradictions = true
+
+[llm]
+endpoint = "https://api.openai.com/v1"
+api_key = ""
+model = "gpt-4o-mini"
+batch_size = 20
 ```
 
 amm supports a flat subset of TOML: `[section]` headers and `key = value` pairs. Nested tables and arrays are not supported. Values can be quoted strings, bare integers, or bare booleans.
@@ -116,6 +132,23 @@ amm supports a flat subset of TOML: `[section]` headers and `key = value` pairs.
 | `auto_compress` | bool | `true` | Enable automatic history compression into summaries. |
 | `auto_consolidate` | bool | `true` | Enable automatic session consolidation. |
 | `auto_detect_contradictions` | bool | `true` | Enable automatic contradiction detection between memories. |
+
+### llm
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `endpoint` | string | _(unset)_ | Base URL for an OpenAI-compatible chat completions API. When set together with `api_key`, amm uses LLM-backed extraction for the `reflect` and `compress_history` workers instead of the built-in heuristic. Compatible with OpenAI, Anthropic (via OpenAI-compat endpoint), Ollama (`http://localhost:11434/v1`), vLLM, LM Studio, or any provider exposing `/v1/chat/completions`. |
+| `api_key` | string | _(unset)_ | Bearer token sent in the `Authorization` header. Required for most hosted providers. For local models (Ollama, LM Studio) set to any non-empty string. |
+| `model` | string | `gpt-4o-mini` | Model identifier passed in the request body. Use a cheap, fast model — extraction is structured JSON output, not creative writing. Good defaults: `gpt-4o-mini` (OpenAI), `claude-3-5-haiku-latest` (Anthropic), `llama3.2` (Ollama). |
+| `batch_size` | int | `20` | Number of events per LLM call during `reprocess` and `reprocess_all` jobs. Higher values use fewer API calls but reduce extraction quality. Recommended range: 10-50. |
+
+When `endpoint` and `api_key` are both unset or empty, amm falls back to a built-in heuristic summarizer that uses phrase-cue matching and truncation. This is the zero-dependency default — no external API calls are made.
+
+When LLM extraction is enabled, the `reflect` worker sends recent events to the LLM with a structured extraction prompt and parses typed `MemoryCandidate` records from the response. The `reprocess` and `reprocess_all` jobs use batch extraction — sending `batch_size` events per LLM call for cross-event deduplication. Each event's content is truncated to 1500 characters before being sent to the LLM.
+
+If any LLM call fails (network error, timeout, rate limit, malformed response), that batch automatically falls back to the heuristic — no data is lost.
+
+Memories created by LLM extraction are tagged with `metadata.extraction_method = "llm"`. The `reprocess` job uses this tag to skip events that have already been processed by the LLM, while `reprocess_all` ignores it and reprocesses everything. Old memories are marked `superseded` and linked to their replacement via the `superseded_by` field.
 
 ---
 

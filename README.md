@@ -135,6 +135,8 @@ See [docs/architecture.md](docs/architecture.md) for detailed layer descriptions
 | `rebuild_indexes` | Rebuild FTS5, embeddings, and retrieval cache |
 | `repair_links` | Validate and repair summary/source/memory links |
 | `cleanup_recall_history` | Delete recall history rows older than TTL (default: 7 days) |
+| `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM |
+| `reprocess_all` | Batch re-extract all memories unconditionally, superseding both heuristic and LLM results |
 
 ## Build Requirements
 
@@ -149,6 +151,18 @@ CGO_ENABLED=1 go build -tags fts5 -o amm ./cmd/amm
 # Run tests
 CGO_ENABLED=1 go test -tags fts5 ./...
 ```
+
+## Optional: LLM-Backed Extraction
+
+By default, amm uses a heuristic phrase-cue system for memory extraction. For higher-quality extraction, set three environment variables to enable LLM-backed reflection and summarization:
+
+```bash
+export AMM_LLM_ENDPOINT=https://api.openai.com/v1   # or http://localhost:11434/v1 for Ollama
+export AMM_LLM_API_KEY=sk-...
+export AMM_LLM_MODEL=gpt-4o-mini                     # optional, defaults to gpt-4o-mini
+```
+
+Any OpenAI-compatible endpoint works (OpenAI, Anthropic, Ollama, vLLM, LM Studio). When unset, amm operates entirely locally with no external API calls. See [Configuration](docs/configuration.md) for details.
 
 ## Documentation
 
