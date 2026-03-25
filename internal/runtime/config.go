@@ -20,6 +20,7 @@ type Config struct {
 	Privacy     PrivacyConfig     `json:"privacy"`
 	Maintenance MaintenanceConfig `json:"maintenance"`
 	LLM         LLMConfig         `json:"llm"`
+	Embeddings  EmbeddingsConfig  `json:"embeddings"`
 }
 
 type LLMConfig struct {
@@ -27,6 +28,12 @@ type LLMConfig struct {
 	APIKey    string `json:"api_key"`
 	Model     string `json:"model"`
 	BatchSize int    `json:"batch_size"`
+}
+
+type EmbeddingsConfig struct {
+	Enabled  bool   `json:"enabled"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
 }
 
 // StorageConfig controls where amm persists data.
@@ -82,6 +89,9 @@ func DefaultConfig() Config {
 		},
 		LLM: LLMConfig{
 			BatchSize: defaultLLMBatchSize,
+		},
+		Embeddings: EmbeddingsConfig{
+			Enabled: false,
 		},
 	}
 }
@@ -188,6 +198,14 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			if n, err := strconv.Atoi(val); err == nil && n > 0 {
 				cfg.LLM.BatchSize = n
 			}
+		case "embeddings.enabled":
+			if b, err := strconv.ParseBool(val); err == nil {
+				cfg.Embeddings.Enabled = b
+			}
+		case "embeddings.provider":
+			cfg.Embeddings.Provider = val
+		case "embeddings.model":
+			cfg.Embeddings.Model = val
 		}
 	}
 	return scanner.Err()
@@ -287,6 +305,17 @@ func ConfigFromEnv(base Config) Config {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			base.LLM.BatchSize = n
 		}
+	}
+	if v := os.Getenv("AMM_EMBEDDINGS_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			base.Embeddings.Enabled = b
+		}
+	}
+	if v := os.Getenv("AMM_EMBEDDINGS_PROVIDER"); v != "" {
+		base.Embeddings.Provider = v
+	}
+	if v := os.Getenv("AMM_EMBEDDINGS_MODEL"); v != "" {
+		base.Embeddings.Model = v
 	}
 	return base
 }

@@ -3,7 +3,7 @@ package service
 import (
 	"strings"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 func prepareMemoryCandidate(candidate core.MemoryCandidate) (core.MemoryCandidate, bool) {

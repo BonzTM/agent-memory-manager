@@ -5,7 +5,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 // commonCapitalized is the set of English words that are frequently capitalized
@@ -21,7 +21,8 @@ var commonCapitalized = map[string]bool{
 	"Should": true, "Can": true, "May": true, "Might": true,
 }
 
-// ExtractEntities extracts potential entity names from text using capitalized-token heuristics.
+// ExtractEntities extracts likely entity names from text using simple
+// capitalized-token heuristics.
 func ExtractEntities(text string) []string {
 	words := strings.Fields(text)
 
@@ -72,9 +73,8 @@ func ExtractEntities(text string) []string {
 	return results
 }
 
-// MatchEntityAliases checks extracted names against known entity aliases.
-// It returns entity IDs where the canonical_name or any alias matches
-// (case-insensitive) an extracted name.
+// MatchEntityAliases returns entity IDs whose canonical name or aliases match
+// any extracted name case-insensitively.
 func MatchEntityAliases(extracted []string, entities []core.Entity) []string {
 	if len(extracted) == 0 || len(entities) == 0 {
 		return nil

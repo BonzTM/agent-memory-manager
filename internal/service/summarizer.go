@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 type phraseCue struct {
@@ -35,8 +35,11 @@ var phraseCues = []phraseCue{
 	},
 }
 
+// HeuristicSummarizer provides a local rule-based fallback for summarization
+// and memory extraction.
 type HeuristicSummarizer struct{}
 
+// Summarize returns text truncated to maxLen characters.
 func (h *HeuristicSummarizer) Summarize(ctx context.Context, text string, maxLen int) (string, error) {
 	_ = ctx
 	if maxLen <= 0 {
@@ -48,6 +51,8 @@ func (h *HeuristicSummarizer) Summarize(ctx context.Context, text string, maxLen
 	return text[:maxLen], nil
 }
 
+// ExtractMemoryCandidate applies phrase cues to derive memory candidates from a
+// single event.
 func (h *HeuristicSummarizer) ExtractMemoryCandidate(ctx context.Context, eventContent string) ([]core.MemoryCandidate, error) {
 	_ = ctx
 	contentLower := strings.ToLower(eventContent)
@@ -84,6 +89,8 @@ func (h *HeuristicSummarizer) ExtractMemoryCandidate(ctx context.Context, eventC
 	return []core.MemoryCandidate{candidate}, nil
 }
 
+// ExtractMemoryCandidateBatch extracts candidates from multiple events and tags
+// each candidate with its source event number.
 func (h *HeuristicSummarizer) ExtractMemoryCandidateBatch(ctx context.Context, eventContents []string) ([]core.MemoryCandidate, error) {
 	var all []core.MemoryCandidate
 	for i, content := range eventContents {

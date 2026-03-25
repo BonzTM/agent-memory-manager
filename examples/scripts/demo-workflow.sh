@@ -60,8 +60,58 @@ echo "--- Step 6: Consolidate Sessions ---"
 $AMM jobs run consolidate_sessions | parse_field '"  Summaries created:", d["result"]["result"].get("summaries_created", "0")'
 echo ""
 
-# 7. Recall
-echo "--- Step 7: Recall ---"
+# 7. Merge duplicates
+echo "--- Step 7: Merge Duplicates ---"
+$AMM jobs run merge_duplicates | parse_field '"  Merges performed:", d["result"]["result"].get("merges_performed", "0")'
+echo ""
+
+# 8. Extract claims
+echo "--- Step 8: Extract Claims ---"
+$AMM jobs run extract_claims | parse_field '"  Claims created:", d["result"]["result"].get("claims_created", "0")'
+echo ""
+
+# 9. Form episodes
+echo "--- Step 9: Form Episodes ---"
+$AMM jobs run form_episodes | parse_field '"  Episodes created:", d["result"]["result"].get("episodes_created", "0")'
+echo ""
+
+# 10. Detect contradictions
+echo "--- Step 10: Detect Contradictions ---"
+$AMM jobs run detect_contradictions | parse_field '"  Contradictions found:", d["result"]["result"].get("contradictions_found", "0")'
+echo ""
+
+# 11. Decay stale memories
+echo "--- Step 11: Decay Stale Memories ---"
+$AMM jobs run decay_stale_memory | parse_field '"  Memories decayed:", d["result"]["result"].get("memories_decayed", "0")'
+echo ""
+
+# 12. Promote high-value memories
+echo "--- Step 12: Promote High-Value Memories ---"
+$AMM jobs run promote_high_value | parse_field '"  Memories promoted:", d["result"]["result"].get("memories_promoted", "0")'
+echo ""
+
+# 13. Archive session traces
+echo "--- Step 13: Archive Session Traces ---"
+$AMM jobs run archive_session_traces | parse_field '"  Memories archived:", d["result"]["result"].get("memories_archived", "0")'
+echo ""
+
+# 14. Rebuild indexes
+echo "--- Step 14: Rebuild Indexes ---"
+$AMM jobs run rebuild_indexes | parse_field '"  Result:", d["result"]["result"].get("action", "done")'
+echo ""
+
+# 15. Repair links
+echo "--- Step 15: Repair Links ---"
+$AMM repair --check | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+r = d.get('result', {})
+print('  Checked:', r.get('checked', 0), ' Issues:', r.get('issues', 0))
+"
+echo ""
+
+# 16. Recall
+echo "--- Step 16: Recall ---"
 echo "  Ambient recall for 'Go backend':"
 $AMM recall --mode ambient "Go backend" | python3 -c "
 import sys, json
@@ -85,8 +135,8 @@ if not items:
 "
 echo ""
 
-# 8. Status
-echo "--- Step 8: Status ---"
+# 17. Status
+echo "--- Step 17: Status ---"
 $AMM status | python3 -c "
 import sys, json
 d = json.load(sys.stdin)

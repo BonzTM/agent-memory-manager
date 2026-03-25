@@ -7,10 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 // sanitizeFTS5Query strips FTS5 operators and special characters from user input
@@ -142,6 +144,19 @@ func unmarshalSlice(data string) []string {
 	return s
 }
 
+func marshalEmbeddingJSON(v []float32) string {
+	if v == nil {
+		return emptySliceJSON()
+	}
+	return marshalJSON(v)
+}
+
+func unmarshalEmbeddingJSON(data string) []float32 {
+	var v []float32
+	_ = json.Unmarshal([]byte(data), &v)
+	return v
+}
+
 func timeToStr(t time.Time) string {
 	return t.Format(time.RFC3339)
 }
@@ -176,6 +191,23 @@ func nullStr(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: true}
 }
 
+// placeholders returns a comma-separated list of n placeholders for SQL IN clauses.
+// placeholders generates a comma-separated list of SQL placeholders (?).
+// Used to construct IN clause queries dynamically.
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	result := make([]byte, 0, n*2)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			result = append(result, ',')
+		}
+		result = append(result, '?')
+	}
+	return string(result)
+}
+
 // ---------- Events ----------
 
 func (r *SQLiteRepository) InsertEvent(ctx context.Context, event *core.Event) error {
@@ -194,22 +226,26 @@ func (r *SQLiteRepository) InsertEvent(ctx context.Context, event *core.Event) e
 		marshalMapJSON(event.Metadata), nullStr(event.Hash),
 		timeToStr(event.OccurredAt), timeToStr(event.IngestedAt),
 	)
+	if err != nil {
+		return err
+	}
+	_, err = r.ExecContext(ctx, `UPDATE events SET sequence_id = rowid WHERE id = ?`, event.ID)
 	return err
 }
 
 func (r *SQLiteRepository) GetEvent(ctx context.Context, id string) (*core.Event, error) {
 	row := r.QueryRowContext(ctx, `
-		SELECT rowid, id, kind, source_system, COALESCE(surface,''), COALESCE(session_id,''),
+		SELECT COALESCE(sequence_id, rowid), id, kind, source_system, COALESCE(surface,''), COALESCE(session_id,''),
 			COALESCE(project_id,''), COALESCE(agent_id,''), COALESCE(actor_type,''),
 			COALESCE(actor_id,''), privacy_level, content, metadata_json,
-			COALESCE(hash,''), occurred_at, ingested_at
+			COALESCE(hash,''), occurred_at, ingested_at, COALESCE(reflected_at,'')
 		FROM events WHERE id = ?`, id)
 
 	var e core.Event
-	var metaJSON, occurredAt, ingestedAt string
-	err := row.Scan(&e.RowID, &e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
+	var metaJSON, occurredAt, ingestedAt, reflectedAt string
+	err := row.Scan(&e.SequenceID, &e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
 		&e.ProjectID, &e.AgentID, &e.ActorType, &e.ActorID, &e.PrivacyLevel,
-		&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt)
+		&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt, &reflectedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("event not found: %s", id)
@@ -219,14 +255,18 @@ func (r *SQLiteRepository) GetEvent(ctx context.Context, id string) (*core.Event
 	e.Metadata = unmarshalMap(metaJSON)
 	e.OccurredAt = strToTime(occurredAt)
 	e.IngestedAt = strToTime(ingestedAt)
+	if reflectedAt != "" {
+		t := strToTime(reflectedAt)
+		e.ReflectedAt = &t
+	}
 	return &e, nil
 }
 
 func (r *SQLiteRepository) ListEvents(ctx context.Context, opts core.ListEventsOptions) ([]core.Event, error) {
-	query := `SELECT rowid, id, kind, source_system, COALESCE(surface,''), COALESCE(session_id,''),
+	query := `SELECT COALESCE(sequence_id, rowid), id, kind, source_system, COALESCE(surface,''), COALESCE(session_id,''),
 		COALESCE(project_id,''), COALESCE(agent_id,''), COALESCE(actor_type,''),
 		COALESCE(actor_id,''), privacy_level, content, metadata_json,
-		COALESCE(hash,''), occurred_at, ingested_at
+		COALESCE(hash,''), occurred_at, ingested_at, COALESCE(reflected_at,'')
 		FROM events WHERE 1=1`
 	var args []interface{}
 
@@ -246,20 +286,23 @@ func (r *SQLiteRepository) ListEvents(ctx context.Context, opts core.ListEventsO
 		query += " AND occurred_at < ?"
 		args = append(args, opts.Before)
 	}
-	if opts.BeforeRowID > 0 {
-		query += " AND rowid <= ?"
-		args = append(args, opts.BeforeRowID)
+	if opts.BeforeSequenceID > 0 {
+		query += " AND sequence_id <= ?"
+		args = append(args, opts.BeforeSequenceID)
 	}
 	if opts.After != "" {
 		query += " AND occurred_at > ?"
 		args = append(args, opts.After)
 	}
-	if opts.AfterRowID > 0 {
-		query += " AND rowid > ?"
-		args = append(args, opts.AfterRowID)
+	if opts.AfterSequenceID > 0 {
+		query += " AND sequence_id > ?"
+		args = append(args, opts.AfterSequenceID)
 	}
-	if opts.AfterRowID > 0 || opts.BeforeRowID > 0 {
-		query += " ORDER BY rowid ASC LIMIT ?"
+	if opts.UnreflectedOnly {
+		query += " AND reflected_at IS NULL"
+	}
+	if opts.AfterSequenceID > 0 || opts.BeforeSequenceID > 0 || opts.UnreflectedOnly {
+		query += " ORDER BY sequence_id ASC LIMIT ?"
 	} else {
 		query += " ORDER BY occurred_at DESC, id DESC LIMIT ?"
 	}
@@ -274,15 +317,19 @@ func (r *SQLiteRepository) ListEvents(ctx context.Context, opts core.ListEventsO
 	var events []core.Event
 	for rows.Next() {
 		var e core.Event
-		var metaJSON, occurredAt, ingestedAt string
-		if err := rows.Scan(&e.RowID, &e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
+		var metaJSON, occurredAt, ingestedAt, reflectedAt string
+		if err := rows.Scan(&e.SequenceID, &e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
 			&e.ProjectID, &e.AgentID, &e.ActorType, &e.ActorID, &e.PrivacyLevel,
-			&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt); err != nil {
+			&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt, &reflectedAt); err != nil {
 			return nil, err
 		}
 		e.Metadata = unmarshalMap(metaJSON)
 		e.OccurredAt = strToTime(occurredAt)
 		e.IngestedAt = strToTime(ingestedAt)
+		if reflectedAt != "" {
+			t := strToTime(reflectedAt)
+			e.ReflectedAt = &t
+		}
 		events = append(events, e)
 	}
 	return events, rows.Err()
@@ -294,10 +341,10 @@ func (r *SQLiteRepository) SearchEvents(ctx context.Context, query string, limit
 		return nil, nil
 	}
 	rows, err := r.QueryContext(ctx, `
-		SELECT e.rowid, e.id, e.kind, e.source_system, COALESCE(e.surface,''), COALESCE(e.session_id,''),
+		SELECT COALESCE(e.sequence_id, e.rowid), e.id, e.kind, e.source_system, COALESCE(e.surface,''), COALESCE(e.session_id,''),
 			COALESCE(e.project_id,''), COALESCE(e.agent_id,''), COALESCE(e.actor_type,''),
 			COALESCE(e.actor_id,''), e.privacy_level, e.content, e.metadata_json,
-			COALESCE(e.hash,''), e.occurred_at, e.ingested_at
+			COALESCE(e.hash,''), e.occurred_at, e.ingested_at, COALESCE(e.reflected_at,'')
 		FROM events_fts f JOIN events e ON f.id = e.id
 		WHERE events_fts MATCH ?
 		ORDER BY rank
@@ -310,8 +357,82 @@ func (r *SQLiteRepository) SearchEvents(ctx context.Context, query string, limit
 	var events []core.Event
 	for rows.Next() {
 		var e core.Event
+		var metaJSON, occurredAt, ingestedAt, reflectedAt string
+		if err := rows.Scan(&e.SequenceID, &e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
+			&e.ProjectID, &e.AgentID, &e.ActorType, &e.ActorID, &e.PrivacyLevel,
+			&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt, &reflectedAt); err != nil {
+			return nil, err
+		}
+		e.Metadata = unmarshalMap(metaJSON)
+		e.OccurredAt = strToTime(occurredAt)
+		e.IngestedAt = strToTime(ingestedAt)
+		if reflectedAt != "" {
+			t := strToTime(reflectedAt)
+			e.ReflectedAt = &t
+		}
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+func (r *SQLiteRepository) UpdateEvent(ctx context.Context, event *core.Event) error {
+	_, err := r.ExecContext(ctx, `
+		UPDATE events SET
+			kind = ?, source_system = ?, surface = ?, session_id = ?, project_id = ?,
+			agent_id = ?, actor_type = ?, actor_id = ?, privacy_level = ?, content = ?,
+			metadata_json = ?, hash = ?, occurred_at = ?, ingested_at = ?, reflected_at = ?
+		WHERE id = ?`,
+		event.Kind, event.SourceSystem,
+		nullStr(event.Surface), nullStr(event.SessionID), nullStr(event.ProjectID),
+		nullStr(event.AgentID), nullStr(event.ActorType), nullStr(event.ActorID),
+		string(event.PrivacyLevel), event.Content,
+		marshalMapJSON(event.Metadata), nullStr(event.Hash),
+		timeToStr(event.OccurredAt), timeToStr(event.IngestedAt),
+		ptrTimeToStr(event.ReflectedAt),
+		event.ID,
+	)
+	return err
+}
+
+func (r *SQLiteRepository) CountUnreflectedEvents(ctx context.Context) (int64, error) {
+	row := r.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE reflected_at IS NULL`)
+	var count int64
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// ClaimUnreflectedEvents atomically selects and marks unreflected events in a single
+// UPDATE ... RETURNING statement. Because the write and read happen in one statement,
+// there is no window for concurrent callers to claim the same rows. This approach is
+// portable across SQLite (3.35+) and PostgreSQL without requiring Go-level mutexes or
+// database-specific transaction modes.
+func (r *SQLiteRepository) ClaimUnreflectedEvents(ctx context.Context, limit int) ([]core.Event, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	rows, err := r.QueryContext(ctx, `
+		UPDATE events
+		SET reflected_at = ?
+		WHERE id IN (
+			SELECT id FROM events
+			WHERE reflected_at IS NULL
+			ORDER BY sequence_id ASC
+			LIMIT ?
+		)
+		RETURNING COALESCE(sequence_id, rowid), id, kind, source_system, COALESCE(surface,''), COALESCE(session_id,''),
+			COALESCE(project_id,''), COALESCE(agent_id,''), COALESCE(actor_type,''),
+			COALESCE(actor_id,''), privacy_level, content, metadata_json,
+			COALESCE(hash,''), occurred_at, ingested_at`, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("claim unreflected events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []core.Event
+	for rows.Next() {
+		var e core.Event
 		var metaJSON, occurredAt, ingestedAt string
-		if err := rows.Scan(&e.RowID, &e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
+		if err := rows.Scan(&e.SequenceID, &e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
 			&e.ProjectID, &e.AgentID, &e.ActorType, &e.ActorID, &e.PrivacyLevel,
 			&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt); err != nil {
 			return nil, err
@@ -323,18 +444,6 @@ func (r *SQLiteRepository) SearchEvents(ctx context.Context, query string, limit
 	}
 	return events, rows.Err()
 }
-
-func (r *SQLiteRepository) MaxEventRowID(ctx context.Context) (int64, error) {
-	row := r.QueryRowContext(ctx, `SELECT COALESCE(MAX(rowid), 0) FROM events`)
-	var maxRowID int64
-	if err := row.Scan(&maxRowID); err != nil {
-		return 0, err
-	}
-	return maxRowID, nil
-}
-
-// ---------- Summaries ----------
-
 func (r *SQLiteRepository) InsertSummary(ctx context.Context, summary *core.Summary) error {
 	if summary.ID == "" {
 		summary.ID = generateID("sum_")
@@ -945,6 +1054,167 @@ func (r *SQLiteRepository) GetMemoryEntities(ctx context.Context, memoryID strin
 	return entities, rows.Err()
 }
 
+func (r *SQLiteRepository) InsertProject(ctx context.Context, project *core.Project) error {
+	if project.ID == "" {
+		project.ID = generateID("prj_")
+	}
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO projects (id, name, path, description, metadata_json, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?)`,
+		project.ID, project.Name,
+		nullStr(project.Path), nullStr(project.Description),
+		marshalMapJSON(project.Metadata),
+		timeToStr(project.CreatedAt), timeToStr(project.UpdatedAt),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) GetProject(ctx context.Context, id string) (*core.Project, error) {
+	row := r.QueryRowContext(ctx, `
+		SELECT id, name, COALESCE(path,''), COALESCE(description,''), metadata_json, created_at, updated_at
+		FROM projects WHERE id = ?`, id)
+
+	var p core.Project
+	var metaJSON, createdAt, updatedAt string
+	err := row.Scan(&p.ID, &p.Name, &p.Path, &p.Description, &metaJSON, &createdAt, &updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("project not found: %s", id)
+		}
+		return nil, err
+	}
+	p.Metadata = unmarshalMap(metaJSON)
+	p.CreatedAt = strToTime(createdAt)
+	p.UpdatedAt = strToTime(updatedAt)
+	return &p, nil
+}
+
+func (r *SQLiteRepository) ListProjects(ctx context.Context) ([]core.Project, error) {
+	rows, err := r.QueryContext(ctx, `
+		SELECT id, name, COALESCE(path,''), COALESCE(description,''), metadata_json, created_at, updated_at
+		FROM projects
+		ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var projects []core.Project
+	for rows.Next() {
+		var p core.Project
+		var metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&p.ID, &p.Name, &p.Path, &p.Description, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		p.Metadata = unmarshalMap(metaJSON)
+		p.CreatedAt = strToTime(createdAt)
+		p.UpdatedAt = strToTime(updatedAt)
+		projects = append(projects, p)
+	}
+	return projects, rows.Err()
+}
+
+func (r *SQLiteRepository) DeleteProject(ctx context.Context, id string) error {
+	res, err := r.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("project not found: %s", id)
+	}
+	return nil
+}
+
+func (r *SQLiteRepository) InsertRelationship(ctx context.Context, rel *core.Relationship) error {
+	if rel.ID == "" {
+		rel.ID = generateID("rel_")
+	}
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO relationships (id, from_entity_id, to_entity_id, relationship_type, metadata_json, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?)`,
+		rel.ID, rel.FromEntityID, rel.ToEntityID, rel.RelationshipType,
+		marshalMapJSON(rel.Metadata),
+		timeToStr(rel.CreatedAt), timeToStr(rel.UpdatedAt),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) GetRelationship(ctx context.Context, id string) (*core.Relationship, error) {
+	row := r.QueryRowContext(ctx, `
+		SELECT id, from_entity_id, to_entity_id, relationship_type, metadata_json, created_at, updated_at
+		FROM relationships WHERE id = ?`, id)
+
+	var rel core.Relationship
+	var metaJSON, createdAt, updatedAt string
+	err := row.Scan(&rel.ID, &rel.FromEntityID, &rel.ToEntityID, &rel.RelationshipType, &metaJSON, &createdAt, &updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("relationship not found: %s", id)
+		}
+		return nil, err
+	}
+	rel.Metadata = unmarshalMap(metaJSON)
+	rel.CreatedAt = strToTime(createdAt)
+	rel.UpdatedAt = strToTime(updatedAt)
+	return &rel, nil
+}
+
+func (r *SQLiteRepository) ListRelationships(ctx context.Context, opts core.ListRelationshipsOptions) ([]core.Relationship, error) {
+	query := `SELECT id, from_entity_id, to_entity_id, relationship_type, metadata_json, created_at, updated_at
+		FROM relationships WHERE 1=1`
+	var args []interface{}
+
+	if opts.EntityID != "" {
+		query += " AND (from_entity_id = ? OR to_entity_id = ?)"
+		args = append(args, opts.EntityID, opts.EntityID)
+	}
+	if opts.RelationshipType != "" {
+		query += " AND relationship_type = ?"
+		args = append(args, opts.RelationshipType)
+	}
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, defaultLimit(opts.Limit))
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var relationships []core.Relationship
+	for rows.Next() {
+		var rel core.Relationship
+		var metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&rel.ID, &rel.FromEntityID, &rel.ToEntityID, &rel.RelationshipType, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		rel.Metadata = unmarshalMap(metaJSON)
+		rel.CreatedAt = strToTime(createdAt)
+		rel.UpdatedAt = strToTime(updatedAt)
+		relationships = append(relationships, rel)
+	}
+	return relationships, rows.Err()
+}
+
+func (r *SQLiteRepository) DeleteRelationship(ctx context.Context, id string) error {
+	res, err := r.ExecContext(ctx, `DELETE FROM relationships WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("relationship not found: %s", id)
+	}
+	return nil
+}
+
 // ---------- Episodes ----------
 
 func (r *SQLiteRepository) InsertEpisode(ctx context.Context, episode *core.Episode) error {
@@ -1238,9 +1508,10 @@ func (r *SQLiteRepository) InsertIngestionPolicy(ctx context.Context, policy *co
 	}
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO ingestion_policies (id, pattern_type, pattern, mode,
-			metadata_json, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?)`,
+			priority, match_mode, metadata_json, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
 		policy.ID, policy.PatternType, policy.Pattern, policy.Mode,
+		policy.Priority, defaultPolicyMatchMode(policy.MatchMode),
 		marshalMapJSON(policy.Metadata),
 		timeToStr(policy.CreatedAt), timeToStr(policy.UpdatedAt),
 	)
@@ -1249,13 +1520,15 @@ func (r *SQLiteRepository) InsertIngestionPolicy(ctx context.Context, policy *co
 
 func (r *SQLiteRepository) GetIngestionPolicy(ctx context.Context, id string) (*core.IngestionPolicy, error) {
 	row := r.QueryRowContext(ctx, `
-		SELECT id, pattern_type, pattern, mode, metadata_json, created_at, updated_at
+		SELECT id, pattern_type, pattern, mode, priority, match_mode, metadata_json, created_at, updated_at
 		FROM ingestion_policies WHERE id = ?`, id)
 
 	var p core.IngestionPolicy
 	var metaJSON, createdAt, updatedAt string
+	var priority sql.NullInt64
+	var matchMode sql.NullString
 	err := row.Scan(&p.ID, &p.PatternType, &p.Pattern, &p.Mode,
-		&metaJSON, &createdAt, &updatedAt)
+		&priority, &matchMode, &metaJSON, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("ingestion policy not found: %s", id)
@@ -1265,14 +1538,18 @@ func (r *SQLiteRepository) GetIngestionPolicy(ctx context.Context, id string) (*
 	p.Metadata = unmarshalMap(metaJSON)
 	p.CreatedAt = strToTime(createdAt)
 	p.UpdatedAt = strToTime(updatedAt)
+	if priority.Valid {
+		p.Priority = int(priority.Int64)
+	}
+	p.MatchMode = defaultPolicyMatchMode(matchMode.String)
 	return &p, nil
 }
 
 func (r *SQLiteRepository) ListIngestionPolicies(ctx context.Context) ([]core.IngestionPolicy, error) {
 	rows, err := r.QueryContext(ctx, `
-		SELECT id, pattern_type, pattern, mode, metadata_json, created_at, updated_at
+		SELECT id, pattern_type, pattern, mode, priority, match_mode, metadata_json, created_at, updated_at
 		FROM ingestion_policies
-		ORDER BY created_at DESC`)
+		ORDER BY priority DESC, created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -1282,12 +1559,18 @@ func (r *SQLiteRepository) ListIngestionPolicies(ctx context.Context) ([]core.In
 	for rows.Next() {
 		var p core.IngestionPolicy
 		var metaJSON, createdAt, updatedAt string
-		if err := rows.Scan(&p.ID, &p.PatternType, &p.Pattern, &p.Mode, &metaJSON, &createdAt, &updatedAt); err != nil {
+		var priority sql.NullInt64
+		var matchMode sql.NullString
+		if err := rows.Scan(&p.ID, &p.PatternType, &p.Pattern, &p.Mode, &priority, &matchMode, &metaJSON, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		p.Metadata = unmarshalMap(metaJSON)
 		p.CreatedAt = strToTime(createdAt)
 		p.UpdatedAt = strToTime(updatedAt)
+		if priority.Valid {
+			p.Priority = int(priority.Int64)
+		}
+		p.MatchMode = defaultPolicyMatchMode(matchMode.String)
 		policies = append(policies, p)
 	}
 	return policies, rows.Err()
@@ -1309,27 +1592,66 @@ func (r *SQLiteRepository) DeleteIngestionPolicy(ctx context.Context, id string)
 }
 
 func (r *SQLiteRepository) MatchIngestionPolicy(ctx context.Context, patternType, value string) (*core.IngestionPolicy, error) {
-	row := r.QueryRowContext(ctx, `
-		SELECT id, pattern_type, pattern, mode, metadata_json, created_at, updated_at
+	rows, err := r.QueryContext(ctx, `
+		SELECT id, pattern_type, pattern, mode, priority, match_mode, metadata_json, created_at, updated_at
 		FROM ingestion_policies
-		WHERE pattern_type = ? AND ? GLOB pattern
-		ORDER BY created_at ASC
-		LIMIT 1`, patternType, value)
-
-	var p core.IngestionPolicy
-	var metaJSON, createdAt, updatedAt string
-	err := row.Scan(&p.ID, &p.PatternType, &p.Pattern, &p.Mode,
-		&metaJSON, &createdAt, &updatedAt)
+		WHERE pattern_type = ?
+		ORDER BY priority DESC, created_at ASC`, patternType)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil // no match is not an error
-		}
 		return nil, err
 	}
-	p.Metadata = unmarshalMap(metaJSON)
-	p.CreatedAt = strToTime(createdAt)
-	p.UpdatedAt = strToTime(updatedAt)
-	return &p, nil
+	defer rows.Close()
+
+	for rows.Next() {
+		var p core.IngestionPolicy
+		var metaJSON, createdAt, updatedAt string
+		var priority sql.NullInt64
+		var matchMode sql.NullString
+		if err := rows.Scan(&p.ID, &p.PatternType, &p.Pattern, &p.Mode,
+			&priority, &matchMode, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		p.Metadata = unmarshalMap(metaJSON)
+		p.CreatedAt = strToTime(createdAt)
+		p.UpdatedAt = strToTime(updatedAt)
+		if priority.Valid {
+			p.Priority = int(priority.Int64)
+		}
+		p.MatchMode = defaultPolicyMatchMode(matchMode.String)
+
+		if matchesPolicy(p, value) {
+			return &p, nil
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return nil, nil
+}
+
+func defaultPolicyMatchMode(mode string) string {
+	if strings.TrimSpace(mode) == "" {
+		return "glob"
+	}
+	return mode
+}
+
+func matchesPolicy(p core.IngestionPolicy, value string) bool {
+	switch p.MatchMode {
+	case "exact":
+		return p.Pattern == value
+	case "regex":
+		re, err := regexp.Compile(p.Pattern)
+		if err != nil {
+			return false
+		}
+		return re.MatchString(value)
+	default:
+		matched, _ := filepath.Match(p.Pattern, value)
+		return matched
+	}
 }
 
 // ---------- Recall History ----------
@@ -1373,6 +1695,49 @@ func (r *SQLiteRepository) CleanupRecallHistory(ctx context.Context, olderThanDa
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+func (r *SQLiteRepository) UpsertEmbedding(ctx context.Context, embedding *core.EmbeddingRecord) error {
+	_, err := r.ExecContext(ctx, `
+		INSERT INTO embeddings (object_id, object_kind, embedding_json, model, created_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(object_id, object_kind, model)
+		DO UPDATE SET embedding_json=excluded.embedding_json, created_at=excluded.created_at`,
+		embedding.ObjectID,
+		embedding.ObjectKind,
+		marshalEmbeddingJSON(embedding.Vector),
+		embedding.Model,
+		timeToStr(embedding.CreatedAt),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) GetEmbedding(ctx context.Context, objectID, objectKind, model string) (*core.EmbeddingRecord, error) {
+	row := r.QueryRowContext(ctx, `
+		SELECT object_id, object_kind, embedding_json, model, created_at
+		FROM embeddings
+		WHERE object_id = ? AND object_kind = ? AND model = ?`, objectID, objectKind, model)
+
+	var rec core.EmbeddingRecord
+	var embeddingJSON, createdAt string
+	if err := row.Scan(&rec.ObjectID, &rec.ObjectKind, &embeddingJSON, &rec.Model, &createdAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("embedding not found: %s/%s/%s", objectKind, objectID, model)
+		}
+		return nil, err
+	}
+	rec.Vector = unmarshalEmbeddingJSON(embeddingJSON)
+	rec.CreatedAt = strToTime(createdAt)
+	return &rec, nil
+}
+
+func (r *SQLiteRepository) DeleteEmbeddings(ctx context.Context, objectID, objectKind, model string) error {
+	if model == "" {
+		_, err := r.ExecContext(ctx, `DELETE FROM embeddings WHERE object_id = ? AND object_kind = ?`, objectID, objectKind)
+		return err
+	}
+	_, err := r.ExecContext(ctx, `DELETE FROM embeddings WHERE object_id = ? AND object_kind = ? AND model = ?`, objectID, objectKind, model)
+	return err
 }
 
 // ---------- Counts ----------

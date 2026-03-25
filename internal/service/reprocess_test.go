@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/adapters/sqlite"
-	"github.com/joshd-04/agent-memory-manager/internal/core"
-	"github.com/joshd-04/agent-memory-manager/internal/service"
+	"github.com/bonztm/agent-memory-manager/internal/adapters/sqlite"
+	"github.com/bonztm/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/service"
 )
 
 func testServiceForReprocess(t *testing.T) (core.Service, *sqlite.SQLiteRepository) {
@@ -70,7 +70,7 @@ func testServiceForReprocessWithSummarizer(t *testing.T, summarizer core.Summari
 	}
 	t.Cleanup(func() { db.Close() })
 	repo := &sqlite.SQLiteRepository{DB: db}
-	svc := service.New(repo, dbPath, summarizer)
+	svc := service.New(repo, dbPath, summarizer, nil)
 	return svc, repo
 }
 
@@ -157,7 +157,7 @@ func TestReprocess_SkipsLLMTaggedMemories(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "skip.db")
-	svc := service.New(repo, dbPath)
+	svc := service.New(repo, dbPath, nil, nil)
 
 	job, err := svc.RunJob(ctx, "reprocess")
 	if err != nil {

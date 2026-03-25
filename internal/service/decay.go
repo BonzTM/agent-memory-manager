@@ -6,7 +6,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 const (
@@ -23,8 +23,8 @@ const (
 	decayArchiveThreshold = 0.1
 )
 
-// DecayStaleMemories identifies memories below a freshness threshold and reduces their importance.
-// Returns the number of memories decayed.
+// DecayStaleMemories downranks or archives stale active memories and returns
+// the number updated.
 func (s *AMMService) DecayStaleMemories(ctx context.Context) (int, error) {
 	// List all active memories.
 	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{

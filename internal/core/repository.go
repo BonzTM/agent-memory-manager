@@ -1,87 +1,157 @@
 package core
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Repository abstracts all persistent storage operations.
 // Implementations must handle their own connection management.
 type Repository interface {
-	// Lifecycle
+	// Open opens the repository at dbPath.
 	Open(ctx context.Context, dbPath string) error
+	// Close releases repository resources.
 	Close() error
+	// Migrate applies any required schema migrations.
 	Migrate(ctx context.Context) error
+	// IsInitialized reports whether the repository has been initialized.
 	IsInitialized(ctx context.Context) (bool, error)
 
-	// Events
+	// InsertEvent stores an event.
 	InsertEvent(ctx context.Context, event *Event) error
+	// GetEvent retrieves an event by ID.
 	GetEvent(ctx context.Context, id string) (*Event, error)
+	// UpdateEvent persists changes to an existing event.
+	UpdateEvent(ctx context.Context, event *Event) error
+	// ListEvents returns events matching the supplied options.
 	ListEvents(ctx context.Context, opts ListEventsOptions) ([]Event, error)
+	// SearchEvents searches events by text query.
 	SearchEvents(ctx context.Context, query string, limit int) ([]Event, error)
-	MaxEventRowID(ctx context.Context) (int64, error)
+	// CountUnreflectedEvents returns the number of events not yet reflected.
+	CountUnreflectedEvents(ctx context.Context) (int64, error)
+	// ClaimUnreflectedEvents atomically claims and returns unreflected events for processing.
+	// Sets reflected_at to now for claimed events to prevent concurrent processing.
+	ClaimUnreflectedEvents(ctx context.Context, limit int) ([]Event, error)
 
-	// Summaries
+	// InsertSummary stores a summary.
 	InsertSummary(ctx context.Context, summary *Summary) error
+	// GetSummary retrieves a summary by ID.
 	GetSummary(ctx context.Context, id string) (*Summary, error)
+	// ListSummaries returns summaries matching the supplied options.
 	ListSummaries(ctx context.Context, opts ListSummariesOptions) ([]Summary, error)
+	// SearchSummaries searches summaries by text query.
 	SearchSummaries(ctx context.Context, query string, limit int) ([]Summary, error)
+	// GetSummaryChildren returns the children of a summary node.
 	GetSummaryChildren(ctx context.Context, parentID string) ([]SummaryEdge, error)
+	// InsertSummaryEdge stores a summary hierarchy edge.
 	InsertSummaryEdge(ctx context.Context, edge *SummaryEdge) error
 
-	// Memories
+	// InsertMemory stores a memory.
 	InsertMemory(ctx context.Context, memory *Memory) error
+	// GetMemory retrieves a memory by ID.
 	GetMemory(ctx context.Context, id string) (*Memory, error)
+	// UpdateMemory persists changes to an existing memory.
 	UpdateMemory(ctx context.Context, memory *Memory) error
+	// ListMemories returns memories matching the supplied options.
 	ListMemories(ctx context.Context, opts ListMemoriesOptions) ([]Memory, error)
+	// SearchMemories searches memories by text query.
 	SearchMemories(ctx context.Context, query string, limit int) ([]Memory, error)
 
-	// Claims
+	// InsertClaim stores a claim.
 	InsertClaim(ctx context.Context, claim *Claim) error
+	// GetClaim retrieves a claim by ID.
 	GetClaim(ctx context.Context, id string) (*Claim, error)
+	// ListClaimsByMemory returns all claims attached to a memory.
 	ListClaimsByMemory(ctx context.Context, memoryID string) ([]Claim, error)
 
-	// Entities
+	// InsertEntity stores an entity.
 	InsertEntity(ctx context.Context, entity *Entity) error
+	// GetEntity retrieves an entity by ID.
 	GetEntity(ctx context.Context, id string) (*Entity, error)
+	// ListEntities returns entities matching the supplied options.
 	ListEntities(ctx context.Context, opts ListEntitiesOptions) ([]Entity, error)
+	// SearchEntities searches entities by text query.
 	SearchEntities(ctx context.Context, query string, limit int) ([]Entity, error)
+	// LinkMemoryEntity links a memory to an entity with a role.
 	LinkMemoryEntity(ctx context.Context, memoryID, entityID, role string) error
+	// GetMemoryEntities returns entities linked to a memory.
 	GetMemoryEntities(ctx context.Context, memoryID string) ([]Entity, error)
 
-	// Episodes
+	// InsertProject stores a project.
+	InsertProject(ctx context.Context, project *Project) error
+	// GetProject retrieves a project by ID.
+	GetProject(ctx context.Context, id string) (*Project, error)
+	// ListProjects returns all projects.
+	ListProjects(ctx context.Context) ([]Project, error)
+	// DeleteProject deletes a project by ID.
+	DeleteProject(ctx context.Context, id string) error
+
+	// InsertRelationship stores a relationship.
+	InsertRelationship(ctx context.Context, rel *Relationship) error
+	// GetRelationship retrieves a relationship by ID.
+	GetRelationship(ctx context.Context, id string) (*Relationship, error)
+	// ListRelationships returns relationships, optionally filtered by entity.
+	ListRelationships(ctx context.Context, opts ListRelationshipsOptions) ([]Relationship, error)
+	// DeleteRelationship deletes a relationship by ID.
+	DeleteRelationship(ctx context.Context, id string) error
+
+	// InsertEpisode stores an episode.
 	InsertEpisode(ctx context.Context, episode *Episode) error
+	// GetEpisode retrieves an episode by ID.
 	GetEpisode(ctx context.Context, id string) (*Episode, error)
+	// ListEpisodes returns episodes matching the supplied options.
 	ListEpisodes(ctx context.Context, opts ListEpisodesOptions) ([]Episode, error)
+	// SearchEpisodes searches episodes by text query.
 	SearchEpisodes(ctx context.Context, query string, limit int) ([]Episode, error)
 
-	// Artifacts
+	// InsertArtifact stores an artifact.
 	InsertArtifact(ctx context.Context, artifact *Artifact) error
+	// GetArtifact retrieves an artifact by ID.
 	GetArtifact(ctx context.Context, id string) (*Artifact, error)
 
-	// Jobs
+	// InsertJob stores a job.
 	InsertJob(ctx context.Context, job *Job) error
+	// GetJob retrieves a job by ID.
 	GetJob(ctx context.Context, id string) (*Job, error)
+	// UpdateJob persists changes to an existing job.
 	UpdateJob(ctx context.Context, job *Job) error
+	// ListJobs returns jobs matching the supplied options.
 	ListJobs(ctx context.Context, opts ListJobsOptions) ([]Job, error)
 
-	// Ingestion Policies
+	// InsertIngestionPolicy stores an ingestion policy.
 	InsertIngestionPolicy(ctx context.Context, policy *IngestionPolicy) error
+	// GetIngestionPolicy retrieves an ingestion policy by ID.
 	GetIngestionPolicy(ctx context.Context, id string) (*IngestionPolicy, error)
+	// ListIngestionPolicies returns all ingestion policies.
 	ListIngestionPolicies(ctx context.Context) ([]IngestionPolicy, error)
+	// DeleteIngestionPolicy deletes an ingestion policy by ID.
 	DeleteIngestionPolicy(ctx context.Context, id string) error
+	// MatchIngestionPolicy finds the best matching ingestion policy.
 	MatchIngestionPolicy(ctx context.Context, patternType, value string) (*IngestionPolicy, error)
 
-	// Recall History (for repetition suppression)
+	// RecordRecall records that an item was shown during recall.
 	RecordRecall(ctx context.Context, sessionID, itemID, itemKind string) error
+	// GetRecentRecalls returns the most recent recall history entries.
 	GetRecentRecalls(ctx context.Context, sessionID string, limit int) ([]RecallHistoryEntry, error)
+	// CleanupRecallHistory removes old recall history entries.
 	CleanupRecallHistory(ctx context.Context, olderThanDays int) (int64, error)
 
-	// Counts for status
+	UpsertEmbedding(ctx context.Context, embedding *EmbeddingRecord) error
+	GetEmbedding(ctx context.Context, objectID, objectKind, model string) (*EmbeddingRecord, error)
+	DeleteEmbeddings(ctx context.Context, objectID, objectKind, model string) error
+
+	// CountEvents returns the total number of events.
 	CountEvents(ctx context.Context) (int64, error)
+	// CountMemories returns the total number of memories.
 	CountMemories(ctx context.Context) (int64, error)
+	// CountSummaries returns the total number of summaries.
 	CountSummaries(ctx context.Context) (int64, error)
+	// CountEpisodes returns the total number of episodes.
 	CountEpisodes(ctx context.Context) (int64, error)
+	// CountEntities returns the total number of entities.
 	CountEntities(ctx context.Context) (int64, error)
 
-	// Index management
+	// RebuildFTSIndexes rebuilds any full-text search indexes.
 	RebuildFTSIndexes(ctx context.Context) error
 }
 
@@ -93,7 +163,7 @@ type SummaryEdge struct {
 	EdgeOrder       int    `json:"edge_order,omitempty"`
 }
 
-// RecallHistoryEntry tracks what was shown to suppress repetition.
+// RecallHistoryEntry tracks a displayed recall item for repetition suppression.
 type RecallHistoryEntry struct {
 	SessionID string `json:"session_id"`
 	ItemID    string `json:"item_id"`
@@ -101,19 +171,28 @@ type RecallHistoryEntry struct {
 	ShownAt   string `json:"shown_at"`
 }
 
-// List option types for filtered queries.
-
-type ListEventsOptions struct {
-	SessionID   string
-	ProjectID   string
-	Kind        string
-	Limit       int
-	BeforeRowID int64
-	Before      string
-	AfterRowID  int64
-	After       string
+type EmbeddingRecord struct {
+	ObjectID   string    `json:"object_id"`
+	ObjectKind string    `json:"object_kind"`
+	Model      string    `json:"model"`
+	Vector     []float32 `json:"vector"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
+// ListEventsOptions filters event list queries.
+type ListEventsOptions struct {
+	SessionID        string
+	ProjectID        string
+	Kind             string
+	Limit            int
+	BeforeSequenceID int64
+	Before           string
+	AfterSequenceID  int64
+	After            string
+	UnreflectedOnly  bool
+}
+
+// ListSummariesOptions filters summary list queries.
 type ListSummariesOptions struct {
 	Kind      string
 	Scope     Scope
@@ -122,6 +201,7 @@ type ListSummariesOptions struct {
 	Limit     int
 }
 
+// ListMemoriesOptions filters memory list queries.
 type ListMemoriesOptions struct {
 	Type      MemoryType
 	Scope     Scope
@@ -130,17 +210,27 @@ type ListMemoriesOptions struct {
 	Limit     int
 }
 
+// ListEntitiesOptions filters entity list queries.
 type ListEntitiesOptions struct {
 	Type  string
 	Limit int
 }
 
+// ListRelationshipsOptions filters relationship queries.
+type ListRelationshipsOptions struct {
+	EntityID         string // matches from_entity_id OR to_entity_id
+	RelationshipType string
+	Limit            int
+}
+
+// ListEpisodesOptions filters episode list queries.
 type ListEpisodesOptions struct {
 	Scope     Scope
 	ProjectID string
 	Limit     int
 }
 
+// ListJobsOptions filters job list queries.
 type ListJobsOptions struct {
 	Kind   string
 	Status string

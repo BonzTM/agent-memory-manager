@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 // claimPattern maps a trigger phrase to a predicate name for SPO extraction.
@@ -27,8 +27,8 @@ var claimPatterns = []claimPattern{
 	{phrase: " is ", predicate: "is_a"},
 }
 
-// ExtractClaims scans memories and extracts structured subject-predicate-object claims.
-// Returns the number of claims created.
+// ExtractClaims scans active memories, derives structured claims, and returns
+// the number created.
 func (s *AMMService) ExtractClaims(ctx context.Context) (int, error) {
 	// List recent memories to process.
 	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{

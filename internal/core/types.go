@@ -6,8 +6,11 @@ import "time"
 type Scope string
 
 const (
-	ScopeGlobal  Scope = "global"
+	// ScopeGlobal marks memory that applies across all projects.
+	ScopeGlobal Scope = "global"
+	// ScopeProject marks memory that applies within a project.
 	ScopeProject Scope = "project"
+	// ScopeSession marks memory that applies within a single session.
 	ScopeSession Scope = "session"
 )
 
@@ -15,8 +18,11 @@ const (
 type PrivacyLevel string
 
 const (
-	PrivacyPrivate    PrivacyLevel = "private"
-	PrivacyShared     PrivacyLevel = "shared"
+	// PrivacyPrivate marks content visible only to the local owner.
+	PrivacyPrivate PrivacyLevel = "private"
+	// PrivacyShared marks content visible to trusted collaborators.
+	PrivacyShared PrivacyLevel = "shared"
+	// PrivacyPublicSafe marks content safe for broader publication.
 	PrivacyPublicSafe PrivacyLevel = "public_safe"
 )
 
@@ -24,31 +30,51 @@ const (
 type MemoryStatus string
 
 const (
-	MemoryStatusActive     MemoryStatus = "active"
+	// MemoryStatusActive marks a memory as currently active.
+	MemoryStatusActive MemoryStatus = "active"
+	// MemoryStatusSuperseded marks a memory as replaced by a newer one.
 	MemoryStatusSuperseded MemoryStatus = "superseded"
-	MemoryStatusArchived   MemoryStatus = "archived"
-	MemoryStatusRetracted  MemoryStatus = "retracted"
+	// MemoryStatusArchived marks a memory as retained but inactive.
+	MemoryStatusArchived MemoryStatus = "archived"
+	// MemoryStatusRetracted marks a memory as withdrawn.
+	MemoryStatusRetracted MemoryStatus = "retracted"
 )
 
 // MemoryType is the kind of durable memory record.
 type MemoryType string
 
 const (
-	MemoryTypeIdentity      MemoryType = "identity"
-	MemoryTypePreference    MemoryType = "preference"
-	MemoryTypeFact          MemoryType = "fact"
-	MemoryTypeDecision      MemoryType = "decision"
-	MemoryTypeEpisode       MemoryType = "episode"
-	MemoryTypeTodo          MemoryType = "todo"
-	MemoryTypeRelationship  MemoryType = "relationship"
-	MemoryTypeProcedure     MemoryType = "procedure"
-	MemoryTypeConstraint    MemoryType = "constraint"
-	MemoryTypeIncident      MemoryType = "incident"
-	MemoryTypeArtifact      MemoryType = "artifact"
-	MemoryTypeSummary       MemoryType = "summary"
+	// MemoryTypeIdentity represents a stable identity claim.
+	MemoryTypeIdentity MemoryType = "identity"
+	// MemoryTypePreference represents a preference.
+	MemoryTypePreference MemoryType = "preference"
+	// MemoryTypeFact represents a factual claim.
+	MemoryTypeFact MemoryType = "fact"
+	// MemoryTypeDecision represents a recorded decision.
+	MemoryTypeDecision MemoryType = "decision"
+	// MemoryTypeEpisode represents a narrative episode.
+	MemoryTypeEpisode MemoryType = "episode"
+	// MemoryTypeTodo represents an actionable todo item.
+	MemoryTypeTodo MemoryType = "todo"
+	// MemoryTypeRelationship represents a relationship between entities.
+	MemoryTypeRelationship MemoryType = "relationship"
+	// MemoryTypeProcedure represents a procedural instruction.
+	MemoryTypeProcedure MemoryType = "procedure"
+	// MemoryTypeConstraint represents a constraint or rule.
+	MemoryTypeConstraint MemoryType = "constraint"
+	// MemoryTypeIncident represents an important incident.
+	MemoryTypeIncident MemoryType = "incident"
+	// MemoryTypeArtifact represents a durable artifact reference.
+	MemoryTypeArtifact MemoryType = "artifact"
+	// MemoryTypeSummary represents a summary-as-memory record.
+	MemoryTypeSummary MemoryType = "summary"
+	// MemoryTypeActiveContext represents active context to preserve.
 	MemoryTypeActiveContext MemoryType = "active_context"
-	MemoryTypeOpenLoop      MemoryType = "open_loop"
-	MemoryTypeAssumption    MemoryType = "assumption"
+	// MemoryTypeOpenLoop represents an unresolved open loop.
+	MemoryTypeOpenLoop MemoryType = "open_loop"
+	// MemoryTypeAssumption represents a provisional assumption.
+	MemoryTypeAssumption MemoryType = "assumption"
+	// MemoryTypeContradiction represents a conflicting claim.
 	MemoryTypeContradiction MemoryType = "contradiction"
 )
 
@@ -56,20 +82,30 @@ const (
 type RecallMode string
 
 const (
-	RecallModeAmbient  RecallMode = "ambient"
-	RecallModeFacts    RecallMode = "facts"
+	// RecallModeAmbient returns low-latency associative recall.
+	RecallModeAmbient RecallMode = "ambient"
+	// RecallModeFacts returns factual memories.
+	RecallModeFacts RecallMode = "facts"
+	// RecallModeEpisodes returns narrative episodes.
 	RecallModeEpisodes RecallMode = "episodes"
+	// RecallModeTimeline returns chronologically ordered results.
 	RecallModeTimeline RecallMode = "timeline"
-	RecallModeProject  RecallMode = "project"
-	RecallModeEntity   RecallMode = "entity"
-	RecallModeActive   RecallMode = "active"
-	RecallModeHistory  RecallMode = "history"
-	RecallModeHybrid   RecallMode = "hybrid"
+	// RecallModeProject returns results scoped to a project.
+	RecallModeProject RecallMode = "project"
+	// RecallModeEntity returns results related to entities.
+	RecallModeEntity RecallMode = "entity"
+	// RecallModeActive returns active context and open loops.
+	RecallModeActive RecallMode = "active"
+	// RecallModeHistory searches raw event history.
+	RecallModeHistory RecallMode = "history"
+	// RecallModeHybrid combines multiple retrieval strategies.
+	RecallModeHybrid RecallMode = "hybrid"
 )
 
 // Event is an append-only raw interaction record.
 type Event struct {
-	RowID        int64             `json:"-"`
+	// SequenceID is the monotonic insertion-order identifier for pagination.
+	SequenceID   int64             `json:"-"`
 	ID           string            `json:"id"`
 	Kind         string            `json:"kind"`
 	SourceSystem string            `json:"source_system"`
@@ -85,6 +121,9 @@ type Event struct {
 	Hash         string            `json:"hash,omitempty"`
 	OccurredAt   time.Time         `json:"occurred_at"`
 	IngestedAt   time.Time         `json:"ingested_at"`
+	// ReflectedAt records when this event was processed by the reflect job.
+	// Nil indicates the event has not yet been reflected.
+	ReflectedAt *time.Time `json:"reflected_at,omitempty"`
 }
 
 // Summary is a compression layer object over history.
@@ -228,6 +267,8 @@ type IngestionPolicy struct {
 	PatternType string            `json:"pattern_type"` // session, source, surface, agent, project, runtime
 	Pattern     string            `json:"pattern"`
 	Mode        string            `json:"mode"` // full, read_only, ignore
+	Priority    int               `json:"priority,omitempty"`
+	MatchMode   string            `json:"match_mode,omitempty"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 	CreatedAt   time.Time         `json:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`
@@ -295,4 +336,26 @@ type StatusResult struct {
 	SummaryCount int64  `json:"summary_count"`
 	EpisodeCount int64  `json:"episode_count"`
 	EntityCount  int64  `json:"entity_count"`
+}
+
+// Project represents a registered project with metadata.
+type Project struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Path        string            `json:"path,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+}
+
+// Relationship represents a directed relationship between two entities.
+type Relationship struct {
+	ID               string            `json:"id"`
+	FromEntityID     string            `json:"from_entity_id"`
+	ToEntityID       string            `json:"to_entity_id"`
+	RelationshipType string            `json:"relationship_type"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
 }

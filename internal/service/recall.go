@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 const (
@@ -23,7 +23,8 @@ type recallFilterOptions struct {
 	suppressToolResults bool
 }
 
-// Recall performs retrieval using the specified mode with full scoring.
+// Recall retrieves items for query using the requested recall mode and the
+// package scoring pipeline.
 func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallOptions) (*core.RecallResult, error) {
 	start := time.Now()
 
@@ -97,6 +98,7 @@ func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallO
 // buildScoringContext creates the scoring context for a recall operation.
 func (s *AMMService) buildScoringContext(ctx context.Context, query string, opts core.RecallOptions) ScoringContext {
 	queryEntities := ExtractEntities(query)
+	queryEmbedding := s.buildQueryEmbedding(ctx, query)
 
 	// Build recent recalls set for repetition suppression.
 	recentRecalls := make(map[string]bool)
@@ -110,12 +112,13 @@ func (s *AMMService) buildScoringContext(ctx context.Context, query string, opts
 	}
 
 	return ScoringContext{
-		Query:         query,
-		QueryEntities: queryEntities,
-		ProjectID:     opts.ProjectID,
-		SessionID:     opts.SessionID,
-		RecentRecalls: recentRecalls,
-		Now:           time.Now().UTC(),
+		Query:          query,
+		QueryEmbedding: queryEmbedding,
+		QueryEntities:  queryEntities,
+		ProjectID:      opts.ProjectID,
+		SessionID:      opts.SessionID,
+		RecentRecalls:  recentRecalls,
+		Now:            time.Now().UTC(),
 	}
 }
 
@@ -151,6 +154,8 @@ func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.
 		candidates = append(candidates, EpisodeToCandidate(ep, i))
 	}
 
+	s.attachCandidateEmbeddings(ctx, candidates)
+
 	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
 }
 
@@ -167,6 +172,7 @@ func (s *AMMService) recallFacts(ctx context.Context, query string, opts core.Re
 		}
 		candidates = append(candidates, MemoryToCandidate(m, i))
 	}
+	s.attachCandidateEmbeddings(ctx, candidates)
 	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
 }
 
@@ -180,6 +186,7 @@ func (s *AMMService) recallEpisodes(ctx context.Context, query string, opts core
 	for i, ep := range episodes {
 		candidates = append(candidates, EpisodeToCandidate(ep, i))
 	}
+	s.attachCandidateEmbeddings(ctx, candidates)
 	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
 }
 
@@ -199,6 +206,7 @@ func (s *AMMService) recallProject(ctx context.Context, query string, opts core.
 		}
 		candidates = append(candidates, MemoryToCandidate(mem, i))
 	}
+	s.attachCandidateEmbeddings(ctx, candidates)
 	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
 }
 
@@ -216,6 +224,7 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 		}
 		candidates = append(candidates, MemoryToCandidate(m, i))
 	}
+	s.attachCandidateEmbeddings(ctx, candidates)
 
 	items := scoreAndConvert(candidates, sctx, defaultRecallFilterOptions())
 	entities, err := s.repo.SearchEntities(ctx, query, opts.Limit)
@@ -244,6 +253,7 @@ func (s *AMMService) recallHistory(ctx context.Context, query string, opts core.
 	for i, evt := range events {
 		candidates = append(candidates, EventToCandidate(evt, i))
 	}
+	s.attachCandidateEmbeddings(ctx, candidates)
 	return scoreAndConvert(candidates, sctx, historyRecallFilterOptions()), nil
 }
 
@@ -287,7 +297,45 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 		candidates = append(candidates, EventToCandidate(evt, i))
 	}
 
+	s.attachCandidateEmbeddings(ctx, candidates)
+
 	return scoreAndConvert(candidates, sctx, hybridRecallFilterOptions()), nil
+}
+
+func (s *AMMService) buildQueryEmbedding(ctx context.Context, query string) []float32 {
+	if s.embeddingProvider == nil || query == "" {
+		return nil
+	}
+	vectors, err := s.embeddingProvider.Embed(ctx, []string{query})
+	if err != nil || len(vectors) == 0 || len(vectors[0]) == 0 {
+		return nil
+	}
+	return vectors[0]
+}
+
+func (s *AMMService) attachCandidateEmbeddings(ctx context.Context, candidates []ScoringCandidate) {
+	if s.embeddingProvider == nil {
+		return
+	}
+	model := s.embeddingProvider.Model()
+	if model == "" {
+		return
+	}
+	for i := range candidates {
+		objectKind := embeddingObjectKind(candidates[i].Kind)
+		rec, err := s.repo.GetEmbedding(ctx, candidates[i].ID, objectKind, model)
+		if err != nil || rec == nil || len(rec.Vector) == 0 {
+			continue
+		}
+		candidates[i].Embedding = rec.Vector
+	}
+}
+
+func embeddingObjectKind(candidateKind string) string {
+	if candidateKind == "history-node" {
+		return "event"
+	}
+	return candidateKind
 }
 
 // scoreAndConvert scores candidates and converts to RecallItems sorted by score.

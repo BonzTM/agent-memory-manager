@@ -35,11 +35,38 @@ type Service interface {
 	// UpdateMemory updates an existing memory.
 	UpdateMemory(ctx context.Context, memory *Memory) (*Memory, error)
 
+	// ListPolicies returns all configured ingestion policies.
 	ListPolicies(ctx context.Context) ([]IngestionPolicy, error)
 
+	// AddPolicy stores a new ingestion policy.
 	AddPolicy(ctx context.Context, policy *IngestionPolicy) (*IngestionPolicy, error)
 
+	// RemovePolicy deletes an ingestion policy by ID.
 	RemovePolicy(ctx context.Context, id string) error
+
+	// RegisterProject stores a project.
+	RegisterProject(ctx context.Context, project *Project) (*Project, error)
+
+	// GetProject retrieves a project by ID.
+	GetProject(ctx context.Context, id string) (*Project, error)
+
+	// ListProjects returns all registered projects.
+	ListProjects(ctx context.Context) ([]Project, error)
+
+	// RemoveProject deletes a project by ID.
+	RemoveProject(ctx context.Context, id string) error
+
+	// AddRelationship stores a relationship.
+	AddRelationship(ctx context.Context, rel *Relationship) (*Relationship, error)
+
+	// GetRelationship retrieves a relationship by ID.
+	GetRelationship(ctx context.Context, id string) (*Relationship, error)
+
+	// ListRelationships returns relationships matching filters.
+	ListRelationships(ctx context.Context, opts ListRelationshipsOptions) ([]Relationship, error)
+
+	// RemoveRelationship deletes a relationship by ID.
+	RemoveRelationship(ctx context.Context, id string) error
 
 	// GetSummary retrieves a single summary by ID.
 	GetSummary(ctx context.Context, id string) (*Summary, error)

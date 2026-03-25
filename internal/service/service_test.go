@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/adapters/sqlite"
-	"github.com/joshd-04/agent-memory-manager/internal/core"
-	"github.com/joshd-04/agent-memory-manager/internal/service"
+	"github.com/bonztm/agent-memory-manager/internal/adapters/sqlite"
+	"github.com/bonztm/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/service"
 )
 
 func testService(t *testing.T) core.Service {
@@ -27,7 +27,7 @@ func testService(t *testing.T) core.Service {
 		t.Fatal(err)
 	}
 	repo := &sqlite.SQLiteRepository{DB: db}
-	svc := service.New(repo, dbPath)
+	svc := service.New(repo, dbPath, nil, nil)
 	t.Cleanup(func() { db.Close() })
 	return svc
 }
@@ -37,7 +37,7 @@ func TestInit(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "init_test.db")
 
 	repo := sqlite.NewSQLiteRepository()
-	svc := service.New(repo, dbPath)
+	svc := service.New(repo, dbPath, nil, nil)
 
 	ctx := context.Background()
 	if err := svc.Init(ctx, dbPath); err != nil {

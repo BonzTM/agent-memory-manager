@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
-// FormEpisodes creates episode records from session event clusters.
-// Returns the number of episodes created.
+// FormEpisodes groups session events into episode records and returns the
+// number created.
 func (s *AMMService) FormEpisodes(ctx context.Context) (int, error) {
 	// List recent events grouped by session_id.
 	events, err := s.repo.ListEvents(ctx, core.ListEventsOptions{

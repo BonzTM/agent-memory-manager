@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/joshd-04/agent-memory-manager/internal/adapters/sqlite"
-	"github.com/joshd-04/agent-memory-manager/internal/core"
-	"github.com/joshd-04/agent-memory-manager/internal/service"
+	"github.com/bonztm/agent-memory-manager/internal/adapters/sqlite"
+	"github.com/bonztm/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/service"
 )
 
 func testMCPService(t *testing.T) core.Service {
@@ -25,7 +25,7 @@ func testMCPService(t *testing.T) core.Service {
 		t.Fatalf("migrate: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return service.New(&sqlite.SQLiteRepository{DB: db}, dbPath)
+	return service.New(&sqlite.SQLiteRepository{DB: db}, dbPath, nil, nil)
 }
 
 func toolReq(t *testing.T, name string, args interface{}) jsonrpcRequest {

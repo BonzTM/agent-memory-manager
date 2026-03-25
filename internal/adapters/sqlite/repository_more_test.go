@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 func TestRepositoryLifecycleAndInitialization(t *testing.T) {
@@ -297,22 +297,83 @@ func TestMatchIngestionPolicy(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
-	first := &core.IngestionPolicy{ID: "pol_old", PatternType: "source", Pattern: "svc-*", Mode: "read_only", CreatedAt: now, UpdatedAt: now}
-	second := &core.IngestionPolicy{ID: "pol_new", PatternType: "source", Pattern: "svc-orders", Mode: "ignore", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
-	if err := repo.InsertIngestionPolicy(ctx, first); err != nil {
-		t.Fatalf("insert first policy: %v", err)
+	policies := []*core.IngestionPolicy{
+		{ID: "pol_glob_default", PatternType: "source", Pattern: "svc-*", Mode: "read_only", CreatedAt: now, UpdatedAt: now},
+		{ID: "pol_exact", PatternType: "session", Pattern: "session-123", Mode: "ignore", MatchMode: "exact", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)},
+		{ID: "pol_glob", PatternType: "session", Pattern: "session-*", Mode: "read_only", MatchMode: "glob", CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)},
+		{ID: "pol_regex", PatternType: "agent", Pattern: `^sess_[0-9]+$`, Mode: "ignore", MatchMode: "regex", CreatedAt: now.Add(3 * time.Second), UpdatedAt: now.Add(3 * time.Second)},
+		{ID: "pol_regex_invalid", PatternType: "project", Pattern: "(", Mode: "ignore", MatchMode: "regex", CreatedAt: now.Add(4 * time.Second), UpdatedAt: now.Add(4 * time.Second)},
+		{ID: "pol_low_priority", PatternType: "surface", Pattern: "ui-*", Mode: "read_only", MatchMode: "glob", Priority: 10, CreatedAt: now.Add(5 * time.Second), UpdatedAt: now.Add(5 * time.Second)},
+		{ID: "pol_high_priority", PatternType: "surface", Pattern: "ui-dashboard", Mode: "ignore", MatchMode: "exact", Priority: 100, CreatedAt: now.Add(6 * time.Second), UpdatedAt: now.Add(6 * time.Second)},
 	}
-	if err := repo.InsertIngestionPolicy(ctx, second); err != nil {
-		t.Fatalf("insert second policy: %v", err)
+	for _, policy := range policies {
+		if err := repo.InsertIngestionPolicy(ctx, policy); err != nil {
+			t.Fatalf("insert policy %s: %v", policy.ID, err)
+		}
 	}
 
-	matched, err := repo.MatchIngestionPolicy(ctx, "source", "svc-orders")
-	if err != nil {
-		t.Fatalf("match ingestion policy: %v", err)
-	}
-	if matched == nil || matched.ID != first.ID {
-		t.Fatalf("expected oldest matching policy, got %+v", matched)
-	}
+	t.Run("default match_mode is glob", func(t *testing.T) {
+		matched, err := repo.MatchIngestionPolicy(ctx, "source", "svc-orders")
+		if err != nil {
+			t.Fatalf("match ingestion policy: %v", err)
+		}
+		if matched == nil || matched.ID != "pol_glob_default" {
+			t.Fatalf("expected default glob policy, got %+v", matched)
+		}
+		if matched.MatchMode != "glob" {
+			t.Fatalf("expected default match_mode glob, got %q", matched.MatchMode)
+		}
+	})
+
+	t.Run("exact match mode", func(t *testing.T) {
+		matched, err := repo.MatchIngestionPolicy(ctx, "session", "session-123")
+		if err != nil {
+			t.Fatalf("match ingestion policy: %v", err)
+		}
+		if matched == nil || matched.ID != "pol_exact" {
+			t.Fatalf("expected exact policy, got %+v", matched)
+		}
+	})
+
+	t.Run("glob wildcard match mode", func(t *testing.T) {
+		matched, err := repo.MatchIngestionPolicy(ctx, "session", "session-999")
+		if err != nil {
+			t.Fatalf("match ingestion policy: %v", err)
+		}
+		if matched == nil || matched.ID != "pol_glob" {
+			t.Fatalf("expected glob policy, got %+v", matched)
+		}
+	})
+
+	t.Run("regex match mode", func(t *testing.T) {
+		matched, err := repo.MatchIngestionPolicy(ctx, "agent", "sess_42")
+		if err != nil {
+			t.Fatalf("match ingestion policy: %v", err)
+		}
+		if matched == nil || matched.ID != "pol_regex" {
+			t.Fatalf("expected regex policy, got %+v", matched)
+		}
+	})
+
+	t.Run("invalid regex does not crash and does not match", func(t *testing.T) {
+		matched, err := repo.MatchIngestionPolicy(ctx, "project", "anything")
+		if err != nil {
+			t.Fatalf("match ingestion policy: %v", err)
+		}
+		if matched != nil {
+			t.Fatalf("expected nil for invalid regex policy, got %+v", matched)
+		}
+	})
+
+	t.Run("higher priority policy wins", func(t *testing.T) {
+		matched, err := repo.MatchIngestionPolicy(ctx, "surface", "ui-dashboard")
+		if err != nil {
+			t.Fatalf("match ingestion policy: %v", err)
+		}
+		if matched == nil || matched.ID != "pol_high_priority" {
+			t.Fatalf("expected higher priority policy, got %+v", matched)
+		}
+	})
 
 	none, err := repo.MatchIngestionPolicy(ctx, "source", "random")
 	if err != nil {
@@ -320,5 +381,181 @@ func TestMatchIngestionPolicy(t *testing.T) {
 	}
 	if none != nil {
 		t.Fatalf("expected nil for non-match, got %+v", none)
+	}
+}
+
+func TestProjectsCRUD(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	project := &core.Project{
+		ID:          "prj_test",
+		Name:        "amm",
+		Path:        "/tmp/amm",
+		Description: "memory manager",
+		Metadata:    map[string]string{"env": "test"},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := repo.InsertProject(ctx, project); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+
+	got, err := repo.GetProject(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if got.Name != project.Name || got.Path != project.Path || got.Metadata["env"] != "test" {
+		t.Fatalf("unexpected project: %+v", got)
+	}
+
+	projects, err := repo.ListProjects(ctx)
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	if len(projects) != 1 || projects[0].ID != project.ID {
+		t.Fatalf("unexpected projects: %+v", projects)
+	}
+
+	if err := repo.DeleteProject(ctx, project.ID); err != nil {
+		t.Fatalf("delete project: %v", err)
+	}
+	if _, err := repo.GetProject(ctx, project.ID); err == nil {
+		t.Fatal("expected get project after delete to fail")
+	}
+}
+
+func TestRelationshipsCRUD(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	from := &core.Entity{ID: "ent_from", Type: "person", CanonicalName: "Alice", CreatedAt: now, UpdatedAt: now}
+	to := &core.Entity{ID: "ent_to", Type: "service", CanonicalName: "AMM", CreatedAt: now, UpdatedAt: now}
+	if err := repo.InsertEntity(ctx, from); err != nil {
+		t.Fatalf("insert from entity: %v", err)
+	}
+	if err := repo.InsertEntity(ctx, to); err != nil {
+		t.Fatalf("insert to entity: %v", err)
+	}
+
+	rel := &core.Relationship{
+		ID:               "rel_test",
+		FromEntityID:     from.ID,
+		ToEntityID:       to.ID,
+		RelationshipType: "owns",
+		Metadata:         map[string]string{"source": "test"},
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := repo.InsertRelationship(ctx, rel); err != nil {
+		t.Fatalf("insert relationship: %v", err)
+	}
+
+	got, err := repo.GetRelationship(ctx, rel.ID)
+	if err != nil {
+		t.Fatalf("get relationship: %v", err)
+	}
+	if got.FromEntityID != from.ID || got.ToEntityID != to.ID || got.RelationshipType != "owns" {
+		t.Fatalf("unexpected relationship: %+v", got)
+	}
+
+	byEntity, err := repo.ListRelationships(ctx, core.ListRelationshipsOptions{EntityID: from.ID, Limit: 10})
+	if err != nil {
+		t.Fatalf("list relationships by entity: %v", err)
+	}
+	if len(byEntity) != 1 || byEntity[0].ID != rel.ID {
+		t.Fatalf("unexpected relationships by entity: %+v", byEntity)
+	}
+
+	byType, err := repo.ListRelationships(ctx, core.ListRelationshipsOptions{RelationshipType: "owns", Limit: 10})
+	if err != nil {
+		t.Fatalf("list relationships by type: %v", err)
+	}
+	if len(byType) != 1 || byType[0].ID != rel.ID {
+		t.Fatalf("unexpected relationships by type: %+v", byType)
+	}
+
+	if err := repo.DeleteRelationship(ctx, rel.ID); err != nil {
+		t.Fatalf("delete relationship: %v", err)
+	}
+	if _, err := repo.GetRelationship(ctx, rel.ID); err == nil {
+		t.Fatal("expected get relationship after delete to fail")
+	}
+}
+
+func TestEmbeddingsRoundTrip(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	first := &core.EmbeddingRecord{
+		ObjectID:   "mem_embed_1",
+		ObjectKind: "memory",
+		Model:      "local-test-v1",
+		Vector:     []float32{0.1, 0.2, 0.3},
+		CreatedAt:  now,
+	}
+	if err := repo.UpsertEmbedding(ctx, first); err != nil {
+		t.Fatalf("upsert embedding: %v", err)
+	}
+
+	got, err := repo.GetEmbedding(ctx, first.ObjectID, first.ObjectKind, first.Model)
+	if err != nil {
+		t.Fatalf("get embedding: %v", err)
+	}
+	if got.ObjectID != first.ObjectID || got.ObjectKind != first.ObjectKind || got.Model != first.Model {
+		t.Fatalf("unexpected embedding identity: %+v", got)
+	}
+	if len(got.Vector) != 3 || got.Vector[0] != 0.1 || got.Vector[2] != 0.3 {
+		t.Fatalf("unexpected embedding vector: %#v", got.Vector)
+	}
+
+	updated := &core.EmbeddingRecord{
+		ObjectID:   first.ObjectID,
+		ObjectKind: first.ObjectKind,
+		Model:      first.Model,
+		Vector:     []float32{0.9, 0.8},
+		CreatedAt:  now.Add(time.Minute),
+	}
+	if err := repo.UpsertEmbedding(ctx, updated); err != nil {
+		t.Fatalf("upsert embedding update: %v", err)
+	}
+
+	gotUpdated, err := repo.GetEmbedding(ctx, updated.ObjectID, updated.ObjectKind, updated.Model)
+	if err != nil {
+		t.Fatalf("get updated embedding: %v", err)
+	}
+	if len(gotUpdated.Vector) != 2 || gotUpdated.Vector[0] != 0.9 || gotUpdated.Vector[1] != 0.8 {
+		t.Fatalf("unexpected updated vector: %#v", gotUpdated.Vector)
+	}
+
+	secondModel := &core.EmbeddingRecord{
+		ObjectID:   first.ObjectID,
+		ObjectKind: first.ObjectKind,
+		Model:      "local-test-v2",
+		Vector:     []float32{0.4},
+		CreatedAt:  now,
+	}
+	if err := repo.UpsertEmbedding(ctx, secondModel); err != nil {
+		t.Fatalf("upsert second model embedding: %v", err)
+	}
+
+	if err := repo.DeleteEmbeddings(ctx, first.ObjectID, first.ObjectKind, first.Model); err != nil {
+		t.Fatalf("delete single model embedding: %v", err)
+	}
+	if _, err := repo.GetEmbedding(ctx, first.ObjectID, first.ObjectKind, first.Model); err == nil {
+		t.Fatal("expected deleted model embedding lookup to fail")
+	}
+	if _, err := repo.GetEmbedding(ctx, secondModel.ObjectID, secondModel.ObjectKind, secondModel.Model); err != nil {
+		t.Fatalf("expected other model embedding to remain: %v", err)
+	}
+
+	if err := repo.DeleteEmbeddings(ctx, secondModel.ObjectID, secondModel.ObjectKind, ""); err != nil {
+		t.Fatalf("delete all object embeddings: %v", err)
+	}
+	if _, err := repo.GetEmbedding(ctx, secondModel.ObjectID, secondModel.ObjectKind, secondModel.Model); err == nil {
+		t.Fatal("expected all object embeddings to be deleted")
 	}
 }

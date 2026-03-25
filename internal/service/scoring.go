@@ -5,21 +5,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
-// v0 weights: semantic is disabled, so we renormalize the remaining 9 signals.
-// Original weights (sum = 1.0):
-//
-//	lexical=0.25, semantic=0.18, entity_overlap=0.18, scope_fit=0.10,
-//	recency=0.08, importance=0.07, temporal_validity=0.05,
-//	structural_proximity=0.05, freshness=0.04, repetition_penalty=-0.10
-//
-// Without semantic the positive weights sum to 0.57 (from 0.75).
-// We scale each positive weight by 0.75/0.57 ≈ 1.3158 so they sum to ~0.75.
-// The penalty stays at -0.10 (not renormalized — it is a deduction, not a share).
+// Recall scoring uses a weighted blend of positive signals plus a repetition
+// penalty. Semantic similarity is optional and only participates when both query
+// and candidate embeddings are available. Positive weights are dynamically
+// renormalized to keep total positive contribution stable when optional signals
+// are missing.
 const (
 	wLexical             = 0.25 * (0.75 / 0.57) // ~0.3289
+	wSemantic            = 0.18 * (0.75 / 0.57) // ~0.2368
 	wEntityOverlap       = 0.18 * (0.75 / 0.57) // ~0.2368
 	wScopeFit            = 0.10 * (0.75 / 0.57) // ~0.1316
 	wRecency             = 0.08 * (0.75 / 0.57) // ~0.1053
@@ -33,19 +29,23 @@ const (
 // recencyHalfLifeDays controls exponential decay for the recency signal.
 const recencyHalfLifeDays = 14.0
 
-// ScoringContext holds the query context for scoring.
+// ScoringContext carries the query-time signals needed to rank recall
+// candidates.
 type ScoringContext struct {
-	Query         string
-	QueryEntities []string // extracted from query
-	ProjectID     string
-	SessionID     string
-	RecentRecalls map[string]bool // item IDs shown recently
-	Now           time.Time
+	Query          string
+	QueryEmbedding []float32
+	QueryEntities  []string // extracted from query
+	ProjectID      string
+	SessionID      string
+	RecentRecalls  map[string]bool // item IDs shown recently
+	Now            time.Time
 }
 
-// SignalBreakdown shows the per-signal scores for explainability.
+// SignalBreakdown records the per-signal contributions used to explain a final
+// recall score.
 type SignalBreakdown struct {
 	Lexical             float64 `json:"lexical"`
+	Semantic            float64 `json:"semantic"`
 	EntityOverlap       float64 `json:"entity_overlap"`
 	ScopeFit            float64 `json:"scope_fit"`
 	Recency             float64 `json:"recency"`
@@ -57,7 +57,8 @@ type SignalBreakdown struct {
 	FinalScore          float64 `json:"final_score"`
 }
 
-// ScoringCandidate is a type-erased representation of any scoreable item.
+// ScoringCandidate is the normalized representation of a memory-like item used
+// by the recall scoring engine.
 type ScoringCandidate struct {
 	ID               string
 	Kind             string // memory, summary, episode, history-node
@@ -79,14 +80,16 @@ type ScoringCandidate struct {
 	LastConfirmedAt  *time.Time
 	SupersededBy     string
 	SourceEventIDs   []string
+	Embedding        []float32
 	FTSPosition      int // position in FTS results (0-based)
 }
 
-// ScoreItem computes the weighted multi-signal score for a candidate.
+// ScoreItem computes the weighted recall score and signal breakdown for item.
 func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 	var b SignalBreakdown
 
 	b.Lexical = signalLexical(item.FTSPosition)
+	b.Semantic = signalSemantic(item, sctx)
 	b.EntityOverlap = signalEntityOverlap(item, sctx.QueryEntities)
 	b.ScopeFit = signalScopeFit(item, sctx)
 	b.Recency = signalRecency(item, sctx.Now)
@@ -96,15 +99,26 @@ func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 	b.Freshness = signalFreshness(item, sctx.Now)
 	b.RepetitionPenalty = signalRepetitionPenalty(item, sctx)
 
-	b.FinalScore = wLexical*b.Lexical +
-		wEntityOverlap*b.EntityOverlap +
-		wScopeFit*b.ScopeFit +
-		wRecency*b.Recency +
-		wImportance*b.Importance +
-		wTemporalValidity*b.TemporalValidity +
-		wStructuralProximity*b.StructuralProximity +
-		wFreshness*b.Freshness -
-		wRepetitionPenalty*b.RepetitionPenalty
+	totalPositive := wLexical + wEntityOverlap + wScopeFit + wRecency + wImportance + wTemporalValidity + wStructuralProximity + wFreshness
+	activePositive := totalPositive
+	if semanticSignalAvailable(item, sctx) {
+		activePositive += wSemantic
+	}
+
+	renorm := 1.0
+	if activePositive > 0 {
+		renorm = totalPositive / activePositive
+	}
+
+	b.FinalScore = renorm*(wLexical*b.Lexical+
+		wSemantic*b.Semantic+
+		wEntityOverlap*b.EntityOverlap+
+		wScopeFit*b.ScopeFit+
+		wRecency*b.Recency+
+		wImportance*b.Importance+
+		wTemporalValidity*b.TemporalValidity+
+		wStructuralProximity*b.StructuralProximity+
+		wFreshness*b.Freshness) - wRepetitionPenalty*b.RepetitionPenalty
 
 	// Clamp to [0, 1].
 	if b.FinalScore < 0 {
@@ -126,6 +140,45 @@ func signalLexical(ftsPosition int) float64 {
 		return 1.0
 	}
 	return 1.0 / (1.0 + float64(ftsPosition)*0.2)
+}
+
+// signalSemantic computes cosine similarity between query and candidate
+// embeddings. Missing embeddings produce an absent semantic signal (0.0).
+func signalSemantic(item ScoringCandidate, sctx ScoringContext) float64 {
+	cos, ok := cosineSimilarity(sctx.QueryEmbedding, item.Embedding)
+	if !ok {
+		return 0.0
+	}
+	if cos < 0 {
+		return 0.0
+	}
+	if cos > 1 {
+		return 1.0
+	}
+	return cos
+}
+
+func semanticSignalAvailable(item ScoringCandidate, sctx ScoringContext) bool {
+	_, ok := cosineSimilarity(sctx.QueryEmbedding, item.Embedding)
+	return ok
+}
+
+func cosineSimilarity(a, b []float32) (float64, bool) {
+	if len(a) == 0 || len(b) == 0 || len(a) != len(b) {
+		return 0, false
+	}
+	var dot, normA, normB float64
+	for i := range a {
+		av := float64(a[i])
+		bv := float64(b[i])
+		dot += av * bv
+		normA += av * av
+		normB += bv * bv
+	}
+	if normA == 0 || normB == 0 {
+		return 0, false
+	}
+	return dot / (math.Sqrt(normA) * math.Sqrt(normB)), true
 }
 
 // signalEntityOverlap counts how many query entities appear in the item text.
@@ -261,7 +314,8 @@ func lastTouchTimestamp(item ScoringCandidate) time.Time {
 
 // --- conversion helpers ---
 
-// MemoryToCandidate converts a core.Memory to a ScoringCandidate.
+// MemoryToCandidate converts a memory into a scoring candidate using ftsPos as
+// its lexical rank.
 func MemoryToCandidate(m core.Memory, ftsPos int) ScoringCandidate {
 	return ScoringCandidate{
 		ID:               m.ID,
@@ -288,7 +342,8 @@ func MemoryToCandidate(m core.Memory, ftsPos int) ScoringCandidate {
 	}
 }
 
-// SummaryToCandidate converts a core.Summary to a ScoringCandidate.
+// SummaryToCandidate converts a summary into a scoring candidate using ftsPos
+// as its lexical rank.
 func SummaryToCandidate(s core.Summary, ftsPos int) ScoringCandidate {
 	return ScoringCandidate{
 		ID:               s.ID,
@@ -306,7 +361,8 @@ func SummaryToCandidate(s core.Summary, ftsPos int) ScoringCandidate {
 	}
 }
 
-// EpisodeToCandidate converts a core.Episode to a ScoringCandidate.
+// EpisodeToCandidate converts an episode into a scoring candidate using ftsPos
+// as its lexical rank.
 func EpisodeToCandidate(e core.Episode, ftsPos int) ScoringCandidate {
 	return ScoringCandidate{
 		ID:               e.ID,
@@ -324,7 +380,8 @@ func EpisodeToCandidate(e core.Episode, ftsPos int) ScoringCandidate {
 	}
 }
 
-// EventToCandidate converts a core.Event to a ScoringCandidate.
+// EventToCandidate converts an event into a history-node scoring candidate
+// using ftsPos as its lexical rank.
 func EventToCandidate(e core.Event, ftsPos int) ScoringCandidate {
 	return ScoringCandidate{
 		ID:               e.ID,

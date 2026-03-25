@@ -3,69 +3,26 @@ package service
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
-const reflectBatchSize = 100
+const reflectBatchSize = 100 // reflectBatchSize controls how many events are claimed per batch.
 
-// Reflect scans unprocessed events and creates candidate durable memories.
-// Returns the number of memories created.
-func (s *AMMService) Reflect(ctx context.Context) (int, error) {
-	runStartedAt := time.Now().UTC()
-
-	// Determine watermark: find the last completed "reflect" job.
-	var afterRowID int64
-	jobs, err := s.repo.ListJobs(ctx, core.ListJobsOptions{
-		Kind:   "reflect",
-		Status: "completed",
-		Limit:  1,
-	})
-	if err == nil && len(jobs) > 0 {
-		if value := jobs[0].Result["last_event_rowid"]; value != "" {
-			parsed, parseErr := strconv.ParseInt(value, 10, 64)
-			if parseErr == nil && parsed > 0 {
-				afterRowID = parsed
-			}
-		}
-	}
-
-	maxRowID, err := s.repo.MaxEventRowID(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("get max event rowid for reflect: %w", err)
-	}
-	if maxRowID <= afterRowID {
-		return 0, nil
-	}
-
-	// Build a set of event IDs that already have memories referencing them.
-	// We check existing memories and collect their source event IDs.
-	existingMemories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
-		Limit: 50000,
-	})
-	if err != nil {
-		return 0, fmt.Errorf("list memories for dedup: %w", err)
-	}
-	reflectedEventIDs := make(map[string]bool)
-	for _, mem := range existingMemories {
-		for _, eid := range mem.SourceEventIDs {
-			reflectedEventIDs[eid] = true
-		}
-	}
-
+// Reflect scans unreflected events, extracts durable memories.
+// Uses atomic row-level claim to prevent duplicate processing across concurrent jobs.
+func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 	created := 0
-	lastScannedRowID := afterRowID
+	processedCount := 0
+
 	for {
-		events, err := s.repo.ListEvents(ctx, core.ListEventsOptions{
-			AfterRowID:  lastScannedRowID,
-			BeforeRowID: maxRowID,
-			Limit:       reflectBatchSize,
-		})
+		// Atomically claim unreflected events - this prevents concurrent jobs
+		// from processing the same events, even if they start simultaneously.
+		events, err := s.repo.ClaimUnreflectedEvents(ctx, reflectBatchSize)
 		if err != nil {
-			return created, fmt.Errorf("list events for reflect: %w", err)
+			return created, fmt.Errorf("claim events for reflect: %w", err)
 		}
 		if len(events) == 0 {
 			break
@@ -73,12 +30,7 @@ func (s *AMMService) Reflect(ctx context.Context) (int, error) {
 
 		for i := range events {
 			evt := &events[i]
-			lastScannedRowID = evt.RowID
-
-			// Skip events already reflected.
-			if reflectedEventIDs[evt.ID] {
-				continue
-			}
+			processedCount++
 
 			// Skip events tagged as read_only or ignore by ingestion policy.
 			if mode, ok := evt.Metadata["ingestion_mode"]; ok && (mode == "read_only" || mode == "ignore") {
@@ -93,7 +45,6 @@ func (s *AMMService) Reflect(ctx context.Context) (int, error) {
 				continue
 			}
 
-			// Determine scope from event.
 			scope := core.ScopeGlobal
 			projectID := ""
 			if evt.ProjectID != "" {
@@ -101,7 +52,6 @@ func (s *AMMService) Reflect(ctx context.Context) (int, error) {
 				projectID = evt.ProjectID
 			}
 
-			eventCreated := false
 			for _, rawCandidate := range candidates {
 				candidate, ok := prepareMemoryCandidate(rawCandidate)
 				if !ok {
@@ -109,8 +59,8 @@ func (s *AMMService) Reflect(ctx context.Context) (int, error) {
 				}
 
 				now := time.Now().UTC()
-				mem := &core.Memory{
-					ID:               generateID("mem_"),
+				importance := importanceForCandidate(candidate)
+				candidateMemory := core.Memory{
 					Type:             candidate.Type,
 					Scope:            scope,
 					ProjectID:        projectID,
@@ -118,10 +68,93 @@ func (s *AMMService) Reflect(ctx context.Context) (int, error) {
 					Body:             candidate.Body,
 					TightDescription: candidate.TightDescription,
 					Confidence:       candidate.Confidence,
-					Importance:       importanceForCandidate(candidate),
-					PrivacyLevel:     core.PrivacyPrivate,
+					Importance:       importance,
 					Status:           core.MemoryStatusActive,
 					SourceEventIDs:   []string{evt.ID},
+				}
+
+				existing, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
+					Type:      candidate.Type,
+					Scope:     scope,
+					ProjectID: projectID,
+					Status:    core.MemoryStatusActive,
+					Limit:     50000,
+				})
+				if err != nil {
+					return created, fmt.Errorf("list memories for reflect duplicate detection: %w", err)
+				}
+				activeMemories := make([]*core.Memory, 0, len(existing))
+				for i := range existing {
+					activeMemories = append(activeMemories, &existing[i])
+				}
+
+				if duplicates := findDuplicateActiveMemories(activeMemories, candidateMemory); len(duplicates) > 0 {
+					duplicate := selectDuplicateKeeper(duplicates)
+					duplicate.SourceEventIDs = mergeUniqueStrings(duplicate.SourceEventIDs, candidateMemory.SourceEventIDs)
+					for _, sibling := range duplicates {
+						if sibling == nil || sibling.ID == duplicate.ID {
+							continue
+						}
+						duplicate.SourceEventIDs = mergeUniqueStrings(duplicate.SourceEventIDs, sibling.SourceEventIDs)
+					}
+					if candidateMemory.Confidence > duplicate.Confidence {
+						duplicate.Confidence = candidateMemory.Confidence
+					}
+					if candidateMemory.Importance > duplicate.Importance {
+						duplicate.Importance = candidateMemory.Importance
+					}
+					if shouldUpgradeDuplicateContent(duplicate, candidateMemory, s.extractionMethod()) {
+						duplicate.Subject = candidateMemory.Subject
+						duplicate.Body = candidateMemory.Body
+						duplicate.TightDescription = candidateMemory.TightDescription
+					}
+					if duplicate.Metadata == nil {
+						duplicate.Metadata = make(map[string]string)
+					}
+					method := s.extractionMethod()
+					if duplicate.Metadata["extraction_method"] == "" || method == "llm" {
+						duplicate.Metadata["extraction_method"] = method
+					}
+					duplicate.UpdatedAt = now
+					if err := s.repo.UpdateMemory(ctx, duplicate); err != nil {
+						return created, fmt.Errorf("update duplicate reflected memory %s: %w", duplicate.ID, err)
+					}
+					s.upsertMemoryEmbeddingBestEffort(ctx, duplicate)
+
+					for _, sibling := range duplicates {
+						if sibling == nil || sibling.ID == duplicate.ID || sibling.Status == core.MemoryStatusSuperseded {
+							continue
+						}
+						supNow := time.Now().UTC()
+						sibling.Status = core.MemoryStatusSuperseded
+						sibling.SupersededBy = duplicate.ID
+						sibling.SupersededAt = &supNow
+						sibling.UpdatedAt = supNow
+						if err := s.repo.UpdateMemory(ctx, sibling); err != nil {
+							return created, fmt.Errorf("supersede duplicate reflected sibling %s: %w", sibling.ID, err)
+						}
+						s.upsertMemoryEmbeddingBestEffort(ctx, sibling)
+					}
+
+					if err := s.linkEntitiesToMemory(ctx, duplicate.ID, evt.Content); err != nil {
+						return created, fmt.Errorf("link reflected entities: %w", err)
+					}
+					continue
+				}
+
+				mem := &core.Memory{
+					ID:               generateID("mem_"),
+					Type:             candidateMemory.Type,
+					Scope:            candidateMemory.Scope,
+					ProjectID:        candidateMemory.ProjectID,
+					Subject:          candidateMemory.Subject,
+					Body:             candidateMemory.Body,
+					TightDescription: candidateMemory.TightDescription,
+					Confidence:       candidateMemory.Confidence,
+					Importance:       importance,
+					PrivacyLevel:     core.PrivacyPrivate,
+					Status:           core.MemoryStatusActive,
+					SourceEventIDs:   candidateMemory.SourceEventIDs,
 					Metadata:         map[string]string{"extraction_method": s.extractionMethod()},
 					CreatedAt:        now,
 					UpdatedAt:        now,
@@ -130,39 +163,38 @@ func (s *AMMService) Reflect(ctx context.Context) (int, error) {
 				if err := s.repo.InsertMemory(ctx, mem); err != nil {
 					return created, fmt.Errorf("insert reflected memory: %w", err)
 				}
+				s.upsertMemoryEmbeddingBestEffort(ctx, mem)
 
 				if err := s.linkEntitiesToMemory(ctx, mem.ID, evt.Content); err != nil {
 					return created, fmt.Errorf("link reflected entities: %w", err)
 				}
 
 				created++
-				eventCreated = true
-			}
-			if eventCreated {
-				reflectedEventIDs[evt.ID] = true
 			}
 		}
 	}
 
-	// Record a job for watermarking.
 	finishedAt := time.Now().UTC()
-	job := &core.Job{
-		ID:         generateID("job_"),
-		Kind:       "reflect",
-		Status:     "completed",
-		StartedAt:  &runStartedAt,
-		FinishedAt: &finishedAt,
-		Result:     map[string]string{"created": fmt.Sprintf("%d", created), "last_event_rowid": fmt.Sprintf("%d", lastScannedRowID)},
-		CreatedAt:  finishedAt,
+	result := map[string]string{
+		"created":   fmt.Sprintf("%d", created),
+		"processed": fmt.Sprintf("%d", processedCount),
 	}
-	if err := s.repo.InsertJob(ctx, job); err != nil {
-		// Non-fatal: the memories were already created.
-		return created, fmt.Errorf("record reflect job: %w", err)
+
+	if jobID != "" {
+		if job, err := s.repo.GetJob(ctx, jobID); err == nil {
+			job.Status = "completed"
+			job.FinishedAt = &finishedAt
+			job.Result = result
+			if err := s.repo.UpdateJob(ctx, job); err != nil {
+				return created, fmt.Errorf("update reflect job: %w", err)
+			}
+		}
 	}
 
 	return created, nil
 }
 
+// linkEntitiesToMemory extracts entity names from content and links them to the memory.
 func (s *AMMService) linkEntitiesToMemory(ctx context.Context, memoryID, content string) error {
 	names := ExtractEntities(content)
 	for _, name := range names {
@@ -180,6 +212,8 @@ func (s *AMMService) linkEntitiesToMemory(ctx context.Context, memoryID, content
 	return nil
 }
 
+// findOrCreateEntity searches for an existing entity by name (case-insensitive),
+// or creates a new entity if no match is found.
 func (s *AMMService) findOrCreateEntity(ctx context.Context, canonicalName string) (*core.Entity, error) {
 	existing, err := s.repo.SearchEntities(ctx, canonicalName, 50)
 	if err != nil {

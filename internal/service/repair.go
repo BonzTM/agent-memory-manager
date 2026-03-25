@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
-// CheckIntegrity validates all link integrity and returns issues found.
+// CheckIntegrity validates cross-record links and summarizes any integrity
+// issues it finds.
 func (s *AMMService) CheckIntegrity(ctx context.Context) (*core.RepairReport, error) {
 	report := &core.RepairReport{}
 
@@ -97,7 +98,8 @@ func (s *AMMService) CheckIntegrity(ctx context.Context) (*core.RepairReport, er
 	return report, nil
 }
 
-// FixLinks attempts to repair broken references.
+// FixLinks repairs link issues that can be corrected through the repository
+// interface and reports what changed.
 func (s *AMMService) FixLinks(ctx context.Context) (*core.RepairReport, error) {
 	report := &core.RepairReport{}
 

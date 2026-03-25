@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 type dummySummarizer struct{}
@@ -540,7 +540,7 @@ func TestExpandSummaryChildAndFallbackSourceSpan(t *testing.T) {
 
 func TestNewWithCustomSummarizerAndObservedRecallItem(t *testing.T) {
 	_, repo := testServiceAndRepo(t)
-	svc := New(repo, "/tmp/test.db", dummySummarizer{})
+	svc := New(repo, "/tmp/test.db", dummySummarizer{}, nil)
 	if svc.summarizer == nil {
 		t.Fatal("expected custom summarizer to be set")
 	}
@@ -549,5 +549,97 @@ func TestNewWithCustomSummarizerAndObservedRecallItem(t *testing.T) {
 	item := memoryToRecallItem(core.Memory{ID: "m_obs", Type: core.MemoryTypeFact, Scope: core.ScopeGlobal, TightDescription: "observed", Confidence: 0.9, ObservedAt: &now}, 0)
 	if item.ObservedAt == "" || item.Confidence == nil {
 		t.Fatalf("expected observed_at and confidence to be populated: %+v", item)
+	}
+}
+
+func TestProjectServiceCRUD(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	created, err := svc.RegisterProject(ctx, &core.Project{
+		Name:        "agent-memory-manager",
+		Path:        "/home/joshd/git/agent-memory-manager",
+		Description: "amm project",
+		Metadata:    map[string]string{"owner": "test"},
+	})
+	if err != nil {
+		t.Fatalf("register project: %v", err)
+	}
+	if created.ID == "" || created.CreatedAt.IsZero() || created.UpdatedAt.IsZero() {
+		t.Fatalf("expected generated id and timestamps, got %+v", created)
+	}
+
+	got, err := svc.GetProject(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if got.Name != created.Name || got.Metadata["owner"] != "test" {
+		t.Fatalf("unexpected project: %+v", got)
+	}
+
+	projects, err := svc.ListProjects(ctx)
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	if len(projects) != 1 || projects[0].ID != created.ID {
+		t.Fatalf("unexpected projects list: %+v", projects)
+	}
+
+	if err := svc.RemoveProject(ctx, created.ID); err != nil {
+		t.Fatalf("remove project: %v", err)
+	}
+	if _, err := svc.GetProject(ctx, created.ID); err == nil {
+		t.Fatal("expected get project to fail after delete")
+	}
+}
+
+func TestRelationshipServiceCRUD(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	from := &core.Entity{ID: "ent_srv_from", Type: "person", CanonicalName: "Alice", CreatedAt: now, UpdatedAt: now}
+	to := &core.Entity{ID: "ent_srv_to", Type: "service", CanonicalName: "AMM", CreatedAt: now, UpdatedAt: now}
+	if err := repo.InsertEntity(ctx, from); err != nil {
+		t.Fatalf("insert from entity: %v", err)
+	}
+	if err := repo.InsertEntity(ctx, to); err != nil {
+		t.Fatalf("insert to entity: %v", err)
+	}
+
+	created, err := svc.AddRelationship(ctx, &core.Relationship{
+		FromEntityID:     from.ID,
+		ToEntityID:       to.ID,
+		RelationshipType: "owns",
+		Metadata:         map[string]string{"source": "test"},
+	})
+	if err != nil {
+		t.Fatalf("add relationship: %v", err)
+	}
+	if created.ID == "" || created.CreatedAt.IsZero() || created.UpdatedAt.IsZero() {
+		t.Fatalf("expected generated id and timestamps, got %+v", created)
+	}
+
+	got, err := svc.GetRelationship(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get relationship: %v", err)
+	}
+	if got.RelationshipType != "owns" || got.FromEntityID != from.ID {
+		t.Fatalf("unexpected relationship: %+v", got)
+	}
+
+	rels, err := svc.ListRelationships(ctx, core.ListRelationshipsOptions{EntityID: from.ID, Limit: 10})
+	if err != nil {
+		t.Fatalf("list relationships: %v", err)
+	}
+	if len(rels) != 1 || rels[0].ID != created.ID {
+		t.Fatalf("unexpected relationships list: %+v", rels)
+	}
+
+	if err := svc.RemoveRelationship(ctx, created.ID); err != nil {
+		t.Fatalf("remove relationship: %v", err)
+	}
+	if _, err := svc.GetRelationship(ctx, created.ID); err == nil {
+		t.Fatal("expected get relationship to fail after delete")
 	}
 }

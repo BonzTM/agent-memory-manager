@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 func testRepo(t *testing.T) *SQLiteRepository {
@@ -44,6 +44,42 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 	if err := Migrate(ctx, db); err != nil {
 		t.Fatalf("second migrate: %v", err)
+	}
+}
+
+func TestMigrateCreatesProjectsAndRelationshipsTables(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	ctx := context.Background()
+
+	db, err := Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	for _, table := range []string{"projects", "relationships"} {
+		row := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table)
+		var count int
+		if err := row.Scan(&count); err != nil {
+			t.Fatalf("check table %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected table %s to exist", table)
+		}
+	}
+
+	row := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(version), 0) FROM schema_version")
+	var version int
+	if err := row.Scan(&version); err != nil {
+		t.Fatalf("scan schema version: %v", err)
+	}
+	if version < 5 {
+		t.Fatalf("expected schema version >= 5, got %d", version)
 	}
 }
 

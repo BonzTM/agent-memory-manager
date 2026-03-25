@@ -1,0 +1,53 @@
+package runtime
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+)
+
+func TestBuildEmbeddingProvider_DefaultOff(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Embeddings.Enabled = false
+	provider := buildEmbeddingProvider(cfg)
+	if provider != nil {
+		t.Fatalf("expected nil embedding provider when disabled, got %#v", provider)
+	}
+}
+
+func TestBuildEmbeddingProvider_EnabledUsesNoop(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Embeddings.Enabled = true
+	cfg.Embeddings.Provider = "local-noop"
+	cfg.Embeddings.Model = "test-model"
+
+	provider := buildEmbeddingProvider(cfg)
+	if provider == nil {
+		t.Fatal("expected non-nil embedding provider when enabled")
+	}
+	if provider.Name() != "local-noop" {
+		t.Fatalf("expected provider name local-noop, got %q", provider.Name())
+	}
+	if provider.Model() != "test-model" {
+		t.Fatalf("expected provider model test-model, got %q", provider.Model())
+	}
+}
+
+func TestNewService_DefaultConfigSafeWithoutEmbeddingProvider(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Storage.DBPath = filepath.Join(t.TempDir(), "runtime-service.db")
+
+	svc, cleanup, err := NewService(cfg)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	status, err := svc.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !status.Initialized {
+		t.Fatal("expected initialized service")
+	}
+}

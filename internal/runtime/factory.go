@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/joshd-04/agent-memory-manager/internal/adapters/sqlite"
-	"github.com/joshd-04/agent-memory-manager/internal/core"
-	"github.com/joshd-04/agent-memory-manager/internal/service"
+	"github.com/bonztm/agent-memory-manager/internal/adapters/sqlite"
+	"github.com/bonztm/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/service"
 )
 
 func buildSummarizer(cfg Config) core.Summarizer {
@@ -20,6 +20,13 @@ func buildSummarizer(cfg Config) core.Summarizer {
 		return service.NewLLMSummarizer(cfg.LLM.Endpoint, cfg.LLM.APIKey, model)
 	}
 	return nil
+}
+
+func buildEmbeddingProvider(cfg Config) core.EmbeddingProvider {
+	if !cfg.Embeddings.Enabled {
+		return nil
+	}
+	return service.NewNoopEmbeddingProvider(cfg.Embeddings.Provider, cfg.Embeddings.Model)
 }
 
 // NewService creates a fully initialized amm service from the given config.
@@ -44,7 +51,7 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	}
 
 	repo := &sqlite.SQLiteRepository{DB: db}
-	svc := service.New(repo, cfg.Storage.DBPath, buildSummarizer(cfg))
+	svc := service.New(repo, cfg.Storage.DBPath, buildSummarizer(cfg), buildEmbeddingProvider(cfg))
 	svc.SetReprocessBatchSize(cfg.LLM.BatchSize)
 
 	cleanup := func() {

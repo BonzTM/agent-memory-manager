@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 )
 
@@ -453,6 +454,78 @@ BEGIN
 END;
 `,
 	},
+	{
+		Version:     3,
+		Description: "add reflected_at tracking for events to prevent reprocessing",
+		SQL: `
+-- Add reflected_at column to track which events have been processed by reflect
+ALTER TABLE events ADD COLUMN reflected_at TEXT;
+
+-- Index for efficient querying of unreflected events
+CREATE INDEX IF NOT EXISTS idx_events_reflected_at ON events(reflected_at);
+
+-- Index for querying events by rowid range with reflection status
+CREATE INDEX IF NOT EXISTS idx_events_rowid_reflected ON events(rowid, reflected_at);
+`,
+	},
+	{
+		Version:     4,
+		Description: "add events sequence_id for portable ordered pagination",
+		SQL: `
+-- Add explicit sequence_id to replace SQLite-specific rowid usage
+ALTER TABLE events ADD COLUMN sequence_id INTEGER;
+
+-- Backfill sequence_id for existing rows
+UPDATE events SET sequence_id = rowid;
+
+-- Indexes for sequence-based pagination and reflection scans
+CREATE INDEX IF NOT EXISTS idx_events_sequence_id ON events(sequence_id);
+CREATE INDEX IF NOT EXISTS idx_events_sequence_id_reflected ON events(sequence_id, reflected_at);
+`,
+	},
+	{
+		Version:     5,
+		Description: "add projects and relationships tables",
+		SQL: `
+-- projects: project registry with metadata
+CREATE TABLE IF NOT EXISTS projects (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	path TEXT,
+	description TEXT,
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name);
+CREATE INDEX IF NOT EXISTS idx_projects_path ON projects(path);
+
+-- relationships: entity-to-entity relationships
+CREATE TABLE IF NOT EXISTS relationships (
+	id TEXT PRIMARY KEY,
+	from_entity_id TEXT NOT NULL,
+	to_entity_id TEXT NOT NULL,
+	relationship_type TEXT NOT NULL,
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY(from_entity_id) REFERENCES entities(id),
+	FOREIGN KEY(to_entity_id) REFERENCES entities(id)
+);
+CREATE INDEX IF NOT EXISTS idx_relationships_from ON relationships(from_entity_id);
+CREATE INDEX IF NOT EXISTS idx_relationships_to ON relationships(to_entity_id);
+CREATE INDEX IF NOT EXISTS idx_relationships_type ON relationships(relationship_type);
+`,
+	},
+	{
+		Version:     6,
+		Description: "add priority to ingestion policies and match_mode column",
+		SQL: `
+ALTER TABLE ingestion_policies ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ingestion_policies ADD COLUMN match_mode TEXT NOT NULL DEFAULT 'glob';
+CREATE INDEX IF NOT EXISTS idx_policies_priority ON ingestion_policies(priority DESC);
+`,
+	},
 }
 
 // Migrate runs all pending migrations.
@@ -484,7 +557,7 @@ func Migrate(ctx context.Context, db *DB) error {
 		if err != nil {
 			return fmt.Errorf("begin migration %d: %w", m.Version, err)
 		}
-		if _, err := tx.ExecContext(ctx, m.SQL); err != nil {
+		if err := execMigration(ctx, tx, m); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("migration %d (%s): %w", m.Version, m.Description, err)
 		}
@@ -495,6 +568,21 @@ func Migrate(ctx context.Context, db *DB) error {
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit migration %d: %w", m.Version, err)
 		}
+	}
+	return nil
+}
+
+func execMigration(ctx context.Context, tx *sql.Tx, m migration) error {
+	if m.Version == 3 {
+		_, err := tx.ExecContext(ctx, `
+ALTER TABLE events ADD COLUMN reflected_at TEXT;
+CREATE INDEX IF NOT EXISTS idx_events_reflected_at ON events(reflected_at);
+`)
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, m.SQL); err != nil {
+		return err
 	}
 	return nil
 }

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 const (
@@ -16,8 +16,8 @@ const (
 	sessionBodyMaxChars = 2000
 )
 
-// CompressHistory creates leaf summaries over recent event spans.
-// Returns the number of summaries created.
+// CompressHistory summarizes recent event chunks into leaf summaries and
+// returns the number created.
 func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 	// Determine watermark from last compress job.
 	var afterTime string
@@ -106,6 +106,7 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 		if err := s.repo.InsertSummary(ctx, summary); err != nil {
 			return created, fmt.Errorf("insert leaf summary: %w", err)
 		}
+		s.upsertSummaryEmbeddingBestEffort(ctx, summary)
 
 		// Create edges linking summary to each event.
 		for order, eid := range eventIDs {
@@ -141,8 +142,8 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 	return created, nil
 }
 
-// ConsolidateSessions creates session-level summaries from events grouped by session_id.
-// Returns the number of session summaries created.
+// ConsolidateSessions creates session-level summaries from grouped session
+// events and returns the number created.
 func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 	// List recent events (up to 500) and group by session_id.
 	events, err := s.repo.ListEvents(ctx, core.ListEventsOptions{
@@ -180,17 +181,18 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 
 		// Collect event IDs and build body.
 		eventIDs := make([]string, 0, len(evts))
-		var bodyBuilder []byte
+		var bodyBuilder strings.Builder
 		for _, evt := range evts {
 			eventIDs = append(eventIDs, evt.ID)
-			if len(bodyBuilder) > 0 {
-				bodyBuilder = append(bodyBuilder, '\n')
+			if bodyBuilder.Len() > 0 {
+				bodyBuilder.WriteByte('\n')
 			}
-			bodyBuilder = append(bodyBuilder, evt.Content...)
-			if len(bodyBuilder) > sessionBodyMaxChars {
-				bodyBuilder = bodyBuilder[:sessionBodyMaxChars]
-				break
-			}
+			bodyBuilder.WriteString(evt.Content)
+		}
+
+		body, err := s.summarizer.Summarize(ctx, bodyBuilder.String(), sessionBodyMaxChars)
+		if err != nil {
+			return created, fmt.Errorf("summarize session body: %w", err)
 		}
 
 		// Build topic snippets for tight description.
@@ -205,7 +207,7 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 			ProjectID:        projectID,
 			SessionID:        sessionID,
 			Title:            fmt.Sprintf("Session %s", sessionID),
-			Body:             string(bodyBuilder),
+			Body:             body,
 			TightDescription: fmt.Sprintf("Session summary: %d events, topics: %s", len(evts), snippets),
 			PrivacyLevel:     core.PrivacyPrivate,
 			SourceSpan: core.SourceSpan{
@@ -218,6 +220,7 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 		if err := s.repo.InsertSummary(ctx, summary); err != nil {
 			return created, fmt.Errorf("insert session summary: %w", err)
 		}
+		s.upsertSummaryEmbeddingBestEffort(ctx, summary)
 
 		// Create edges.
 		for order, eid := range eventIDs {

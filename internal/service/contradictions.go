@@ -6,12 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
-// DetectContradictions scans claims for conflicting subject+predicate pairs with different values.
-// Creates contradiction-type memories linking the conflicting items.
-// Returns the number of contradictions found.
+// DetectContradictions scans extracted claims for conflicting subject-predicate
+// pairs and records contradiction memories for conflicts it finds.
 func (s *AMMService) DetectContradictions(ctx context.Context) (int, error) {
 	// List all active memories.
 	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
@@ -153,6 +152,28 @@ func (s *AMMService) DetectContradictions(ctx context.Context) (int, error) {
 		if err := s.repo.InsertMemory(ctx, mem); err != nil {
 			return found, fmt.Errorf("insert contradiction memory: %w", err)
 		}
+		s.upsertMemoryEmbeddingBestEffort(ctx, mem)
+
+		memA, errA := s.repo.GetMemory(ctx, a.memoryID)
+		memB, errB := s.repo.GetMemory(ctx, b.memoryID)
+		if errA == nil && errB == nil && !memA.CreatedAt.Equal(memB.CreatedAt) {
+			older := memA
+			newer := memB
+			if memB.CreatedAt.Before(memA.CreatedAt) {
+				older = memB
+				newer = memA
+			}
+
+			older.Status = core.MemoryStatusSuperseded
+			older.SupersededBy = newer.ID
+			older.SupersededAt = &now
+			older.UpdatedAt = now
+			if err := s.repo.UpdateMemory(ctx, older); err != nil {
+				return found, fmt.Errorf("supersede older conflicting memory: %w", err)
+			}
+			s.upsertMemoryEmbeddingBestEffort(ctx, older)
+		}
+
 		existingBodies[body] = true
 		found++
 	}

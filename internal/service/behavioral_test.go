@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/adapters/sqlite"
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/adapters/sqlite"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 // testServiceAndRepo creates an AMMService backed by a real SQLite DB and
@@ -30,7 +30,7 @@ func testServiceAndRepo(t *testing.T) (*AMMService, *sqlite.SQLiteRepository) {
 		t.Fatal(err)
 	}
 	repo := &sqlite.SQLiteRepository{DB: db}
-	svc := New(repo, dbPath)
+	svc := New(repo, dbPath, nil, nil)
 	t.Cleanup(func() { db.Close() })
 	return svc, repo
 }
@@ -48,13 +48,76 @@ func testServiceAndRepoWithSummarizer(t *testing.T, summarizer core.Summarizer) 
 		t.Fatal(err)
 	}
 	repo := &sqlite.SQLiteRepository{DB: db}
-	svc := New(repo, dbPath, summarizer)
+	svc := New(repo, dbPath, summarizer, nil)
+	t.Cleanup(func() { db.Close() })
+	return svc, repo
+}
+
+func testServiceAndRepoWithEmbeddingProvider(t *testing.T, provider core.EmbeddingProvider) (*AMMService, *sqlite.SQLiteRepository) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	ctx := context.Background()
+	db, err := sqlite.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlite.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	repo := &sqlite.SQLiteRepository{DB: db}
+	svc := New(repo, dbPath, nil, provider)
 	t.Cleanup(func() { db.Close() })
 	return svc, repo
 }
 
 type reflectTestSummarizer struct {
 	extract func(string) ([]core.MemoryCandidate, error)
+}
+
+type staticEmbeddingProvider struct {
+	model   string
+	vectors map[string][]float32
+}
+
+func (p staticEmbeddingProvider) Name() string { return "test-static" }
+
+func (p staticEmbeddingProvider) Model() string {
+	if p.model == "" {
+		return "test-model"
+	}
+	return p.model
+}
+
+func (p staticEmbeddingProvider) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i, text := range texts {
+		if vec, ok := p.vectors[text]; ok {
+			out[i] = vec
+			continue
+		}
+		out[i] = []float32{}
+	}
+	return out, nil
+}
+
+type consolidateTestSummarizer struct {
+	summarize func(content string, maxLen int) (string, error)
+}
+
+func (s consolidateTestSummarizer) Summarize(_ context.Context, content string, maxLen int) (string, error) {
+	if s.summarize == nil {
+		return content, nil
+	}
+	return s.summarize(content, maxLen)
+}
+
+func (consolidateTestSummarizer) ExtractMemoryCandidate(context.Context, string) ([]core.MemoryCandidate, error) {
+	return nil, nil
+}
+
+func (consolidateTestSummarizer) ExtractMemoryCandidateBatch(context.Context, []string) ([]core.MemoryCandidate, error) {
+	return nil, nil
 }
 
 func (s reflectTestSummarizer) Summarize(context.Context, string, int) (string, error) {
@@ -98,7 +161,7 @@ func TestReflect_ExtractsPreferences(t *testing.T) {
 		}
 	}
 
-	created, err := svc.Reflect(ctx)
+	created, err := svc.Reflect(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +201,7 @@ func TestReflect_ExtractsDecisions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := svc.Reflect(ctx)
+	created, err := svc.Reflect(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +240,7 @@ func TestReflect_AssignsTypeBasedImportance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := svc.Reflect(ctx)
+	created, err := svc.Reflect(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +278,7 @@ func TestReflect_SkipsDuplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, err := svc.Reflect(ctx)
+	first, err := svc.Reflect(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,12 +286,66 @@ func TestReflect_SkipsDuplicates(t *testing.T) {
 		t.Fatalf("expected first Reflect to create >= 1, got %d", first)
 	}
 
-	second, err := svc.Reflect(ctx)
+	second, err := svc.Reflect(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if second != 0 {
 		t.Errorf("expected second Reflect to create 0 (dedup), got %d", second)
+	}
+}
+
+func TestReflect_DeduplicatesParaphrases(t *testing.T) {
+	summarizer := reflectTestSummarizer{extract: func(content string) ([]core.MemoryCandidate, error) {
+		body := "Use Postgres for the primary application database"
+		if strings.Contains(content, "paraphrase two") {
+			body = "Use Postgres for primary application database"
+		}
+		return []core.MemoryCandidate{{
+			Type:             core.MemoryTypeFact,
+			Subject:          "database",
+			Body:             body,
+			TightDescription: body,
+			Confidence:       0.9,
+		}}, nil
+	}}
+
+	svc, repo := testServiceAndRepoWithSummarizer(t, summarizer)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	for i, content := range []string{"event paraphrase one", "event paraphrase two"} {
+		evt := &core.Event{
+			ID:           fmt.Sprintf("evt_reflect_paraphrase_%d", i),
+			Kind:         "message_user",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      content,
+			OccurredAt:   now,
+			IngestedAt:   now,
+		}
+		if err := repo.InsertEvent(ctx, evt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 created memory after paraphrase dedup, got %d", created)
+	}
+
+	all, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Type: core.MemoryTypeFact, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected exactly 1 stored memory for paraphrases, got %d", len(all))
+	}
+	if len(all[0].SourceEventIDs) != 2 {
+		t.Fatalf("expected deduped memory to retain both source event IDs, got %d", len(all[0].SourceEventIDs))
 	}
 }
 
@@ -247,7 +364,7 @@ func TestReflect_CreatesEntities(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := svc.Reflect(ctx)
+	created, err := svc.Reflect(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,12 +454,12 @@ func TestReflect_PaginatesBacklogBeyond100(t *testing.T) {
 		}
 	}
 
-	created, err := svc.Reflect(ctx)
+	created, err := svc.Reflect(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if created != 205 {
-		t.Fatalf("expected 205 created memories, got %d", created)
+		t.Fatalf("expected 205 created memories across paginated backlog, got %d", created)
 	}
 
 	mems, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusActive, Limit: 500})
@@ -350,10 +467,18 @@ func TestReflect_PaginatesBacklogBeyond100(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(mems) != 205 {
-		t.Fatalf("expected 205 active memories, got %d", len(mems))
+		t.Fatalf("expected 205 active memories from 205 reflected events, got %d", len(mems))
 	}
 
-	createdAgain, err := svc.Reflect(ctx)
+	superseded, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusSuperseded, Limit: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(superseded) != 0 {
+		t.Fatalf("expected 0 superseded memories for non-duplicate backlog events, got %d", len(superseded))
+	}
+
+	createdAgain, err := svc.Reflect(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +503,7 @@ func TestReflect_StoresAllCandidatesPerEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := svc.Reflect(ctx)
+	created, err := svc.Reflect(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +542,7 @@ func TestReflect_RejectsInvalidCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := svc.Reflect(ctx)
+	created, err := svc.Reflect(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +593,7 @@ func TestReflect_AdvancesCursorPastInvalidOnlyEvents(t *testing.T) {
 		}
 	}
 
-	created, err := svc.Reflect(ctx)
+	created, err := svc.Reflect(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,23 +601,94 @@ func TestReflect_AdvancesCursorPastInvalidOnlyEvents(t *testing.T) {
 		t.Fatalf("expected one valid memory from first reflect run, got %d", created)
 	}
 
-	jobs, err := repo.ListJobs(ctx, core.ListJobsOptions{Kind: "reflect", Status: "completed", Limit: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(jobs) != 1 {
-		t.Fatalf("expected one completed reflect job, got %d", len(jobs))
-	}
-	if jobs[0].Result["last_event_rowid"] == "" {
-		t.Fatalf("expected reflect job to persist last_event_rowid, got %#v", jobs[0].Result)
-	}
-
-	createdAgain, err := svc.Reflect(ctx)
+	// Second run should find zero unreflected events (all were claimed on first run).
+	createdAgain, err := svc.Reflect(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if createdAgain != 0 {
 		t.Fatalf("expected second reflect run to create 0 memories, got %d", createdAgain)
+	}
+}
+
+func TestReflect_SupersedesConflictingExistingMemory(t *testing.T) {
+	summarizer := reflectTestSummarizer{extract: func(content string) ([]core.MemoryCandidate, error) {
+		return []core.MemoryCandidate{{
+			Type:             core.MemoryTypeFact,
+			Subject:          "database",
+			Body:             "Use Postgres for storage",
+			TightDescription: "database choice postgres",
+			Confidence:       0.9,
+		}}, nil
+	}}
+	svc, repo := testServiceAndRepoWithSummarizer(t, summarizer)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	old := &core.Memory{
+		ID:               "mem_reflect_conflict_old",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Subject:          "database",
+		Body:             "Use SQLite for storage",
+		TightDescription: "database choice sqlite",
+		Confidence:       0.8,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now.Add(-time.Minute),
+		UpdatedAt:        now.Add(-time.Minute),
+	}
+	if err := repo.InsertMemory(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.InsertEvent(ctx, &core.Event{ID: "evt_reflect_conflict", Kind: "message_user", SourceSystem: "test", PrivacyLevel: core.PrivacyPrivate, Content: "we should use postgres", OccurredAt: now, IngestedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 created memory when content is not similar enough to merge, got %d", created)
+	}
+
+	updatedOld, err := repo.GetMemory(ctx, old.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedOld.Status != core.MemoryStatusActive {
+		t.Fatalf("expected existing memory to remain active, got %s", updatedOld.Status)
+	}
+	if updatedOld.SupersededBy != "" {
+		t.Fatalf("expected existing memory to have empty superseded_by, got %q", updatedOld.SupersededBy)
+	}
+	if updatedOld.Body != "Use SQLite for storage" {
+		t.Fatalf("expected existing memory body to remain unchanged, got %q", updatedOld.Body)
+	}
+	if len(updatedOld.SourceEventIDs) != 0 {
+		t.Fatalf("expected existing memory source event IDs unchanged, got %v", updatedOld.SourceEventIDs)
+	}
+
+	all, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Type: core.MemoryTypeFact, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected two fact memories when existing and candidate are not duplicates, got %d", len(all))
+	}
+
+	var postgresFound bool
+	for _, mem := range all {
+		if mem.Body == "Use Postgres for storage" {
+			postgresFound = true
+			break
+		}
+	}
+	if !postgresFound {
+		t.Fatal("expected reflected postgres memory to be inserted")
 	}
 }
 
@@ -582,6 +778,57 @@ func TestConsolidateSessions(t *testing.T) {
 	}
 	if summaries[0].SessionID != sessID {
 		t.Errorf("expected session_id=%s, got %s", sessID, summaries[0].SessionID)
+	}
+}
+
+func TestConsolidateSessions_UsesSummarizer(t *testing.T) {
+	var gotInput string
+	var gotMaxLen int
+	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: func(content string, maxLen int) (string, error) {
+		gotInput = content
+		gotMaxLen = maxLen
+		return "llm session summary", nil
+	}})
+	ctx := context.Background()
+
+	sessID := "sess_consolidate_llm"
+	for i := 0; i < 3; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			SessionID:    sessID,
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("llm consolidate event %d", i),
+			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.ConsolidateSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 session summary, got %d", created)
+	}
+	if gotMaxLen != sessionBodyMaxChars {
+		t.Fatalf("expected summarize maxLen %d, got %d", sessionBodyMaxChars, gotMaxLen)
+	}
+	if !strings.Contains(gotInput, "llm consolidate event 0") || !strings.Contains(gotInput, "llm consolidate event 2") {
+		t.Fatalf("expected summarize input to include concatenated event content, got %q", gotInput)
+	}
+
+	summaries, err := svc.repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "session", SessionID: sessID, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 session summary, got %d", len(summaries))
+	}
+	if summaries[0].Body != "llm session summary" {
+		t.Fatalf("expected summarized body, got %q", summaries[0].Body)
 	}
 }
 
@@ -705,6 +952,353 @@ func TestIngestionPolicy_Default(t *testing.T) {
 	}
 }
 
+func TestIngestionPolicy_ExplicitPolicyOverridesNoiseHeuristic(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	err := repo.InsertIngestionPolicy(ctx, &core.IngestionPolicy{
+		ID:          "pol_full_noise_source",
+		PatternType: "source",
+		Pattern:     "noise-source",
+		Mode:        "full",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	evt := &core.Event{
+		Kind:         "tool_result",
+		SourceSystem: "noise-source",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "go test ./...\n=== RUN   TestX\n--- PASS: TestX (0.00s)",
+		OccurredAt:   now,
+	}
+
+	ingest, createMem, err := svc.ShouldIngest(ctx, evt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ingest || !createMem {
+		t.Fatalf("expected explicit full policy to win; got ingest=%t createMemory=%t", ingest, createMem)
+	}
+
+	stored, err := svc.IngestEvent(ctx, evt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Metadata != nil {
+		if stored.Metadata["ingestion_mode"] == "read_only" {
+			t.Fatalf("expected heuristic not to downgrade explicit full policy event, metadata=%#v", stored.Metadata)
+		}
+		if stored.Metadata["ingestion_reason"] != "" || stored.Metadata["noise_kind"] != "" {
+			t.Fatalf("expected no noise metadata when explicit policy matches, metadata=%#v", stored.Metadata)
+		}
+	}
+}
+
+func TestIngestionPolicy_NoiseHeuristicDowngradesConservativeCases(t *testing.T) {
+	testCases := []struct {
+		name      string
+		event     *core.Event
+		noiseKind string
+	}{
+		{
+			name: "tool_result kind",
+			event: &core.Event{
+				Kind:         "tool_result",
+				SourceSystem: "test",
+				PrivacyLevel: core.PrivacyPrivate,
+				Content:      "{}",
+			},
+			noiseKind: "tool_result",
+		},
+		{
+			name: "large json blob",
+			event: &core.Event{
+				Kind:         "message",
+				SourceSystem: "test",
+				PrivacyLevel: core.PrivacyPrivate,
+				Content:      `{"records":[{"line":"` + strings.Repeat("a", 2400) + `"}]}`,
+			},
+			noiseKind: "json_blob",
+		},
+		{
+			name: "build output dump",
+			event: &core.Event{
+				Kind:         "message",
+				SourceSystem: "test",
+				PrivacyLevel: core.PrivacyPrivate,
+				Content:      "=== RUN   TestAlpha\n=== RUN   TestBeta\n--- PASS: TestAlpha (0.00s)\n--- FAIL: TestBeta (0.00s)\nerror: compile failed\nFAIL\tgithub.com/example/project\t0.123s",
+			},
+			noiseKind: "build_or_test_log",
+		},
+		{
+			name: "grep style dump",
+			event: &core.Event{
+				Kind:         "message",
+				SourceSystem: "test",
+				PrivacyLevel: core.PrivacyPrivate,
+				Content:      "internal/a.go:10:func A()\ninternal/b.go:11:func B()\ninternal/c.go:12:func C()\ninternal/d.go:13:func D()\ninternal/e.go:14:func E()\ninternal/f.go:15:func F()\ninternal/g.go:16:func G()\ninternal/h.go:17:func H()",
+			},
+			noiseKind: "listing_or_diff_dump",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := testServiceAndRepo(t)
+			ctx := context.Background()
+
+			evt := *tc.event
+			evt.OccurredAt = time.Now().UTC()
+
+			ingest, createMem, err := svc.ShouldIngest(ctx, &evt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !ingest || createMem {
+				t.Fatalf("expected noisy unmatched event to downgrade to read_only; got ingest=%t createMemory=%t", ingest, createMem)
+			}
+			if evt.Metadata["ingestion_mode"] != "read_only" {
+				t.Fatalf("expected ingestion_mode=read_only, got metadata=%#v", evt.Metadata)
+			}
+			if evt.Metadata["ingestion_reason"] != "noise_filter" {
+				t.Fatalf("expected ingestion_reason=noise_filter, got metadata=%#v", evt.Metadata)
+			}
+			if evt.Metadata["noise_kind"] != tc.noiseKind {
+				t.Fatalf("expected noise_kind=%s, got metadata=%#v", tc.noiseKind, evt.Metadata)
+			}
+		})
+	}
+}
+
+func TestIngestionPolicy_NoiseHeuristicKeepsNormalProseFull(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	evt := &core.Event{
+		Kind:         "message_user",
+		SourceSystem: "normal_system",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "I prefer concise responses and want to track decisions from this sprint.",
+		OccurredAt:   time.Now().UTC(),
+	}
+
+	ingest, createMem, err := svc.ShouldIngest(ctx, evt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ingest || !createMem {
+		t.Fatalf("expected normal prose to stay full; got ingest=%t createMemory=%t", ingest, createMem)
+	}
+	if evt.Metadata != nil && evt.Metadata["ingestion_mode"] == "read_only" {
+		t.Fatalf("expected no noise downgrade metadata for normal prose, got %#v", evt.Metadata)
+	}
+}
+
+func TestReflect_SkipsNoiseDowngradedEvents(t *testing.T) {
+	summarizer := reflectTestSummarizer{extract: func(_ string) ([]core.MemoryCandidate, error) {
+		return []core.MemoryCandidate{{
+			Type:             core.MemoryTypeFact,
+			Body:             "build output should not become memory",
+			TightDescription: "skip downgraded noise",
+			Confidence:       0.9,
+		}}, nil
+	}}
+	svc, _ := testServiceAndRepoWithSummarizer(t, summarizer)
+	ctx := context.Background()
+
+	evt, err := svc.IngestEvent(ctx, &core.Event{
+		Kind:         "tool_result",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "tool output that should be preserved in history only",
+		OccurredAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Metadata["ingestion_mode"] != "read_only" {
+		t.Fatalf("expected noisy event to be tagged read_only, got metadata=%#v", evt.Metadata)
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 0 {
+		t.Fatalf("expected reflect to skip downgraded noisy event, created=%d", created)
+	}
+
+	mems, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mems) != 0 {
+		t.Fatalf("expected no memories from downgraded noisy event, got %#v", mems)
+	}
+}
+
+func TestRemember_MergesNearExactDuplicate(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	first, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "postgres is primary database for production workloads",
+		TightDescription: "postgres is primary db",
+		Confidence:       0.6,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	merged, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "postgres is primary database for production workloads services",
+		TightDescription: "postgres remains primary db",
+		Confidence:       0.95,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged == nil {
+		t.Fatal("expected non-nil merged memory")
+	}
+	if merged.ID != first.ID {
+		t.Fatalf("expected duplicate to merge into keeper %s, got %s", first.ID, merged.ID)
+	}
+	if merged.Confidence != 0.95 {
+		t.Fatalf("expected keeper confidence to upgrade to 0.95, got %.2f", merged.Confidence)
+	}
+
+	active, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{
+		Type:   core.MemoryTypeFact,
+		Status: core.MemoryStatusActive,
+		Limit:  10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("expected exactly 1 active memory after merge, got %d", len(active))
+	}
+}
+
+func TestRemember_AllowsDistinctMemories(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	_, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "postgres powers analytics workloads",
+		TightDescription: "postgres for analytics",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "redis handles ephemeral cache state",
+		TightDescription: "redis cache layer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	active, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{
+		Type:   core.MemoryTypeFact,
+		Status: core.MemoryStatusActive,
+		Limit:  10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 2 {
+		t.Fatalf("expected 2 active distinct memories, got %d", len(active))
+	}
+}
+
+func TestRemember_ExplicitSupersedesSkipsDedup(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	base, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "kubernetes target cluster is alpha",
+		TightDescription: "k8s alpha",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newer, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "kubernetes target cluster is alpha now with hardened settings",
+		TightDescription: "k8s alpha hardened",
+		Supersedes:       base.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newer.ID == base.ID {
+		t.Fatalf("expected explicit supersession to insert new memory, got merged keeper %s", newer.ID)
+	}
+
+	updatedBase, err := svc.repo.GetMemory(ctx, base.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedBase.Status != core.MemoryStatusSuperseded {
+		t.Fatalf("expected base memory to be superseded, got %s", updatedBase.Status)
+	}
+	if updatedBase.SupersededBy != newer.ID {
+		t.Fatalf("expected base superseded_by=%s, got %s", newer.ID, updatedBase.SupersededBy)
+	}
+}
+
+func TestRemember_MergesSourceEventIDs(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	first, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypePreference,
+		Body:             "user prefers concise responses with direct action items",
+		TightDescription: "prefers concise responses",
+		SourceEventIDs:   []string{"evt-1", "evt-2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	merged, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypePreference,
+		Body:             "user prefers concise responses with direct action items always",
+		TightDescription: "concise responses preference",
+		SourceEventIDs:   []string{"evt-2", "evt-3"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.ID != first.ID {
+		t.Fatalf("expected source IDs merge to keep %s, got %s", first.ID, merged.ID)
+	}
+
+	got := make(map[string]bool, len(merged.SourceEventIDs))
+	for _, id := range merged.SourceEventIDs {
+		got[id] = true
+	}
+	for _, want := range []string{"evt-1", "evt-2", "evt-3"} {
+		if !got[want] {
+			t.Fatalf("expected merged source_event_ids to include %s, got %#v", want, merged.SourceEventIDs)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Supersession
 // ---------------------------------------------------------------------------
@@ -746,6 +1340,45 @@ func TestSupersession_Remember(t *testing.T) {
 	}
 	if updatedA.SupersededBy != memB.ID {
 		t.Errorf("expected A.SupersededBy=%s, got %s", memB.ID, updatedA.SupersededBy)
+	}
+}
+
+func TestSupersession_UpdateMemoryHandlesSupersedes(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	memA, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "runtime is go1.21",
+		TightDescription: "go1.21",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	memB, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "runtime is go1.22",
+		TightDescription: "go1.22",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	memB.Supersedes = memA.ID
+	if _, err := svc.UpdateMemory(ctx, memB); err != nil {
+		t.Fatal(err)
+	}
+
+	updatedA, err := svc.repo.GetMemory(ctx, memA.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedA.Status != core.MemoryStatusSuperseded {
+		t.Fatalf("expected memory A status superseded, got %s", updatedA.Status)
+	}
+	if updatedA.SupersededBy != memB.ID {
+		t.Fatalf("expected memory A superseded_by %s, got %s", memB.ID, updatedA.SupersededBy)
 	}
 }
 
@@ -934,6 +1567,121 @@ func TestExplainRecall(t *testing.T) {
 	}
 	if result["item_kind"] != "memory" {
 		t.Errorf("expected item_kind=memory, got %v", result["item_kind"])
+	}
+}
+
+func TestRecallAmbient_SemanticReranksLexicalCandidates(t *testing.T) {
+	query := "terraform infrastructure"
+	provider := staticEmbeddingProvider{
+		model: "test-model",
+		vectors: map[string][]float32{
+			query: {1, 0},
+		},
+	}
+
+	svc, repo := testServiceAndRepoWithEmbeddingProvider(t, provider)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	lowSemantic := &core.Memory{
+		ID:               "mem_sem_low",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "terraform infrastructure terraform infrastructure rollout notes",
+		TightDescription: "Terraform infra lexical-heavy",
+		Confidence:       0.9,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	highSemantic := &core.Memory{
+		ID:               "mem_sem_high",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "terraform infrastructure deployment notes",
+		TightDescription: "Terraform infra semantic-best",
+		Confidence:       0.9,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := repo.InsertMemory(ctx, lowSemantic); err != nil {
+		t.Fatalf("insert low semantic memory: %v", err)
+	}
+	if err := repo.InsertMemory(ctx, highSemantic); err != nil {
+		t.Fatalf("insert high semantic memory: %v", err)
+	}
+
+	if err := repo.UpsertEmbedding(ctx, &core.EmbeddingRecord{ObjectID: lowSemantic.ID, ObjectKind: "memory", Model: "test-model", Vector: []float32{0, 1}, CreatedAt: now}); err != nil {
+		t.Fatalf("upsert low semantic embedding: %v", err)
+	}
+	if err := repo.UpsertEmbedding(ctx, &core.EmbeddingRecord{ObjectID: highSemantic.ID, ObjectKind: "memory", Model: "test-model", Vector: []float32{1, 0}, CreatedAt: now}); err != nil {
+		t.Fatalf("upsert high semantic embedding: %v", err)
+	}
+
+	noSemanticSvc := New(repo, svc.dbPath, nil, nil)
+	withoutSemantic, err := noSemanticSvc.Recall(ctx, query, core.RecallOptions{Mode: core.RecallModeFacts, Limit: 2})
+	if err != nil {
+		t.Fatalf("facts recall without semantic: %v", err)
+	}
+	if len(withoutSemantic.Items) < 2 {
+		t.Fatalf("expected two lexical matches without semantic, got %d", len(withoutSemantic.Items))
+	}
+	if withoutSemantic.Items[0].ID != lowSemantic.ID {
+		t.Fatalf("expected lexical ordering to start with %s, got %s", lowSemantic.ID, withoutSemantic.Items[0].ID)
+	}
+
+	withSemantic, err := svc.Recall(ctx, query, core.RecallOptions{Mode: core.RecallModeFacts, Limit: 2})
+	if err != nil {
+		t.Fatalf("facts recall with semantic: %v", err)
+	}
+	if len(withSemantic.Items) < 2 {
+		t.Fatalf("expected two matches with semantic, got %d", len(withSemantic.Items))
+	}
+	if withSemantic.Items[0].ID != highSemantic.ID {
+		t.Fatalf("expected semantic rerank to promote %s, got %s", highSemantic.ID, withSemantic.Items[0].ID)
+	}
+}
+
+func TestExplainRecall_IncludesSemanticSignalWhenEmbeddingsAvailable(t *testing.T) {
+	query := "postgres durability"
+	provider := staticEmbeddingProvider{
+		model: "test-model",
+		vectors: map[string][]float32{
+			query: {1, 0},
+		},
+	}
+	svc, repo := testServiceAndRepoWithEmbeddingProvider(t, provider)
+	ctx := context.Background()
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "Postgres offers strong durability guarantees",
+		TightDescription: "Postgres durability",
+	})
+	if err != nil {
+		t.Fatalf("remember memory: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := repo.UpsertEmbedding(ctx, &core.EmbeddingRecord{ObjectID: mem.ID, ObjectKind: "memory", Model: "test-model", Vector: []float32{1, 0}, CreatedAt: now}); err != nil {
+		t.Fatalf("upsert embedding: %v", err)
+	}
+
+	result, err := svc.ExplainRecall(ctx, query, mem.ID)
+	if err != nil {
+		t.Fatalf("explain recall: %v", err)
+	}
+
+	breakdown, ok := result["signal_breakdown"].(SignalBreakdown)
+	if !ok {
+		t.Fatalf("expected signal_breakdown type SignalBreakdown, got %T", result["signal_breakdown"])
+	}
+	if breakdown.Semantic <= 0 {
+		t.Fatalf("expected positive semantic contribution, got %f", breakdown.Semantic)
 	}
 }
 
@@ -1370,31 +2118,111 @@ func TestDetectContradictions(t *testing.T) {
 	}
 }
 
+func TestDetectContradictions_SupersedesOlderConflictingMemory(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	older := &core.Memory{
+		ID:               "mem_contradiction_older",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Subject:          "amm",
+		Body:             "amm uses sqlite",
+		TightDescription: "amm sqlite",
+		Confidence:       0.8,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now.Add(-2 * time.Hour),
+		UpdatedAt:        now.Add(-2 * time.Hour),
+	}
+	newer := &core.Memory{
+		ID:               "mem_contradiction_newer",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Subject:          "amm",
+		Body:             "amm uses postgres",
+		TightDescription: "amm postgres",
+		Confidence:       0.9,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := repo.InsertMemory(ctx, older); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.InsertMemory(ctx, newer); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.InsertClaim(ctx, &core.Claim{ID: "clm_contradiction_old", MemoryID: older.ID, Predicate: "uses", ObjectValue: "sqlite", Confidence: 0.8}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.InsertClaim(ctx, &core.Claim{ID: "clm_contradiction_new", MemoryID: newer.ID, Predicate: "uses", ObjectValue: "postgres", Confidence: 0.9}); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := svc.DetectContradictions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found < 1 {
+		t.Fatalf("expected contradiction to be found, got %d", found)
+	}
+
+	updatedOlder, err := repo.GetMemory(ctx, older.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedOlder.Status != core.MemoryStatusSuperseded {
+		t.Fatalf("expected older memory status superseded, got %s", updatedOlder.Status)
+	}
+	if updatedOlder.SupersededBy != newer.ID {
+		t.Fatalf("expected older memory superseded_by=%s, got %s", newer.ID, updatedOlder.SupersededBy)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // MergeDuplicates
 // ---------------------------------------------------------------------------
 
 func TestMergeDuplicates(t *testing.T) {
-	svc, _ := testServiceAndRepo(t)
+	svc, repo := testServiceAndRepo(t)
 	ctx := context.Background()
 
-	// Remember two nearly identical memories.
-	_, err := svc.Remember(ctx, &core.Memory{
+	// Insert two nearly identical memories directly (bypassing Remember dedup).
+	now := time.Now().UTC()
+	if err := repo.InsertMemory(ctx, &core.Memory{
+		ID:               generateID("mem_"),
 		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
 		Body:             "The deployment pipeline uses GitHub Actions for CI and CD",
 		TightDescription: "deployment pipeline uses GitHub Actions CI CD",
 		Confidence:       0.8,
-	})
-	if err != nil {
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.Remember(ctx, &core.Memory{
+	if err := repo.InsertMemory(ctx, &core.Memory{
+		ID:               generateID("mem_"),
 		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
 		Body:             "The deployment pipeline uses GitHub Actions for CI and CD workflows",
 		TightDescription: "deployment pipeline uses GitHub Actions CI CD workflows",
 		Confidence:       0.9,
-	})
-	if err != nil {
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now.Add(time.Second),
+		UpdatedAt:        now.Add(time.Second),
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1416,6 +2244,178 @@ func TestMergeDuplicates(t *testing.T) {
 	}
 	if len(mems) < 1 {
 		t.Error("expected at least one superseded memory after MergeDuplicates")
+	}
+}
+
+func TestMergeDuplicates_ManyNearIdenticalMemories(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	for i := 0; i < 24; i++ {
+		mem := &core.Memory{
+			Type:         core.MemoryTypeFact,
+			Scope:        core.ScopeGlobal,
+			PrivacyLevel: core.PrivacyPrivate,
+			Status:       core.MemoryStatusActive,
+			CreatedAt:    now.Add(time.Duration(i) * time.Second),
+			UpdatedAt:    now.Add(time.Duration(i) * time.Second),
+			Importance:   0.5,
+			Confidence:   0.8 + (float64(i) * 0.001),
+			Body: fmt.Sprintf(
+				"The deployment pipeline uses GitHub Actions for CI and CD with build test package security scan and release promotion stages variant %d",
+				i,
+			),
+			TightDescription: fmt.Sprintf(
+				"deployment pipeline uses GitHub Actions CI CD build test package security scan release promotion variant %d",
+				i,
+			),
+		}
+		if err := repo.InsertMemory(ctx, mem); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	merged, err := svc.MergeDuplicates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged != 23 {
+		t.Fatalf("expected 23 merges for 24 near-identical memories, got %d", merged)
+	}
+
+	active, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{
+		Status: core.MemoryStatusActive,
+		Limit:  100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("expected exactly 1 active memory after dedup, got %d", len(active))
+	}
+
+	superseded, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{
+		Status: core.MemoryStatusSuperseded,
+		Limit:  100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(superseded) != 23 {
+		t.Fatalf("expected 23 superseded memories after dedup, got %d", len(superseded))
+	}
+}
+
+func TestMergeDuplicates_ConvergesAcrossIterations(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	for i := 0; i < 4; i++ {
+		mem := &core.Memory{
+			Type:         core.MemoryTypeFact,
+			Scope:        core.ScopeGlobal,
+			PrivacyLevel: core.PrivacyPrivate,
+			Status:       core.MemoryStatusActive,
+			CreatedAt:    now.Add(time.Duration(i) * time.Second),
+			UpdatedAt:    now.Add(time.Duration(i) * time.Second),
+			Importance:   0.5,
+			Body: fmt.Sprintf(
+				"The deployment pipeline uses GitHub Actions for CI and CD with build test package security scan and release promotion stages variant %d",
+				i,
+			),
+			TightDescription: fmt.Sprintf(
+				"deployment pipeline uses GitHub Actions CI CD build test package security scan release promotion variant %d",
+				i,
+			),
+			Confidence: 0.9,
+		}
+		if err := repo.InsertMemory(ctx, mem); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	merged, err := svc.MergeDuplicates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged != 3 {
+		t.Fatalf("expected 3 total merges across iterations, got %d", merged)
+	}
+
+	active, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{
+		Status: core.MemoryStatusActive,
+		Limit:  10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("expected convergence to 1 active memory, got %d", len(active))
+	}
+}
+
+func TestMergeDuplicates_MergesSourceEventIDsIntoKeeper(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	first := &core.Memory{
+		ID:               "mem_source_event_first",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		Importance:       0.5,
+		Body:             "The service stores durable memories in SQLite and serves recall over FTS5",
+		TightDescription: "service stores durable memories in sqlite with fts5 recall",
+		Confidence:       0.7,
+		SourceEventIDs:   []string{"evt-a", "evt-shared"},
+	}
+	if err := repo.InsertMemory(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+
+	keeper := &core.Memory{
+		ID:               "mem_source_event_keeper",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now.Add(time.Second),
+		UpdatedAt:        now.Add(time.Second),
+		Importance:       0.5,
+		Body:             "The service stores durable memories in SQLite and serves recall over FTS5 indexes",
+		TightDescription: "service stores durable memories in sqlite with fts5 indexes",
+		Confidence:       0.95,
+		SourceEventIDs:   []string{"evt-b", "evt-shared"},
+	}
+	if err := repo.InsertMemory(ctx, keeper); err != nil {
+		t.Fatal(err)
+	}
+
+	merged, err := svc.MergeDuplicates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged != 1 {
+		t.Fatalf("expected exactly 1 merge, got %d", merged)
+	}
+
+	updatedKeeper, err := svc.repo.GetMemory(ctx, keeper.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids := make(map[string]bool, len(updatedKeeper.SourceEventIDs))
+	for _, id := range updatedKeeper.SourceEventIDs {
+		ids[id] = true
+	}
+	if !ids["evt-a"] || !ids["evt-b"] || !ids["evt-shared"] {
+		t.Fatalf("expected keeper source event IDs to include evt-a, evt-b, evt-shared; got %#v", updatedKeeper.SourceEventIDs)
 	}
 }
 

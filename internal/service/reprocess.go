@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 const defaultBatchSize = 20
 
+// Reprocess re-extracts memory candidates from stored events, creating new
+// memories and superseding duplicate older ones. When reprocessAll is false, it
+// skips events already covered by LLM-extracted memories.
 func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int, error) {
 	events, err := s.repo.ListEvents(ctx, core.ListEventsOptions{
 		Limit: 50000,
@@ -149,6 +152,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 				if err := s.repo.UpdateMemory(ctx, duplicate); err != nil {
 					return created, superseded, fmt.Errorf("update duplicate memory %s: %w", duplicate.ID, err)
 				}
+				s.upsertMemoryEmbeddingBestEffort(ctx, duplicate)
 				for _, sibling := range duplicates {
 					if sibling == nil || sibling.ID == duplicate.ID || sibling.Status == core.MemoryStatusSuperseded {
 						continue
@@ -161,6 +165,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 					if err := s.repo.UpdateMemory(ctx, sibling); err != nil {
 						return created, superseded, fmt.Errorf("supersede duplicate sibling %s: %w", sibling.ID, err)
 					}
+					s.upsertMemoryEmbeddingBestEffort(ctx, sibling)
 					superseded++
 				}
 				for _, eid := range duplicate.SourceEventIDs {
@@ -191,6 +196,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 			if err := s.repo.InsertMemory(ctx, mem); err != nil {
 				return created, superseded, fmt.Errorf("insert reprocessed memory: %w", err)
 			}
+			s.upsertMemoryEmbeddingBestEffort(ctx, mem)
 			created++
 			activeMemories = append(activeMemories, mem)
 			for _, eid := range sourceEventIDs {
@@ -218,6 +224,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 					if err := s.repo.UpdateMemory(ctx, old); err != nil {
 						return created, superseded, fmt.Errorf("supersede memory %s: %w", old.ID, err)
 					}
+					s.upsertMemoryEmbeddingBestEffort(ctx, old)
 					superseded++
 				}
 			}

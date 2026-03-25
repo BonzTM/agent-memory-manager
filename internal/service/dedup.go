@@ -3,125 +3,139 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
-// MergeDuplicates finds same-type memories with high FTS text overlap and merges them via supersession.
-// Returns the number of merges performed.
+// MergeDuplicates finds highly overlapping active memories and merges them via
+// supersession.
 func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
-	// List active memories.
-	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
-		Status: core.MemoryStatusActive,
-		Limit:  1000,
-	})
-	if err != nil {
-		return 0, fmt.Errorf("list memories for dedup: %w", err)
-	}
+	const maxMergesPerIteration = 500
+	const maxIterations = 10
 
-	// Group by type.
-	groups := make(map[core.MemoryType][]core.Memory)
-	for _, mem := range memories {
-		groups[mem.Type] = append(groups[mem.Type], mem)
-	}
+	totalMerged := 0
+	for iteration := 1; iteration <= maxIterations; iteration++ {
+		memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
+			Status: core.MemoryStatusActive,
+			Limit:  10000,
+		})
+		if err != nil {
+			return totalMerged, fmt.Errorf("list memories for dedup: %w", err)
+		}
 
-	merged := 0
-	mergedIDs := make(map[string]bool)
-	const maxMerges = 50
+		groups := make(map[core.MemoryType][]core.Memory)
+		for _, mem := range memories {
+			groups[mem.Type] = append(groups[mem.Type], mem)
+		}
 
-	for _, group := range groups {
-		for i := range group {
-			if merged >= maxMerges {
-				return merged, nil
-			}
+		merged := 0
+		mergedIDs := make(map[string]bool)
+		stopIteration := false
 
-			memA := &group[i]
-			if mergedIDs[memA.ID] {
-				continue
-			}
-
-			// Use the first 50 chars of TightDescription as an FTS query.
-			query := memA.TightDescription
-			if len(query) > 50 {
-				query = query[:50]
-			}
-			if strings.TrimSpace(query) == "" {
-				continue
-			}
-
-			candidates, err := s.repo.SearchMemories(ctx, query, 10)
-			if err != nil {
-				continue
-			}
-
-			for j := range candidates {
-				candB := &candidates[j]
-
-				// Skip self, already merged, different type, different scope.
-				if candB.ID == memA.ID {
-					continue
+		for _, group := range groups {
+			for i := range group {
+				if merged >= maxMergesPerIteration {
+					stopIteration = true
+					break
 				}
-				if mergedIDs[candB.ID] {
-					continue
-				}
-				if candB.Type != memA.Type {
-					continue
-				}
-				if candB.Scope != memA.Scope {
-					continue
-				}
-				if candB.Status != core.MemoryStatusActive {
+
+				memA := &group[i]
+				if mergedIDs[memA.ID] {
 					continue
 				}
 
-				sim := jaccardSimilarity(memA.Body, candB.Body)
-				if sim <= 0.7 {
+				query := memA.TightDescription
+				if strings.TrimSpace(query) == "" {
 					continue
 				}
 
-				// Determine keeper and superseded.
-				keeper, superseded := memA, candB
-				if candB.Confidence > memA.Confidence {
-					keeper, superseded = candB, memA
-				} else if candB.Confidence == memA.Confidence && candB.CreatedAt.After(memA.CreatedAt) {
-					keeper, superseded = candB, memA
+				candidates, err := s.repo.SearchMemories(ctx, query, 10)
+				if err != nil {
+					continue
+				}
+				if len(candidates) <= 1 {
+					candidates = group
 				}
 
-				// Supersede the loser.
-				now := time.Now().UTC()
-				superseded.Status = core.MemoryStatusSuperseded
-				superseded.SupersededBy = keeper.ID
-				superseded.SupersededAt = &now
-				superseded.UpdatedAt = now
+				for j := range candidates {
+					candB := &candidates[j]
 
-				if keeper.Supersedes == "" {
-					keeper.Supersedes = superseded.ID
+					if candB.ID == memA.ID {
+						continue
+					}
+					if mergedIDs[candB.ID] {
+						continue
+					}
+					if candB.Type != memA.Type {
+						continue
+					}
+					if candB.Scope != memA.Scope {
+						continue
+					}
+					if candB.Status != core.MemoryStatusActive {
+						continue
+					}
+
+					sim := jaccardSimilarity(memA.Body, candB.Body)
+					if sim <= 0.7 {
+						continue
+					}
+
+					keeper, superseded := memA, candB
+					if candB.Confidence > memA.Confidence {
+						keeper, superseded = candB, memA
+					} else if candB.Confidence == memA.Confidence && candB.CreatedAt.After(memA.CreatedAt) {
+						keeper, superseded = candB, memA
+					}
+
+					now := time.Now().UTC()
+					superseded.Status = core.MemoryStatusSuperseded
+					superseded.SupersededBy = keeper.ID
+					superseded.SupersededAt = &now
+					superseded.UpdatedAt = now
+					keeper.SourceEventIDs = mergeUniqueStrings(keeper.SourceEventIDs, superseded.SourceEventIDs)
 					keeper.UpdatedAt = now
-				}
 
-				if err := s.repo.UpdateMemory(ctx, superseded); err != nil {
-					continue
-				}
-				if err := s.repo.UpdateMemory(ctx, keeper); err != nil {
-					continue
-				}
+					if keeper.Supersedes == "" {
+						keeper.Supersedes = superseded.ID
+					}
 
-				mergedIDs[superseded.ID] = true
-				merged++
+					if err := s.repo.UpdateMemory(ctx, superseded); err != nil {
+						continue
+					}
+					if err := s.repo.UpdateMemory(ctx, keeper); err != nil {
+						continue
+					}
 
-				if merged >= maxMerges {
-					return merged, nil
+					mergedIDs[superseded.ID] = true
+					merged++
+
+					if merged >= maxMergesPerIteration {
+						stopIteration = true
+						break
+					}
+
+					break
 				}
-
-				// Only merge one candidate per source memory per iteration.
+				if stopIteration {
+					break
+				}
+			}
+			if stopIteration {
 				break
 			}
 		}
-	}
 
-	return merged, nil
+		slog.Debug("merge_duplicates iteration complete", "iteration", iteration, "merged", merged)
+		totalMerged += merged
+		if merged == 0 {
+			break
+		}
+	}
+	return totalMerged, nil
 }
 
 // jaccardSimilarity computes the Jaccard similarity between the word sets of two texts.

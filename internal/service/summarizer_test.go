@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 func TestHeuristicSummarizer_ImplementsInterface(t *testing.T) {

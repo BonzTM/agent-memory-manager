@@ -3,10 +3,11 @@
 package service
 
 import (
+	"math"
 	"testing"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 // ---------------------------------------------------------------------------
@@ -289,6 +290,69 @@ func TestScoreItem_RepetitionPenalty(t *testing.T) {
 			t.Errorf("expected 0.0 for not shown, got %f", score)
 		}
 	})
+}
+
+func TestCosineSimilarity(t *testing.T) {
+	t.Run("identical vectors", func(t *testing.T) {
+		got, ok := cosineSimilarity([]float32{1, 2, 3}, []float32{1, 2, 3})
+		if !ok {
+			t.Fatal("expected cosine to be available")
+		}
+		if math.Abs(got-1.0) > 1e-9 {
+			t.Fatalf("expected cosine=1, got %f", got)
+		}
+	})
+
+	t.Run("orthogonal vectors", func(t *testing.T) {
+		got, ok := cosineSimilarity([]float32{1, 0}, []float32{0, 1})
+		if !ok {
+			t.Fatal("expected cosine to be available")
+		}
+		if math.Abs(got) > 1e-9 {
+			t.Fatalf("expected cosine=0, got %f", got)
+		}
+	})
+
+	t.Run("missing vector returns unavailable", func(t *testing.T) {
+		if _, ok := cosineSimilarity([]float32{1, 0}, nil); ok {
+			t.Fatal("expected unavailable cosine for missing vector")
+		}
+	})
+}
+
+func TestScoreItem_MissingEmbeddingsDoNotChangeScore(t *testing.T) {
+	now := time.Now().UTC()
+	item := ScoringCandidate{
+		ID:          "item_1",
+		Kind:        "memory",
+		Subject:     "postgres notes",
+		Body:        "postgres durability notes",
+		Importance:  0.7,
+		ProjectID:   "proj_1",
+		Scope:       core.ScopeProject,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		FTSPosition: 0,
+	}
+
+	base := ScoringContext{
+		Query:         "postgres durability",
+		QueryEntities: []string{"Postgres"},
+		ProjectID:     "proj_1",
+		RecentRecalls: map[string]bool{},
+		Now:           now,
+	}
+	withMissingSemantic := base
+	withMissingSemantic.QueryEmbedding = []float32{1, 0}
+
+	bBase := ScoreItem(item, base)
+	bMissing := ScoreItem(item, withMissingSemantic)
+	if math.Abs(bBase.FinalScore-bMissing.FinalScore) > 1e-9 {
+		t.Fatalf("expected score unchanged when semantic is unavailable: base=%f missing=%f", bBase.FinalScore, bMissing.FinalScore)
+	}
+	if bMissing.Semantic != 0 {
+		t.Fatalf("expected semantic=0 with missing candidate embedding, got %f", bMissing.Semantic)
+	}
 }
 
 func TestScoreItem_FinalScore(t *testing.T) {

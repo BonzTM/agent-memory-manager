@@ -10,9 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
+// LLMSummarizer uses an OpenAI-compatible chat completion endpoint for
+// summarization and memory extraction, with heuristic fallback on failure.
 type LLMSummarizer struct {
 	endpoint string
 	apiKey   string
@@ -21,6 +23,8 @@ type LLMSummarizer struct {
 	fallback *HeuristicSummarizer
 }
 
+// NewLLMSummarizer constructs an LLM-backed summarizer for the supplied
+// endpoint, API key, and model.
 func NewLLMSummarizer(endpoint, apiKey, model string) *LLMSummarizer {
 	return &LLMSummarizer{
 		endpoint: strings.TrimRight(endpoint, "/"),
@@ -31,6 +35,8 @@ func NewLLMSummarizer(endpoint, apiKey, model string) *LLMSummarizer {
 	}
 }
 
+// Summarize asks the configured LLM for a concise summary and falls back to the
+// heuristic summarizer when the request fails.
 func (s *LLMSummarizer) Summarize(ctx context.Context, text string, maxLen int) (string, error) {
 	prompt := fmt.Sprintf(
 		"Summarize the following text in at most %d characters. "+
@@ -47,6 +53,8 @@ func (s *LLMSummarizer) Summarize(ctx context.Context, text string, maxLen int) 
 	return result, nil
 }
 
+// ExtractMemoryCandidate asks the configured LLM to extract durable memory
+// candidates from a single event, falling back heuristically on failure.
 func (s *LLMSummarizer) ExtractMemoryCandidate(ctx context.Context, eventContent string) ([]core.MemoryCandidate, error) {
 	prompt := buildMemoryExtractionPrompt([]string{eventContent}, false)
 
@@ -64,6 +72,9 @@ func (s *LLMSummarizer) ExtractMemoryCandidate(ctx context.Context, eventContent
 
 const maxEventContentLen = 1200
 
+// ExtractMemoryCandidateBatch asks the configured LLM to extract deduplicated
+// memory candidates across a batch of events, falling back heuristically on
+// failure.
 func (s *LLMSummarizer) ExtractMemoryCandidateBatch(ctx context.Context, eventContents []string) ([]core.MemoryCandidate, error) {
 	if len(eventContents) == 0 {
 		return nil, nil
