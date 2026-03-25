@@ -85,7 +85,13 @@ else
   printf '%s\n' "$$" > "$lock_dir/pid"
 fi
 
-trap 'rm -rf "$lock_dir"' EXIT INT TERM
+cleanup() {
+  trap - EXIT INT TERM
+  kill 0 2>/dev/null || true
+  rm -rf "$lock_dir" 2>/dev/null || true
+}
+
+trap cleanup EXIT INT TERM
 
 "$amm_bin" jobs run reflect >/dev/null 2>&1 || true
 "$amm_bin" jobs run compress_history >/dev/null 2>&1 || true
@@ -102,9 +108,9 @@ trap 'rm -rf "$lock_dir"' EXIT INT TERM
   );
 
   const timer = setTimeout(() => {
-    try { child.kill("SIGTERM"); } catch {}
+    try { process.kill(-child.pid, "SIGTERM"); } catch {}
     setTimeout(() => {
-      try { child.kill("SIGKILL"); } catch {}
+      try { process.kill(-child.pid, "SIGKILL"); } catch {}
     }, 2_000);
     maintenanceRunning = false;
   }, AMM_JOB_TIMEOUT_MS);
