@@ -2,58 +2,69 @@
 
 Remaining gaps and improvement areas, ordered by impact.
 
-## High Priority
+## Completed Recently
 
-### Scoring weight dead code (41% of retrieval signal)
-The retrieval scoring formula allocates 0.18 weight to semantic similarity (embeddings) and 0.18 to entity overlap. Neither signal produces meaningful output today:
-- **Semantic similarity**: The `embeddings` table exists but is never populated. No embedding model is integrated. When enabled, the scoring formula should renormalize weights — currently it just adds zero.
-- **Entity overlap**: Entities are now auto-created during reflection, but the entity-overlap scoring signal in `scoring.go` still uses a basic name-match. Once entity volume grows, consider TF-IDF or frequency-dampened overlap to avoid hub entities dominating recall.
+### Semantic scoring + embedding pipeline
+Completed.
+- Added an `EmbeddingProvider` abstraction and runtime wiring.
+- Embeddings are now populated for memory/summary write paths and rebuilt via `rebuild_indexes`.
+- Recall scoring now includes semantic similarity via cosine similarity over existing FTS candidates.
+- Explain output now includes semantic contribution.
 
-**Next step**: Add an `EmbeddingProvider` interface similar to the `Summarizer` pattern — local model (e.g., `all-MiniLM-L6-v2` via ONNX) or API-backed. Populate embeddings on memory/summary insert. Use cosine similarity in the scoring pipeline.
-
-### Supersession workflows (partially done)
-The `reprocess` and `reprocess_all` jobs now use the supersession fields (`supersedes`, `superseded_by`, `superseded_at`) to mark old memories when new LLM extractions replace them. What's still missing:
-- `Reflect` should detect when a new memory conflicts with an existing one (same subject, same type, different body) and supersede the old one in real-time, not just during reprocessing.
-- `UpdateMemory` should record the supersession chain when a memory's body changes substantively.
-- `DetectContradictions` should propose supersession candidates, not just flag conflicts.
+### Supersession workflows
+Completed for the originally identified gaps.
+- `Reflect` now supersedes conflicting active memories in real time.
+- `UpdateMemory` now handles supersession chaining via `Supersedes`.
+- `DetectContradictions` now supersedes the older conflicting memory.
 
 ### LLM-backed summarization for compress/consolidate
-The `LLMSummarizer` is wired into `Reflect` and `CompressHistory` via `Summarize()`. `ConsolidateSessions` still concatenates event content rather than synthesizing session-level summaries. Wire `s.summarizer.Summarize()` into `ConsolidateSessions` for real cross-event synthesis.
+Completed.
+- `ConsolidateSessions` now uses `s.summarizer.Summarize()` instead of concatenating and truncating raw event content.
+
+### `projects` and `relationships` tables
+Completed.
+- Added canonical tables, migration, repository methods, service methods, and adapter wiring.
+
+### End-to-end integration tests
+Completed.
+- Added CLI integration coverage against a temp DB for init, remember, recall, ingest, status, jobs, and error paths.
+
+### Ingestion policy matching improvements
+Completed.
+- Added glob/regex matching support.
+- Added policy priority ordering.
+
+### Ingestion noise filtering
+Completed.
+- Noisy events are now conservatively downgraded to `read_only` and tagged so reflect/reprocess skip them.
+
+### Decay and promotion automation
+Completed.
+- `promote_high_value` and `archive_session_traces` jobs are implemented.
+
+## Remaining Priorities
+
+## High Priority
+
+### Entity-overlap scoring quality
+Semantic similarity is now implemented, but entity overlap is still basic string/name matching. Once entity volume grows, consider TF-IDF or frequency-dampened overlap so hub entities do not dominate recall.
 
 ## Medium Priority
 
 ### JSON Schema validation (`spec/v1/`)
-The spec calls for `spec/v1` JSON schemas that stay in lockstep with `internal/contracts/v1`. This directory doesn't exist.
+The spec calls for `spec/v1` JSON schemas that stay in lockstep with `internal/contracts/v1`. The directory now exists, but schema coverage and enforcement are still incomplete.
 
 **What's needed**:
 - JSON Schema files for each command's request/response payloads.
 - A validation script (Python or Go) that checks contract types match schemas.
 - CI step to enforce lockstep.
 
-### `projects` and `relationships` tables
-The spec (section 30.1) lists `projects` and `relationships` as canonical tables. Neither exists in migrations. Project scoping works via bare `project_id` strings, which means:
-- No project registry or metadata.
-- No way to list known projects.
-- No relationship tracking between entities.
-
-**Next step**: Add migration v3 with `projects` table (id, name, path, metadata, created_at) and `relationships` table (from_entity_id, to_entity_id, relationship_type, metadata). Add repository + service methods. Wire into CLI/MCP.
-
-### End-to-end integration tests
-No tests exercise the full CLI binary or MCP JSON-RPC protocol. Current tests cover service and repository layers but not the adapter glue.
+### MCP end-to-end integration tests
+CLI integration tests now exist, but there is still no end-to-end coverage for the MCP JSON-RPC protocol.
 
 **What's needed**:
-- Build the binary, run CLI commands against a temp DB, assert JSON output.
-- Send JSON-RPC messages to the MCP server, assert responses.
+- Start the MCP server in tests, send JSON-RPC messages, assert responses.
 - Cover happy paths and error paths for at least: init, remember, recall, ingest, jobs run.
-
-### Ingestion policy matching improvements
-Policy matching currently only supports exact match on pattern_type + pattern. The spec describes richer matching:
-- Glob/regex patterns for session IDs.
-- Wildcard source system matching.
-- Priority ordering when multiple policies match.
-
-### Ingestion noise filtering
-The heuristic reflect job still creates garbage memories from tool output, JSON blobs, and build logs. Even with LLM extraction, these events consume LLM tokens without producing useful memories. Adding ingestion-time classification (or an ingestion policy that auto-tags noisy event kinds) would reduce both cost and memory pollution.
 
 ## Lower Priority
 
@@ -61,13 +72,13 @@ The heuristic reflect job still creates garbage memories from tool output, JSON 
 The spec (section 23.2, 30.2) mentions optional `graph_projection` tables and graph-assisted retrieval. This is explicitly post-v0 but worth tracking.
 
 ### Contradiction resolution workflow
-`DetectContradictions` currently flags conflicts via keyword overlap heuristic. A real resolution workflow would:
+`DetectContradictions` now helps drive supersession, but there is still no full contradiction-resolution workflow. A real workflow would:
 - Present contradictions to the user or agent.
 - Allow explicit resolution (pick winner, merge, or archive both).
 - Record resolution provenance.
 
 ### Temporal validity enforcement
-The `valid_from` and `valid_to` fields exist on memories but are never checked during recall. Queries should filter out temporally invalid memories by default and support `as_of` queries for historical truth.
+`valid_from` and `valid_to` now participate in recall scoring, but there is still no full `as_of` query workflow or stronger temporal reasoning.
 
 ### Privacy-aware filtering
 The `privacy_level` field exists but recall doesn't filter by caller context. Surface-aware filtering (spec section 32.2) needs a caller identity model.
@@ -78,5 +89,10 @@ Current entity extraction uses capitalized-word heuristics. Improvements:
 - Topic extraction from recent conversation context.
 - Entity alias resolution against the canonical entity store.
 
-### Decay and promotion automation
-`decay_stale_memory` works but `promote_high_value_memories` and `archive_low_salience_session_traces` (spec section 26.2) are not implemented.
+### Local embedding provider implementation
+The embedding abstraction and semantic scoring are in place, but the active provider is still a noop/local placeholder. The next real upgrade is a production local embedding backend (likely a small MiniLM-class model).
+
+**What's needed**:
+- Implement a real local provider behind `EmbeddingProvider`.
+- Keep local-first as the default.
+- Re-run retrieval-quality evaluation once real vectors exist.
