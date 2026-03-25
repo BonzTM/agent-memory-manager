@@ -83,3 +83,18 @@ func (h *HeuristicSummarizer) ExtractMemoryCandidate(ctx context.Context, eventC
 
 	return []core.MemoryCandidate{candidate}, nil
 }
+
+func (h *HeuristicSummarizer) ExtractMemoryCandidateBatch(ctx context.Context, eventContents []string) ([]core.MemoryCandidate, error) {
+	var all []core.MemoryCandidate
+	for i, content := range eventContents {
+		candidates, err := h.ExtractMemoryCandidate(ctx, content)
+		if err != nil {
+			return all, err
+		}
+		for j := range candidates {
+			candidates[j].SourceEventNums = []int{i + 1}
+		}
+		all = append(all, candidates...)
+	}
+	return all, nil
+}
