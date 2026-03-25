@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+const defaultLLMBatchSize = 20
+
 // Config holds all runtime configuration for amm.
 // Matches blueprint section 15.
 type Config struct {
@@ -17,6 +19,14 @@ type Config struct {
 	Retrieval   RetrievalConfig   `json:"retrieval"`
 	Privacy     PrivacyConfig     `json:"privacy"`
 	Maintenance MaintenanceConfig `json:"maintenance"`
+	LLM         LLMConfig         `json:"llm"`
+}
+
+type LLMConfig struct {
+	Endpoint  string `json:"endpoint"`
+	APIKey    string `json:"api_key"`
+	Model     string `json:"model"`
+	BatchSize int    `json:"batch_size"`
 }
 
 // StorageConfig controls where amm persists data.
@@ -69,6 +79,9 @@ func DefaultConfig() Config {
 			AutoCompress:             true,
 			AutoConsolidate:          true,
 			AutoDetectContradictions: true,
+		},
+		LLM: LLMConfig{
+			BatchSize: defaultLLMBatchSize,
 		},
 	}
 }
@@ -165,9 +178,40 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			if b, err := strconv.ParseBool(val); err == nil {
 				cfg.Maintenance.AutoDetectContradictions = b
 			}
+		case "llm.endpoint":
+			cfg.LLM.Endpoint = val
+		case "llm.api_key":
+			cfg.LLM.APIKey = val
+		case "llm.model":
+			cfg.LLM.Model = val
+		case "llm.batch_size":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.LLM.BatchSize = n
+			}
 		}
 	}
 	return scanner.Err()
+}
+
+// LoadConfigWithEnv loads configuration by merging defaults, config file, and
+// environment variables (in that priority order). It checks ~/.amm/config.json,
+// ~/.amm/config.toml, and AMM_DB_PATH for the config file location.
+func LoadConfigWithEnv() Config {
+	cfg := DefaultConfig()
+
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		for _, name := range []string{"config.json", "config.toml"} {
+			path := filepath.Join(home, ".amm", name)
+			if fileCfg, err := LoadConfig(path); err == nil {
+				cfg = fileCfg
+				break
+			}
+		}
+	}
+
+	cfg = ConfigFromEnv(cfg)
+	return cfg
 }
 
 // ConfigFromEnv overrides config fields with environment variables.
@@ -228,6 +272,20 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_AUTO_DETECT_CONTRADICTIONS"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			base.Maintenance.AutoDetectContradictions = b
+		}
+	}
+	if v := os.Getenv("AMM_LLM_ENDPOINT"); v != "" {
+		base.LLM.Endpoint = v
+	}
+	if v := os.Getenv("AMM_LLM_API_KEY"); v != "" {
+		base.LLM.APIKey = v
+	}
+	if v := os.Getenv("AMM_LLM_MODEL"); v != "" {
+		base.LLM.Model = v
+	}
+	if v := os.Getenv("AMM_LLM_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.LLM.BatchSize = n
 		}
 	}
 	return base
