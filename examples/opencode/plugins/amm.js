@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 function nowRfc3339(value = Date.now()) {
   const date = new Date(value > 1_000_000_000_000 ? value : value * 1000);
@@ -19,26 +19,107 @@ function stringifyRecord(record) {
   );
 }
 
-function runAmm(command, input) {
+const AMM_INGEST_TIMEOUT_MS = 5_000;
+const AMM_JOB_TIMEOUT_MS = 120_000;
+
+function runAmmAsync(command, input, timeoutMs = AMM_INGEST_TIMEOUT_MS) {
   const ammBin = process.env.AMM_BIN ?? "/usr/local/bin/amm";
   const dbPath = process.env.AMM_DB_PATH ?? `${process.env.HOME ?? "~"}/.amm/amm.db`;
-  const result = spawnSync(ammBin, command, {
-    input,
-    encoding: "utf8",
+
+  const child = spawn(ammBin, command, {
+    stdio: ["pipe", "ignore", "ignore"],
     env: { ...process.env, AMM_DB_PATH: dbPath },
+    detached: false,
   });
 
-  if (result.error || result.status !== 0) {
-    const detail = result.error?.message ?? result.stderr ?? `exit ${result.status ?? "unknown"}`;
-    console.error(`[amm-opencode] ${command.join(" ")}: ${detail}`);
+  if (input) {
+    child.stdin.write(input);
+    child.stdin.end();
+  } else {
+    child.stdin.end();
   }
+
+  const timer = setTimeout(() => {
+    try { child.kill("SIGTERM"); } catch {}
+    setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch {}
+    }, 2_000);
+  }, timeoutMs);
+
+  child.on("exit", () => clearTimeout(timer));
+  child.on("error", () => clearTimeout(timer));
+
+  child.unref();
 }
 
 function ingestEvent(event) {
-  runAmm(["ingest", "event", "--in", "-"], JSON.stringify(event));
+  runAmmAsync(["ingest", "event", "--in", "-"], JSON.stringify(event), AMM_INGEST_TIMEOUT_MS);
 }
 
+let maintenanceRunning = false;
 const maintenanceBySession = new Map();
+
+function runMaintenanceAsync() {
+  if (maintenanceRunning) return;
+  maintenanceRunning = true;
+
+  const ammBin = process.env.AMM_BIN ?? "/usr/local/bin/amm";
+  const dbPath = process.env.AMM_DB_PATH ?? `${process.env.HOME ?? "~"}/.amm/amm.db`;
+  const lockDir = `${dbPath}.opencode-maintenance.lock`;
+
+  const maintenanceScript = `
+lock_dir="$1"
+amm_bin="$2"
+
+if mkdir "$lock_dir" 2>/dev/null; then
+  printf '%s\n' "$$" > "$lock_dir/pid"
+else
+  if [ -f "$lock_dir/pid" ]; then
+    pid=$(cat "$lock_dir/pid" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      exit 0
+    fi
+  fi
+  rm -rf "$lock_dir" 2>/dev/null || exit 0
+  mkdir "$lock_dir" 2>/dev/null || exit 0
+  printf '%s\n' "$$" > "$lock_dir/pid"
+fi
+
+trap 'rm -rf "$lock_dir"' EXIT INT TERM
+
+"$amm_bin" jobs run reflect >/dev/null 2>&1 || true
+"$amm_bin" jobs run compress_history >/dev/null 2>&1 || true
+`;
+
+  const child = spawn(
+    "/bin/sh",
+    ["-c", maintenanceScript, "sh", lockDir, ammBin],
+    {
+      stdio: "ignore",
+      env: { ...process.env, AMM_DB_PATH: dbPath },
+      detached: true,
+    },
+  );
+
+  const timer = setTimeout(() => {
+    try { child.kill("SIGTERM"); } catch {}
+    setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch {}
+    }, 2_000);
+    maintenanceRunning = false;
+  }, AMM_JOB_TIMEOUT_MS);
+
+  child.on("exit", () => {
+    clearTimeout(timer);
+    maintenanceRunning = false;
+  });
+  child.on("error", () => {
+    clearTimeout(timer);
+    maintenanceRunning = false;
+  });
+
+  child.unref();
+}
 
 export const AMMMemoryPlugin = async ({ project }) => {
   const projectID = project?.id ?? "opencode-project";
@@ -84,7 +165,7 @@ export const AMMMemoryPlugin = async ({ project }) => {
           metadata: stringifyRecord({
             hook_event: event.type,
             directory: event.properties.info.directory,
-            worktree: event.properties.info.projectID,
+            project_ref: event.properties.info.projectID,
           }),
           occurred_at: nowRfc3339(event.properties.info.time.created),
         });
@@ -108,8 +189,7 @@ export const AMMMemoryPlugin = async ({ project }) => {
           occurred_at: nowRfc3339(now),
         });
 
-        runAmm(["jobs", "run", "reflect"]);
-        runAmm(["jobs", "run", "compress_history"]);
+        runMaintenanceAsync();
       }
     },
   };
