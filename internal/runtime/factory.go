@@ -11,6 +11,17 @@ import (
 	"github.com/joshd-04/agent-memory-manager/internal/service"
 )
 
+func buildSummarizer(cfg Config) core.Summarizer {
+	if cfg.LLM.APIKey != "" && cfg.LLM.Endpoint != "" {
+		model := cfg.LLM.Model
+		if model == "" {
+			model = "gpt-4o-mini"
+		}
+		return service.NewLLMSummarizer(cfg.LLM.Endpoint, cfg.LLM.APIKey, model)
+	}
+	return nil
+}
+
 // NewService creates a fully initialized amm service from the given config.
 // Returns the Service interface, a cleanup function, and any error.
 // The caller must invoke the cleanup function when done (typically via defer).
@@ -33,7 +44,8 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	}
 
 	repo := &sqlite.SQLiteRepository{DB: db}
-	svc := service.New(repo, cfg.Storage.DBPath)
+	svc := service.New(repo, cfg.Storage.DBPath, buildSummarizer(cfg))
+	svc.SetReprocessBatchSize(cfg.LLM.BatchSize)
 
 	cleanup := func() {
 		db.Close()

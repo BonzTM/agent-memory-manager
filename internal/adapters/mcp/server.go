@@ -65,8 +65,7 @@ func tools() []Tool {
 
 // Serve runs the MCP server on stdin/stdout using JSON-RPC.
 func Serve() error {
-	cfg := runtime.DefaultConfig()
-	cfg = runtime.ConfigFromEnv(cfg)
+	cfg := runtime.LoadConfigWithEnv()
 
 	svc, cleanup, err := runtime.NewService(cfg)
 	if err != nil {

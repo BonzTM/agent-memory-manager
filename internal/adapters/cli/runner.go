@@ -133,15 +133,7 @@ func Run(args []string) error {
 }
 
 func getService() (core.Service, func(), error) {
-	cfg := runtime.DefaultConfig()
-	cfg = runtime.ConfigFromEnv(cfg)
-
-	// Check for --db flag in a simple way
-	dbPath := os.Getenv("AMM_DB_PATH")
-	if dbPath != "" {
-		cfg.Storage.DBPath = dbPath
-	}
-
+	cfg := runtime.LoadConfigWithEnv()
 	return runtime.NewService(cfg)
 }
 
@@ -681,8 +673,32 @@ func runPolicyRemove(args []string) error {
 }
 
 func runJob(args []string) error {
+	flags := parseFlags(args)
 	pos := positionalArgs(args)
-	if len(pos) == 0 {
+
+	if len(pos) > 0 && (flags["reprocess"] == "true" || flags["reprocess-all"] == "true") {
+		fail("jobs_run", "VALIDATION_ERROR", "cannot combine positional job kind with --reprocess/--reprocess-all")
+		return fmt.Errorf("cannot combine positional job kind with --reprocess/--reprocess-all")
+	}
+
+	kind := ""
+	if len(pos) > 0 {
+		kind = pos[0]
+	} else {
+		reprocess := flags["reprocess"] == "true"
+		reprocessAll := flags["reprocess-all"] == "true"
+		switch {
+		case reprocess && reprocessAll:
+			fail("jobs_run", "VALIDATION_ERROR", "cannot pass both --reprocess and --reprocess-all")
+			return fmt.Errorf("cannot pass both --reprocess and --reprocess-all")
+		case reprocess:
+			kind = "reprocess"
+		case reprocessAll:
+			kind = "reprocess_all"
+		}
+	}
+
+	if kind == "" {
 		fail("jobs_run", "VALIDATION_ERROR", "job kind required")
 		return fmt.Errorf("job kind required")
 	}
@@ -695,7 +711,7 @@ func runJob(args []string) error {
 	defer cleanup()
 
 	ctx := context.Background()
-	job, err := svc.RunJob(ctx, pos[0])
+	job, err := svc.RunJob(ctx, kind)
 	if err != nil {
 		fail("jobs_run", "JOB_ERROR", err.Error())
 		return err
