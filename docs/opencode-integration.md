@@ -54,6 +54,7 @@ The shipped `amm.js` plugin stays on the stable documented boundary:
 - `shell.env` injects amm-related env vars into shell/tool execution
 - `tool.execute.after` records durable `tool_result` events in amm
 - `event` handles only coarse session lifecycle markers such as `session.created` and `session.idle`
+- maintenance jobs are executed asynchronously with process timeouts and a filesystem lock (`$AMM_DB_PATH.opencode-maintenance.lock`) so OpenCode's event loop is not blocked and overlapping workers are skipped
 
 That gives you useful operational memory without promising transcript fidelity from undocumented hook behavior.
 

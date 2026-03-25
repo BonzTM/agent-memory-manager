@@ -18,7 +18,7 @@ It does **not** claim full transcript capture from OpenCode yet.
   - injects `AMM_BIN`, `AMM_DB_PATH`, `AMM_PROJECT_ID`, and `AMM_SESSION_ID`
   - records `tool.execute.after` as amm `tool_result`
   - records `session.created` / `session.idle`
-  - runs `reflect` and `compress_history` on `session.idle`
+  - runs `reflect` and `compress_history` on `session.idle` in a non-blocking background process with timeout guards and a lock file to prevent overlapping maintenance runs
 
 ## Global install
 

@@ -21,8 +21,6 @@ Once amm is installed, the agent should follow the same durable-memory rules reg
 4. **Let capture stay honest.** Hooks and plugins should capture what the runtime can really expose, not what we wish it exposed.
 5. **Keep workers external.** Reflection, compression, and heavier maintenance stay outside the runtime boundary as `amm jobs run <kind>` calls.
 
-If the repo also uses ACM, the agent should use ACM for task workflow and AMM for durable memory.
-
 ---
 
 ## Prerequisites Check
@@ -82,6 +80,41 @@ Expected output from `status` should show `initialized: true` with all counts at
 
 ---
 
+## Step 2b: (Optional) Enable LLM-Backed Extraction
+
+By default, amm extracts memories from events using a heuristic phrase-cue system. For significantly higher extraction quality, configure an LLM endpoint. This is optional — amm works without it.
+
+```bash
+# For OpenAI
+export AMM_LLM_ENDPOINT=https://api.openai.com/v1
+export AMM_LLM_API_KEY=sk-your-key-here
+export AMM_LLM_MODEL=gpt-4o-mini
+
+# For a local Ollama instance
+export AMM_LLM_ENDPOINT=http://localhost:11434/v1
+export AMM_LLM_API_KEY=ollama
+export AMM_LLM_MODEL=llama3.2
+```
+
+To make these persistent, add them to `~/.amm/config.toml`:
+
+```toml
+[llm]
+endpoint = "https://api.openai.com/v1"
+api_key = "sk-your-key-here"
+model = "gpt-4o-mini"
+```
+
+When enabled, the `reflect` and `compress_history` workers use the LLM for structured extraction and summarization. If the LLM is unavailable, the workers automatically fall back to heuristics — no data is lost.
+
+Verify with:
+
+```bash
+AMM_DB_PATH=~/.amm/amm.db AMM_LLM_ENDPOINT=https://api.openai.com/v1 AMM_LLM_API_KEY=sk-... /usr/local/bin/amm jobs run reflect
+```
+
+---
+
 ## Choose Your Runtime Path
 
 After Steps 1-2, pick the path that matches the user's host:
@@ -111,6 +144,24 @@ Add the following to `~/.claude.json` for global config:
       "command": "/usr/local/bin/amm-mcp",
       "env": {
         "AMM_DB_PATH": "$HOME/.amm/amm.db"
+      }
+    }
+  }
+}
+```
+
+To enable LLM-backed extraction via MCP, add the LLM variables to the env block:
+
+```json
+{
+  "mcpServers": {
+    "amm": {
+      "command": "/usr/local/bin/amm-mcp",
+      "env": {
+        "AMM_DB_PATH": "$HOME/.amm/amm.db",
+        "AMM_LLM_ENDPOINT": "https://api.openai.com/v1",
+        "AMM_LLM_API_KEY": "sk-your-key-here",
+        "AMM_LLM_MODEL": "gpt-4o-mini"
       }
     }
   }
@@ -429,6 +480,10 @@ Description=amm background maintenance
 [Service]
 Type=oneshot
 Environment=AMM_DB_PATH=%h/.amm/amm.db
+# Optional: Enable LLM-backed extraction
+# Environment=AMM_LLM_ENDPOINT=https://api.openai.com/v1
+# Environment=AMM_LLM_API_KEY=sk-your-key-here
+# Environment=AMM_LLM_MODEL=gpt-4o-mini
 ExecStart=/usr/local/bin/amm jobs run reflect
 ExecStart=/usr/local/bin/amm jobs run compress_history
 ExecStart=/usr/local/bin/amm jobs run consolidate_sessions
