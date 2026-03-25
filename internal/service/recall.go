@@ -9,12 +9,26 @@ import (
 	"github.com/joshd-04/agent-memory-manager/internal/core"
 )
 
+const (
+	minRecallScore            = 0.2
+	minRecallMemoryConfidence = 0.35
+	minHybridHistoryScore     = 0.55
+)
+
+type recallFilterOptions struct {
+	minScore            float64
+	minMemoryConfidence float64
+	allowHistoryNodes   bool
+	minHistoryScore     float64
+	suppressToolResults bool
+}
+
 // Recall performs retrieval using the specified mode with full scoring.
 func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallOptions) (*core.RecallResult, error) {
 	start := time.Now()
 
 	if opts.Mode == "" {
-		opts.Mode = core.RecallModeAmbient
+		opts.Mode = core.RecallModeHybrid
 	}
 
 	if opts.Limit == 0 {
@@ -57,9 +71,6 @@ func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallO
 	if err != nil {
 		return nil, err
 	}
-
-	// Note: superseded memories are already filtered at the source in each
-	// recall mode (recallAmbient, recallFacts, etc.) by checking m.Status.
 
 	// Truncate to limit.
 	if len(items) > opts.Limit {
@@ -118,7 +129,7 @@ func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.
 		return nil, fmt.Errorf("search memories: %w", err)
 	}
 	for i, m := range memories {
-		if m.Status == core.MemoryStatusSuperseded {
+		if !isRecallMemoryStatusAllowed(m.Status) {
 			continue
 		}
 		candidates = append(candidates, MemoryToCandidate(m, i))
@@ -140,7 +151,7 @@ func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.
 		candidates = append(candidates, EpisodeToCandidate(ep, i))
 	}
 
-	return scoreAndConvert(candidates, sctx), nil
+	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
 }
 
 // recallFacts searches only memories with full scoring.
@@ -151,12 +162,12 @@ func (s *AMMService) recallFacts(ctx context.Context, query string, opts core.Re
 	}
 	var candidates []ScoringCandidate
 	for i, m := range memories {
-		if m.Status == core.MemoryStatusSuperseded {
+		if !isRecallMemoryStatusAllowed(m.Status) {
 			continue
 		}
 		candidates = append(candidates, MemoryToCandidate(m, i))
 	}
-	return scoreAndConvert(candidates, sctx), nil
+	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
 }
 
 // recallEpisodes searches only episodes with full scoring.
@@ -169,7 +180,7 @@ func (s *AMMService) recallEpisodes(ctx context.Context, query string, opts core
 	for i, ep := range episodes {
 		candidates = append(candidates, EpisodeToCandidate(ep, i))
 	}
-	return scoreAndConvert(candidates, sctx), nil
+	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
 }
 
 // recallProject searches memories filtered by project_id with full scoring.
@@ -183,12 +194,12 @@ func (s *AMMService) recallProject(ctx context.Context, query string, opts core.
 		if opts.ProjectID != "" && mem.ProjectID != opts.ProjectID {
 			continue
 		}
-		if mem.Status == core.MemoryStatusSuperseded {
+		if !isRecallMemoryStatusAllowed(mem.Status) {
 			continue
 		}
 		candidates = append(candidates, MemoryToCandidate(mem, i))
 	}
-	return scoreAndConvert(candidates, sctx), nil
+	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
 }
 
 // recallEntity searches memories and entities with full scoring.
@@ -200,13 +211,13 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 		return nil, fmt.Errorf("search memories: %w", err)
 	}
 	for i, m := range memories {
-		if m.Status == core.MemoryStatusSuperseded {
+		if !isRecallMemoryStatusAllowed(m.Status) {
 			continue
 		}
 		candidates = append(candidates, MemoryToCandidate(m, i))
 	}
 
-	items := scoreAndConvert(candidates, sctx)
+	items := scoreAndConvert(candidates, sctx, defaultRecallFilterOptions())
 	entities, err := s.repo.SearchEntities(ctx, query, opts.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("search entities: %w", err)
@@ -233,7 +244,7 @@ func (s *AMMService) recallHistory(ctx context.Context, query string, opts core.
 	for i, evt := range events {
 		candidates = append(candidates, EventToCandidate(evt, i))
 	}
-	return scoreAndConvert(candidates, sctx), nil
+	return scoreAndConvert(candidates, sctx, historyRecallFilterOptions()), nil
 }
 
 // recallHybrid searches all types with full scoring.
@@ -246,7 +257,7 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 		return nil, fmt.Errorf("search memories: %w", err)
 	}
 	for i, m := range memories {
-		if m.Status == core.MemoryStatusSuperseded {
+		if !isRecallMemoryStatusAllowed(m.Status) {
 			continue
 		}
 		candidates = append(candidates, MemoryToCandidate(m, i))
@@ -276,11 +287,11 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 		candidates = append(candidates, EventToCandidate(evt, i))
 	}
 
-	return scoreAndConvert(candidates, sctx), nil
+	return scoreAndConvert(candidates, sctx, hybridRecallFilterOptions()), nil
 }
 
 // scoreAndConvert scores candidates and converts to RecallItems sorted by score.
-func scoreAndConvert(candidates []ScoringCandidate, sctx ScoringContext) []core.RecallItem {
+func scoreAndConvert(candidates []ScoringCandidate, sctx ScoringContext, opts recallFilterOptions) []core.RecallItem {
 	type scored struct {
 		candidate ScoringCandidate
 		breakdown SignalBreakdown
@@ -288,6 +299,9 @@ func scoreAndConvert(candidates []ScoringCandidate, sctx ScoringContext) []core.
 	scoredItems := make([]scored, 0, len(candidates))
 	for _, c := range candidates {
 		b := ScoreItem(c, sctx)
+		if !shouldIncludeRecallCandidate(c, b, opts) {
+			continue
+		}
 		scoredItems = append(scoredItems, scored{candidate: c, breakdown: b})
 	}
 	// Sort by score descending.
@@ -315,6 +329,55 @@ func scoreAndConvert(candidates []ScoringCandidate, sctx ScoringContext) []core.
 		items = append(items, item)
 	}
 	return items
+}
+
+func defaultRecallFilterOptions() recallFilterOptions {
+	return recallFilterOptions{
+		minScore:            minRecallScore,
+		minMemoryConfidence: minRecallMemoryConfidence,
+	}
+}
+
+func hybridRecallFilterOptions() recallFilterOptions {
+	return recallFilterOptions{
+		minScore:            minRecallScore,
+		minMemoryConfidence: minRecallMemoryConfidence,
+		allowHistoryNodes:   true,
+		minHistoryScore:     minHybridHistoryScore,
+		suppressToolResults: true,
+	}
+}
+
+func historyRecallFilterOptions() recallFilterOptions {
+	return recallFilterOptions{
+		allowHistoryNodes: true,
+	}
+}
+
+func shouldIncludeRecallCandidate(candidate ScoringCandidate, breakdown SignalBreakdown, opts recallFilterOptions) bool {
+	if candidate.Kind == "history-node" {
+		if !opts.allowHistoryNodes {
+			return false
+		}
+		if opts.suppressToolResults && candidate.Type == "tool_result" {
+			return false
+		}
+		if opts.minHistoryScore > 0 && breakdown.FinalScore < opts.minHistoryScore {
+			return false
+		}
+	}
+
+	if breakdown.FinalScore < opts.minScore {
+		return false
+	}
+	if candidate.Kind == "memory" && candidate.Confidence < opts.minMemoryConfidence {
+		return false
+	}
+	return true
+}
+
+func isRecallMemoryStatusAllowed(status core.MemoryStatus) bool {
+	return status == "" || status == core.MemoryStatusActive
 }
 
 // recallTimeline lists events ordered by occurred_at.

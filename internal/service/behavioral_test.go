@@ -35,6 +35,43 @@ func testServiceAndRepo(t *testing.T) (*AMMService, *sqlite.SQLiteRepository) {
 	return svc, repo
 }
 
+func testServiceAndRepoWithSummarizer(t *testing.T, summarizer core.Summarizer) (*AMMService, *sqlite.SQLiteRepository) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	ctx := context.Background()
+	db, err := sqlite.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlite.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	repo := &sqlite.SQLiteRepository{DB: db}
+	svc := New(repo, dbPath, summarizer)
+	t.Cleanup(func() { db.Close() })
+	return svc, repo
+}
+
+type reflectTestSummarizer struct {
+	extract func(string) ([]core.MemoryCandidate, error)
+}
+
+func (s reflectTestSummarizer) Summarize(context.Context, string, int) (string, error) {
+	return "", nil
+}
+
+func (s reflectTestSummarizer) ExtractMemoryCandidate(_ context.Context, content string) ([]core.MemoryCandidate, error) {
+	if s.extract == nil {
+		return nil, nil
+	}
+	return s.extract(content)
+}
+
+func (s reflectTestSummarizer) ExtractMemoryCandidateBatch(context.Context, []string) ([]core.MemoryCandidate, error) {
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // Reflect
 // ---------------------------------------------------------------------------
@@ -123,6 +160,44 @@ func TestReflect_ExtractsDecisions(t *testing.T) {
 	if !found {
 		t.Error("expected at least one decision memory after Reflect")
 	}
+}
+
+func TestReflect_AssignsTypeBasedImportance(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	_, err := svc.IngestEvent(ctx, &core.Event{
+		Kind:         "message",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "We decided to use PostgreSQL for the database layer",
+		OccurredAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := svc.Reflect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created < 1 {
+		t.Fatalf("expected at least 1 memory, got %d", created)
+	}
+
+	mems, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range mems {
+		if m.Type == core.MemoryTypeDecision {
+			if math.Abs(m.Importance-0.85) > 0.0001 {
+				t.Fatalf("expected decision importance 0.85, got %f", m.Importance)
+			}
+			return
+		}
+	}
+	t.Fatal("expected reflected decision memory")
 }
 
 func TestReflect_SkipsDuplicates(t *testing.T) {
@@ -230,6 +305,194 @@ func TestReflect_CreatesEntities(t *testing.T) {
 	}
 	if !linkedNames["kubernetes"] {
 		t.Fatalf("expected reflected memory to be linked to Kubernetes; got linked=%v", linkedEntities)
+	}
+}
+
+func TestReflect_PaginatesBacklogBeyond100(t *testing.T) {
+	summarizer := reflectTestSummarizer{extract: func(content string) ([]core.MemoryCandidate, error) {
+		return []core.MemoryCandidate{{
+			Type:             core.MemoryTypeFact,
+			Subject:          "backlog",
+			Body:             content,
+			TightDescription: content,
+			Confidence:       0.9,
+		}}, nil
+	}}
+	svc, repo := testServiceAndRepoWithSummarizer(t, summarizer)
+	ctx := context.Background()
+	now := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+
+	for i := 0; i < 205; i++ {
+		evt := &core.Event{
+			ID:           fmt.Sprintf("evt_reflect_page_%03d", i),
+			Kind:         "message_user",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("reflect backlog event %03d", i),
+			OccurredAt:   now,
+			IngestedAt:   now,
+		}
+		if err := repo.InsertEvent(ctx, evt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.Reflect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 205 {
+		t.Fatalf("expected 205 created memories, got %d", created)
+	}
+
+	mems, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusActive, Limit: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mems) != 205 {
+		t.Fatalf("expected 205 active memories, got %d", len(mems))
+	}
+
+	createdAgain, err := svc.Reflect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createdAgain != 0 {
+		t.Fatalf("expected second reflect run to create 0 memories, got %d", createdAgain)
+	}
+}
+
+func TestReflect_StoresAllCandidatesPerEvent(t *testing.T) {
+	eventID := "evt_multi_candidate"
+	summarizer := reflectTestSummarizer{extract: func(content string) ([]core.MemoryCandidate, error) {
+		return []core.MemoryCandidate{
+			{Type: core.MemoryTypeFact, Subject: "alpha", Body: "first candidate", TightDescription: "first candidate", Confidence: 0.9},
+			{Type: core.MemoryTypeDecision, Subject: "alpha", Body: "second candidate", TightDescription: "second candidate", Confidence: 0.95},
+		}, nil
+	}}
+	svc, repo := testServiceAndRepoWithSummarizer(t, summarizer)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if err := repo.InsertEvent(ctx, &core.Event{ID: eventID, Kind: "message_user", SourceSystem: "test", PrivacyLevel: core.PrivacyPrivate, Content: "event with multiple memories", OccurredAt: now, IngestedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := svc.Reflect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 2 {
+		t.Fatalf("expected 2 created memories, got %d", created)
+	}
+
+	mems, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mems) != 2 {
+		t.Fatalf("expected 2 active memories, got %d", len(mems))
+	}
+	for _, mem := range mems {
+		if len(mem.SourceEventIDs) != 1 || mem.SourceEventIDs[0] != eventID {
+			t.Fatalf("expected source_event_ids [%s], got %#v", eventID, mem.SourceEventIDs)
+		}
+	}
+}
+
+func TestReflect_RejectsInvalidCandidates(t *testing.T) {
+	summarizer := reflectTestSummarizer{extract: func(content string) ([]core.MemoryCandidate, error) {
+		return []core.MemoryCandidate{
+			{Type: core.MemoryType("bogus"), Subject: "invalid", Body: "bad type", TightDescription: "bad type", Confidence: 0.8},
+			{Type: core.MemoryTypeFact, Subject: "invalid", Body: "", TightDescription: "missing body", Confidence: 0.8},
+			{Type: core.MemoryTypeFact, Subject: "invalid", Body: "missing description", TightDescription: "", Confidence: 0.8},
+			{Type: core.MemoryTypeFact, Subject: "valid", Body: "valid memory body", TightDescription: "valid memory", Confidence: 0.9},
+		}, nil
+	}}
+	svc, repo := testServiceAndRepoWithSummarizer(t, summarizer)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if err := repo.InsertEvent(ctx, &core.Event{ID: "evt_invalid_candidates", Kind: "message_user", SourceSystem: "test", PrivacyLevel: core.PrivacyPrivate, Content: "candidate validation event", OccurredAt: now, IngestedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := svc.Reflect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 valid reflected memory, got %d", created)
+	}
+
+	mems, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 active memory, got %d", len(mems))
+	}
+	if mems[0].TightDescription != "valid memory" {
+		t.Fatalf("expected surviving memory to be the valid candidate, got %q", mems[0].TightDescription)
+	}
+}
+
+func TestReflect_AdvancesCursorPastInvalidOnlyEvents(t *testing.T) {
+	summarizer := reflectTestSummarizer{extract: func(content string) ([]core.MemoryCandidate, error) {
+		if strings.Contains(content, "invalid") {
+			return []core.MemoryCandidate{{
+				Type:             core.MemoryTypeFact,
+				Body:             "",
+				TightDescription: "invalid candidate",
+				Confidence:       0.8,
+			}}, nil
+		}
+		return []core.MemoryCandidate{{
+			Type:             core.MemoryTypeFact,
+			Body:             content,
+			TightDescription: content,
+			Confidence:       0.9,
+		}}, nil
+	}}
+	svc, repo := testServiceAndRepoWithSummarizer(t, summarizer)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	events := []*core.Event{
+		{ID: "evt_invalid_only", Kind: "message_user", SourceSystem: "test", PrivacyLevel: core.PrivacyPrivate, Content: "invalid event", OccurredAt: now, IngestedAt: now},
+		{ID: "evt_valid_after_invalid", Kind: "message_user", SourceSystem: "test", PrivacyLevel: core.PrivacyPrivate, Content: "valid event", OccurredAt: now, IngestedAt: now},
+	}
+	for _, evt := range events {
+		if err := repo.InsertEvent(ctx, evt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.Reflect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected one valid memory from first reflect run, got %d", created)
+	}
+
+	jobs, err := repo.ListJobs(ctx, core.ListJobsOptions{Kind: "reflect", Status: "completed", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected one completed reflect job, got %d", len(jobs))
+	}
+	if jobs[0].Result["last_event_rowid"] == "" {
+		t.Fatalf("expected reflect job to persist last_event_rowid, got %#v", jobs[0].Result)
+	}
+
+	createdAgain, err := svc.Reflect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createdAgain != 0 {
+		t.Fatalf("expected second reflect run to create 0 memories, got %d", createdAgain)
 	}
 }
 
@@ -509,6 +772,28 @@ func TestSupersession_RecallFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	archived, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "deployment target is kubernetes cluster archived",
+		TightDescription: "deploy archived",
+		Status:           core.MemoryStatusArchived,
+		Confidence:       0.9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	retracted, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "deployment target is kubernetes cluster retracted",
+		TightDescription: "deploy retracted",
+		Status:           core.MemoryStatusRetracted,
+		Confidence:       0.9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	result, err := svc.Recall(ctx, "deployment kubernetes", core.RecallOptions{
 		Mode: core.RecallModeFacts,
 	})
@@ -519,6 +804,12 @@ func TestSupersession_RecallFilters(t *testing.T) {
 	for _, item := range result.Items {
 		if item.ID == memA.ID {
 			t.Error("superseded memory A should not appear in recall results")
+		}
+		if item.ID == archived.ID {
+			t.Error("archived memory should not appear in recall results")
+		}
+		if item.ID == retracted.ID {
+			t.Error("retracted memory should not appear in recall results")
 		}
 	}
 }
@@ -801,6 +1092,50 @@ func TestExtractClaims_SkipsExisting(t *testing.T) {
 	if second != 0 {
 		t.Errorf("expected second ExtractClaims to create 0 (already extracted), got %d", second)
 	}
+}
+
+func TestExtractClaims_DecisionBodyUsesChosenOptionOnly(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeDecision,
+		Subject:          "database",
+		Body:             "Decision: use SQLite for persistence\nWhy: simpler local setup and fewer moving parts",
+		TightDescription: "Use SQLite for persistence",
+		Confidence:       0.9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := svc.ExtractClaims(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created < 1 {
+		t.Fatalf("expected at least 1 claim created, got %d", created)
+	}
+
+	claims, err := svc.repo.ListClaimsByMemory(ctx, mem.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, claim := range claims {
+		if claim.Predicate != "decided" {
+			continue
+		}
+		if claim.ObjectValue != "use SQLite for persistence" {
+			t.Fatalf("expected decided claim object to be chosen option only, got %q", claim.ObjectValue)
+		}
+		if claim.Metadata["subject"] != "database" {
+			t.Fatalf("expected subject metadata to use memory subject, got %q", claim.Metadata["subject"])
+		}
+		return
+	}
+
+	t.Fatal("expected a decided claim for decision-style body")
 }
 
 // ---------------------------------------------------------------------------

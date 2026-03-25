@@ -342,3 +342,37 @@ func TestScoreItem_FinalScore(t *testing.T) {
 		t.Errorf("expected penalized score (%f) < unpenalized (%f)", bPenalized.FinalScore, b.FinalScore)
 	}
 }
+
+func TestShouldIncludeRecallCandidate(t *testing.T) {
+	t.Run("filters low score", func(t *testing.T) {
+		candidate := ScoringCandidate{Kind: "memory", Confidence: 0.9}
+		include := shouldIncludeRecallCandidate(candidate, SignalBreakdown{FinalScore: 0.1}, defaultRecallFilterOptions())
+		if include {
+			t.Fatal("expected low-score candidate to be filtered")
+		}
+	})
+
+	t.Run("filters low confidence memories", func(t *testing.T) {
+		candidate := ScoringCandidate{Kind: "memory", Confidence: 0.1}
+		include := shouldIncludeRecallCandidate(candidate, SignalBreakdown{FinalScore: 0.9}, defaultRecallFilterOptions())
+		if include {
+			t.Fatal("expected low-confidence memory to be filtered")
+		}
+	})
+
+	t.Run("suppresses tool results in hybrid", func(t *testing.T) {
+		candidate := ScoringCandidate{Kind: "history-node", Type: "tool_result"}
+		include := shouldIncludeRecallCandidate(candidate, SignalBreakdown{FinalScore: 0.95}, hybridRecallFilterOptions())
+		if include {
+			t.Fatal("expected tool_result history nodes to be filtered in hybrid recall")
+		}
+	})
+
+	t.Run("keeps tool results in history mode", func(t *testing.T) {
+		candidate := ScoringCandidate{Kind: "history-node", Type: "tool_result"}
+		include := shouldIncludeRecallCandidate(candidate, SignalBreakdown{FinalScore: 0.2}, historyRecallFilterOptions())
+		if !include {
+			t.Fatal("expected history mode to keep tool_result events")
+		}
+	})
+}

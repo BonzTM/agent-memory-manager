@@ -15,8 +15,9 @@ type claimPattern struct {
 }
 
 var claimPatterns = []claimPattern{
+	{phrase: "decision: ", predicate: "decided"},
 	{phrase: " was decided to be ", predicate: "decided"},
-	{phrase: " decided to use ", predicate: "decided"},
+	{phrase: "decided to use ", predicate: "decided"},
 	{phrase: " depends on ", predicate: "depends_on"},
 	{phrase: " runs on ", predicate: "runs_on"},
 	{phrase: " requires ", predicate: "requires"},
@@ -92,11 +93,7 @@ func extractClaimsFromBody(mem *core.Memory) []core.Claim {
 		if afterIdx >= len(mem.Body) {
 			continue
 		}
-		object := strings.TrimSpace(mem.Body[afterIdx:])
-		// Take only until end of sentence or line.
-		if endIdx := strings.IndexAny(object, ".!?\n"); endIdx >= 0 {
-			object = strings.TrimSpace(object[:endIdx])
-		}
+		object := trimClaimObject(mem.Body[afterIdx:])
 
 		// Truncate subject and object to reasonable length.
 		subject = truncate(subject, 100)
@@ -133,4 +130,23 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen]
+}
+
+func trimClaimObject(s string) string {
+	object := strings.TrimSpace(s)
+	objectLower := strings.ToLower(object)
+
+	end := len(object)
+	for _, idx := range []int{
+		strings.IndexAny(object, ".!?\n;"),
+		strings.Index(objectLower, " why:"),
+		strings.Index(objectLower, " tradeoff:"),
+		strings.Index(objectLower, " because "),
+	} {
+		if idx >= 0 && idx < end {
+			end = idx
+		}
+	}
+
+	return strings.TrimSpace(object[:end])
 }

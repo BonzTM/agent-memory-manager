@@ -174,6 +174,142 @@ func TestRecallAmbient(t *testing.T) {
 	}
 }
 
+func TestRecallDefaultsToHybrid(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	_, err := svc.IngestEvent(ctx, &core.Event{
+		Kind:         "message",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "event-only hybrid default signal",
+		OccurredAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("IngestEvent: %v", err)
+	}
+
+	result, err := svc.Recall(ctx, "hybrid default signal", core.RecallOptions{})
+	if err != nil {
+		t.Fatalf("Recall default: %v", err)
+	}
+	if result.Meta.Mode != core.RecallModeHybrid {
+		t.Fatalf("expected default mode hybrid, got %s", result.Meta.Mode)
+	}
+	if len(result.Items) == 0 {
+		t.Fatal("expected default recall to return items")
+	}
+	foundHistory := false
+	for _, item := range result.Items {
+		if item.Kind == "history-node" {
+			foundHistory = true
+			break
+		}
+	}
+	if !foundHistory {
+		t.Fatalf("expected default hybrid recall to include history-node results, got %+v", result.Items)
+	}
+}
+
+func TestRecallHybrid_SuppressesToolResultHistory(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	_, err := svc.IngestEvent(ctx, &core.Event{
+		Kind:         "tool_result",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "hybrid tool result noise",
+		OccurredAt:   now,
+	})
+	if err != nil {
+		t.Fatalf("IngestEvent tool_result: %v", err)
+	}
+	_, err = svc.IngestEvent(ctx, &core.Event{
+		Kind:         "message_user",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "hybrid tool result noise",
+		OccurredAt:   now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("IngestEvent message_user: %v", err)
+	}
+
+	result, err := svc.Recall(ctx, "hybrid tool result noise", core.RecallOptions{Mode: core.RecallModeHybrid})
+	if err != nil {
+		t.Fatalf("Recall hybrid: %v", err)
+	}
+	if len(result.Items) == 0 {
+		t.Fatal("expected at least one hybrid recall item")
+	}
+	for _, item := range result.Items {
+		if item.Kind == "history-node" && item.Type == "tool_result" {
+			t.Fatalf("expected tool_result history nodes to be suppressed in hybrid recall: %+v", result.Items)
+		}
+	}
+}
+
+func TestRecallHistory_StillReturnsToolResult(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	_, err := svc.IngestEvent(ctx, &core.Event{
+		Kind:         "tool_result",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "history tool result signal",
+		OccurredAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("IngestEvent: %v", err)
+	}
+
+	result, err := svc.Recall(ctx, "history tool result signal", core.RecallOptions{Mode: core.RecallModeHistory})
+	if err != nil {
+		t.Fatalf("Recall history: %v", err)
+	}
+	if len(result.Items) == 0 {
+		t.Fatal("expected history recall to return tool_result event")
+	}
+	found := false
+	for _, item := range result.Items {
+		if item.Kind == "history-node" && item.Type == "tool_result" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected history recall to preserve tool_result events: %+v", result.Items)
+	}
+}
+
+func TestRecallFacts_FiltersLowConfidenceMemory(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "low confidence fact should not surface",
+		TightDescription: "low confidence fact",
+		Confidence:       0.1,
+	})
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+
+	result, err := svc.Recall(ctx, "low confidence fact", core.RecallOptions{Mode: core.RecallModeFacts})
+	if err != nil {
+		t.Fatalf("Recall facts: %v", err)
+	}
+	for _, item := range result.Items {
+		if item.ID == mem.ID {
+			t.Fatalf("expected low-confidence memory to be filtered from facts recall: %+v", result.Items)
+		}
+	}
+}
+
 func TestRecallFacts(t *testing.T) {
 	svc := testService(t)
 	ctx := context.Background()

@@ -213,6 +213,42 @@ func TestHandleToolCallInvalidParamsAndUnknownTool(t *testing.T) {
 	}
 }
 
+func TestHandleToolCallRecallDefaultsToHybrid(t *testing.T) {
+	svc := testMCPService(t)
+
+	ingestResp := handleToolCall(svc, toolReq(t, "amm_ingest_event", map[string]interface{}{
+		"kind":          "message_user",
+		"source_system": "mcp-test",
+		"content":       "mcp default hybrid recall event",
+	}))
+	if ingestResp.Error != nil {
+		t.Fatalf("ingest event rpc error: %+v", ingestResp.Error)
+	}
+
+	recallResp := handleToolCall(svc, toolReq(t, "amm_recall", map[string]interface{}{
+		"query": "hybrid recall event",
+		"opts":  map[string]interface{}{},
+	}))
+	var recallResult core.RecallResult
+	decodeToolResultJSON(t, recallResp, &recallResult)
+	if recallResult.Meta.Mode != core.RecallModeHybrid {
+		t.Fatalf("expected default recall mode hybrid, got %#v", recallResult.Meta.Mode)
+	}
+	if len(recallResult.Items) == 0 {
+		t.Fatalf("expected recall to return items: %#v", recallResult)
+	}
+	foundHistory := false
+	for _, item := range recallResult.Items {
+		if item.Kind == "history-node" {
+			foundHistory = true
+			break
+		}
+	}
+	if !foundHistory {
+		t.Fatalf("expected history-node in default recall result: %#v", recallResult.Items)
+	}
+}
+
 func TestHandleToolCallCoversAllTools(t *testing.T) {
 	svc := testMCPService(t)
 
