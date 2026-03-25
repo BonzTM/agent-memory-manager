@@ -69,6 +69,7 @@ const (
 
 // Event is an append-only raw interaction record.
 type Event struct {
+	RowID        int64             `json:"-"`
 	ID           string            `json:"id"`
 	Kind         string            `json:"kind"`
 	SourceSystem string            `json:"source_system"`
