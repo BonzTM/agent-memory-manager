@@ -25,9 +25,10 @@ func generateID(prefix string) string {
 
 // AMMService implements core.Service with business logic on top of a Repository.
 type AMMService struct {
-	repo       core.Repository
-	dbPath     string
-	summarizer core.Summarizer
+	repo               core.Repository
+	dbPath             string
+	summarizer         core.Summarizer
+	reprocessBatchSize int
 }
 
 // Compile-time check that AMMService implements core.Service.
@@ -39,7 +40,15 @@ func New(repo core.Repository, dbPath string, summarizer ...core.Summarizer) *AM
 	if len(summarizer) > 0 && summarizer[0] != nil {
 		selected = summarizer[0]
 	}
-	return &AMMService{repo: repo, dbPath: dbPath, summarizer: selected}
+	return &AMMService{repo: repo, dbPath: dbPath, summarizer: selected, reprocessBatchSize: defaultBatchSize}
+}
+
+func (s *AMMService) SetReprocessBatchSize(batchSize int) {
+	if batchSize <= 0 {
+		s.reprocessBatchSize = defaultBatchSize
+		return
+	}
+	s.reprocessBatchSize = batchSize
 }
 
 // Init initializes the database: creates the parent directory, opens the DB,
@@ -411,6 +420,18 @@ func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error)
 		jobErr = err
 		if jobErr == nil {
 			job.Result = map[string]string{"action": "cleanup_recall_history", "deleted": fmt.Sprintf("%d", cleaned)}
+		}
+	case "reprocess":
+		created, superseded, err := s.Reprocess(ctx, false)
+		jobErr = err
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "reprocess", "memories_created": fmt.Sprintf("%d", created), "memories_superseded": fmt.Sprintf("%d", superseded)}
+		}
+	case "reprocess_all":
+		created, superseded, err := s.Reprocess(ctx, true)
+		jobErr = err
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "reprocess_all", "memories_created": fmt.Sprintf("%d", created), "memories_superseded": fmt.Sprintf("%d", superseded)}
 		}
 	default:
 		jobErr = fmt.Errorf("%w: unknown job kind %q", core.ErrInvalidInput, kind)
