@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/joshd-04/agent-memory-manager/internal/adapters/cli"
+	"github.com/bonztm/agent-memory-manager/internal/adapters/cli"
 )
 
 func main() {

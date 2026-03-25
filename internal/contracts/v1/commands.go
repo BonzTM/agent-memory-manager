@@ -1,23 +1,43 @@
 package v1
 
-// Command name constants for all v0 amm commands.
+// Command name constants for all v1 amm commands.
 const (
-	CmdIngestEvent      = "ingest_event"
+	// CmdIngestEvent appends a single raw event to history.
+	CmdIngestEvent = "ingest_event"
+	// CmdIngestTranscript appends a batch of raw events to history.
 	CmdIngestTranscript = "ingest_transcript"
-	CmdRemember         = "remember"
-	CmdRecall           = "recall"
-	CmdDescribe         = "describe"
-	CmdExpand           = "expand"
-	CmdHistory          = "history"
-	CmdGetMemory        = "get_memory"
-	CmdUpdateMemory     = "update_memory"
-	CmdPolicyList       = "policy_list"
-	CmdPolicyAdd        = "policy_add"
-	CmdPolicyRemove     = "policy_remove"
-	CmdRunJob           = "run_job"
-	CmdRepair           = "repair"
-	CmdExplainRecall    = "explain_recall"
-	CmdStatus           = "status"
+	// CmdRemember commits a durable memory record.
+	CmdRemember = "remember"
+	// CmdRecall retrieves memories for a query.
+	CmdRecall = "recall"
+	// CmdDescribe returns thin descriptions for one or more items.
+	CmdDescribe = "describe"
+	// CmdExpand expands a single item to full detail.
+	CmdExpand = "expand"
+	// CmdHistory queries raw interaction history.
+	CmdHistory = "history"
+	// CmdGetMemory retrieves a single memory by ID.
+	CmdGetMemory = "get_memory"
+	// CmdUpdateMemory updates an existing memory.
+	CmdUpdateMemory = "update_memory"
+	// CmdPolicyList lists ingestion policies.
+	CmdPolicyList = "policy_list"
+	// CmdPolicyAdd adds an ingestion policy.
+	CmdPolicyAdd = "policy_add"
+	// CmdPolicyRemove removes an ingestion policy by ID.
+	CmdPolicyRemove = "policy_remove"
+	// CmdRunJob executes a maintenance job.
+	CmdRunJob = "run_job"
+	// CmdRepair runs integrity checks and optional fixes.
+	CmdRepair = "repair"
+	// CmdExplainRecall explains why an item surfaced for a query.
+	CmdExplainRecall = "explain_recall"
+	// CmdStatus returns runtime and storage status information.
+	CmdStatus = "status"
+	// CmdRun executes a full v1 command envelope.
+	CmdRun = "run"
+	// CmdValidate validates a v1 command envelope without executing it.
+	CmdValidate = "validate"
 )
 
 // CommandInfo describes a single amm command.
@@ -91,5 +111,13 @@ var CommandRegistry = map[string]CommandInfo{
 	CmdStatus: {
 		Name:        CmdStatus,
 		Description: "Return system status information.",
+	},
+	CmdRun: {
+		Name:        CmdRun,
+		Description: "Execute a full v1 command envelope from a file or stdin.",
+	},
+	CmdValidate: {
+		Name:        CmdValidate,
+		Description: "Validate a v1 command envelope without executing.",
 	},
 }

@@ -70,6 +70,8 @@ var (
 		"cleanup_recall_history": true,
 		"reprocess":              true,
 		"reprocess_all":          true,
+		"promote_high_value":     true,
+		"archive_session_traces": true,
 	}
 
 	validPolicyPatternTypes = map[string]bool{
@@ -86,9 +88,16 @@ var (
 		"read_only": true,
 		"ignore":    true,
 	}
+
+	validPolicyMatchModes = map[string]bool{
+		"exact": true,
+		"glob":  true,
+		"regex": true,
+	}
 )
 
-// ValidateIngestEvent validates an IngestEventRequest.
+// ValidateIngestEvent validates an IngestEventRequest before the ingest_event
+// command is executed.
 func ValidateIngestEvent(req *IngestEventRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -108,7 +117,8 @@ func ValidateIngestEvent(req *IngestEventRequest) error {
 	return nil
 }
 
-// ValidateIngestTranscript validates an IngestTranscriptRequest.
+// ValidateIngestTranscript validates an IngestTranscriptRequest and all nested
+// events before bulk ingestion.
 func ValidateIngestTranscript(req *IngestTranscriptRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -124,7 +134,8 @@ func ValidateIngestTranscript(req *IngestTranscriptRequest) error {
 	return nil
 }
 
-// ValidateRemember validates a RememberRequest.
+// ValidateRemember validates a RememberRequest before creating a durable
+// memory.
 func ValidateRemember(req *RememberRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -150,7 +161,7 @@ func ValidateRemember(req *RememberRequest) error {
 	return nil
 }
 
-// ValidateRecall validates a RecallRequest.
+// ValidateRecall validates a RecallRequest before a recall query is run.
 func ValidateRecall(req *RecallRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -167,7 +178,8 @@ func ValidateRecall(req *RecallRequest) error {
 	return nil
 }
 
-// ValidateDescribe validates a DescribeRequest.
+// ValidateDescribe validates a DescribeRequest before thin item descriptions
+// are fetched.
 func ValidateDescribe(req *DescribeRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -183,7 +195,7 @@ func ValidateDescribe(req *DescribeRequest) error {
 	return nil
 }
 
-// ValidateExpand validates an ExpandRequest.
+// ValidateExpand validates an ExpandRequest before an item is expanded.
 func ValidateExpand(req *ExpandRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -205,7 +217,8 @@ func ValidateExpand(req *ExpandRequest) error {
 	return nil
 }
 
-// ValidateHistory validates a HistoryRequest.
+// ValidateHistory validates a HistoryRequest before raw event history is
+// queried.
 func ValidateHistory(req *HistoryRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -218,7 +231,7 @@ func ValidateHistory(req *HistoryRequest) error {
 	return nil
 }
 
-// ValidateRunJob validates a RunJobRequest.
+// ValidateRunJob validates a RunJobRequest before a maintenance job is run.
 func ValidateRunJob(req *RunJobRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -232,7 +245,8 @@ func ValidateRunJob(req *RunJobRequest) error {
 	return nil
 }
 
-// ValidateRepair validates a RepairRequest.
+// ValidateRepair validates a RepairRequest before integrity checks or repairs
+// are started.
 func ValidateRepair(req *RepairRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -241,7 +255,8 @@ func ValidateRepair(req *RepairRequest) error {
 	return nil
 }
 
-// ValidateExplainRecall validates an ExplainRecallRequest.
+// ValidateExplainRecall validates an ExplainRecallRequest before recall
+// explanation is generated.
 func ValidateExplainRecall(req *ExplainRecallRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -255,7 +270,8 @@ func ValidateExplainRecall(req *ExplainRecallRequest) error {
 	return nil
 }
 
-// ValidateGetMemory validates a GetMemoryRequest.
+// ValidateGetMemory validates a GetMemoryRequest before a memory is fetched by
+// ID.
 func ValidateGetMemory(req *GetMemoryRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -266,7 +282,8 @@ func ValidateGetMemory(req *GetMemoryRequest) error {
 	return nil
 }
 
-// ValidateUpdateMemory validates an UpdateMemoryRequest.
+// ValidateUpdateMemory validates an UpdateMemoryRequest before mutable memory
+// fields are updated.
 func ValidateUpdateMemory(req *UpdateMemoryRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -286,6 +303,8 @@ func ValidateUpdateMemory(req *UpdateMemoryRequest) error {
 	return nil
 }
 
+// ValidatePolicyAdd validates a PolicyAddRequest before a new ingestion policy
+// is created.
 func ValidatePolicyAdd(req *PolicyAddRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -304,6 +323,9 @@ func ValidatePolicyAdd(req *PolicyAddRequest) error {
 	}
 	if !validPolicyModes[req.Mode] {
 		return fmt.Errorf("invalid mode %q: must be one of full, read_only, ignore", req.Mode)
+	}
+	if req.MatchMode != "" && !validPolicyMatchModes[req.MatchMode] {
+		return fmt.Errorf("invalid match_mode %q: must be one of exact, glob, regex", req.MatchMode)
 	}
 	return nil
 }

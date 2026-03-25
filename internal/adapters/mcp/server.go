@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
-	v1 "github.com/joshd-04/agent-memory-manager/internal/contracts/v1"
-	"github.com/joshd-04/agent-memory-manager/internal/core"
-	"github.com/joshd-04/agent-memory-manager/internal/runtime"
+	v1 "github.com/bonztm/agent-memory-manager/internal/contracts/v1"
+	"github.com/bonztm/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/runtime"
 )
+
+var Version = "dev"
 
 // JSON-RPC types for MCP protocol.
 type jsonrpcRequest struct {
@@ -33,7 +36,8 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-// Tool describes an MCP tool.
+// Tool describes a single MCP-exposed amm tool, including its name,
+// human-readable description, and JSON schema input contract.
 type Tool struct {
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
@@ -63,9 +67,11 @@ func tools() []Tool {
 	}
 }
 
-// Serve runs the MCP server on stdin/stdout using JSON-RPC.
+// Serve runs the amm MCP server over stdin/stdout using JSON-RPC and dispatches
+// incoming tool calls through the shared service layer.
 func Serve() error {
 	cfg := runtime.LoadConfigWithEnv()
+	slog.Debug("mcp server start", "db_path", cfg.Storage.DBPath, "version", Version)
 
 	svc, cleanup, err := runtime.NewService(cfg)
 	if err != nil {
@@ -94,6 +100,7 @@ func Serve() error {
 }
 
 func handleRequest(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
+	slog.Debug("mcp handle request", "method", req.Method)
 	switch req.Method {
 	case "initialize":
 		return jsonrpcResponse{
@@ -138,6 +145,7 @@ type toolCallParams struct {
 func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 	var params toolCallParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
+		slog.Error("mcp tool call failed", "tool", "", "error", err)
 		return jsonrpcResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
@@ -148,6 +156,11 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 	ctx := context.Background()
 	var result interface{}
 	var callErr error
+	slog.Debug("mcp tool call start", "tool", params.Name)
+	invalidArgs := func(err error) jsonrpcResponse {
+		slog.Error("mcp tool call failed", "tool", params.Name, "error", err)
+		return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+	}
 
 	switch params.Name {
 	case "amm_init":
@@ -156,7 +169,7 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 	case "amm_ingest_event":
 		var evt core.Event
 		if err := json.Unmarshal(params.Arguments, &evt); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.IngestEvent(ctx, &evt)
 
@@ -165,14 +178,14 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			Events []*core.Event `json:"events"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.IngestTranscript(ctx, args.Events)
 
 	case "amm_remember":
 		var mem core.Memory
 		if err := json.Unmarshal(params.Arguments, &mem); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.Remember(ctx, &mem)
 
@@ -182,7 +195,7 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			Opts  core.RecallOptions `json:"opts"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.Recall(ctx, args.Query, args.Opts)
 
@@ -191,7 +204,7 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			IDs []string `json:"ids"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.Describe(ctx, args.IDs)
 
@@ -201,7 +214,7 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			Kind string `json:"kind"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.Expand(ctx, args.ID, args.Kind)
 
@@ -211,7 +224,7 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			Opts  core.HistoryOptions `json:"opts"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.History(ctx, args.Query, args.Opts)
 
@@ -220,14 +233,14 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.GetMemory(ctx, args.ID)
 
 	case "amm_update_memory":
 		var mem core.Memory
 		if err := json.Unmarshal(params.Arguments, &mem); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.UpdateMemory(ctx, &mem)
 
@@ -237,15 +250,17 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 	case "amm_policy_add":
 		var policy core.IngestionPolicy
 		if err := json.Unmarshal(params.Arguments, &policy); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		if err := v1.ValidatePolicyAdd(&v1.PolicyAddRequest{
 			PatternType: policy.PatternType,
 			Pattern:     policy.Pattern,
 			Mode:        policy.Mode,
+			Priority:    policy.Priority,
+			MatchMode:   policy.MatchMode,
 			Metadata:    policy.Metadata,
 		}); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.AddPolicy(ctx, &policy)
 
@@ -254,7 +269,7 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		callErr = svc.RemovePolicy(ctx, args.ID)
 		if callErr == nil {
@@ -266,7 +281,7 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			Kind string `json:"kind"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.RunJob(ctx, args.Kind)
 
@@ -276,7 +291,7 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			ItemID string `json:"item_id"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.ExplainRecall(ctx, args.Query, args.ItemID)
 
@@ -286,7 +301,7 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			Fix   string `json:"fix"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
+			return invalidArgs(err)
 		}
 		result, callErr = svc.Repair(ctx, args.Check, args.Fix)
 
@@ -294,10 +309,12 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 		result, callErr = svc.Status(ctx)
 
 	default:
+		slog.Error("mcp tool call failed", "tool", params.Name, "error", fmt.Sprintf("unknown tool: %s", params.Name))
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
 	}
 
 	if callErr != nil {
+		slog.Error("mcp tool call failed", "tool", params.Name, "error", callErr)
 		return jsonrpcResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
@@ -309,6 +326,7 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 	}
 
 	resultJSON, _ := json.Marshal(result)
+	slog.Debug("mcp tool call succeeded", "tool", params.Name)
 	return jsonrpcResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
@@ -501,8 +519,10 @@ func policyAddSchema() map[string]interface{} {
 		"type": "object",
 		"properties": map[string]interface{}{
 			"pattern_type": map[string]string{"type": "string", "description": "Pattern type: session, source, surface, agent, project, runtime"},
-			"pattern":      map[string]string{"type": "string", "description": "Glob pattern"},
+			"pattern":      map[string]string{"type": "string", "description": "Policy pattern"},
 			"mode":         map[string]string{"type": "string", "description": "Ingestion mode: full, read_only, ignore"},
+			"priority":     map[string]string{"type": "integer", "description": "Priority ordering (higher wins)"},
+			"match_mode":   map[string]string{"type": "string", "description": "Pattern match mode: exact, glob, regex"},
 		},
 		"required": []string{"pattern_type", "pattern", "mode"},
 	}

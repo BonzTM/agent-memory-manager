@@ -1,0 +1,27 @@
+{
+  "version": "amm.v1",
+  "command": "ingest_transcript",
+  "request_id": "example-002",
+  "payload": {
+    "events": [
+      {
+        "kind": "message_user",
+        "source_system": "cli",
+        "content": "How do I set up the database?",
+        "occurred_at": "2026-03-25T10:00:00Z"
+      },
+      {
+        "kind": "message_assistant",
+        "source_system": "cli",
+        "content": "I'll help you set up the database. First, let's initialize...",
+        "occurred_at": "2026-03-25T10:00:05Z"
+      },
+      {
+        "kind": "message_user",
+        "source_system": "cli",
+        "content": "Thanks, that worked perfectly!",
+        "occurred_at": "2026-03-25T10:05:00Z"
+      }
+    ]
+  }
+}

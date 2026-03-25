@@ -1,0 +1,12 @@
+{
+  "version": "amm.v1",
+  "command": "recall",
+  "request_id": "example-004",
+  "payload": {
+    "query": "communication style",
+    "opts": {
+      "mode": "facts",
+      "limit": 10
+    }
+  }
+}

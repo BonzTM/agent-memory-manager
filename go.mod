@@ -1,4 +1,4 @@
-module github.com/joshd-04/agent-memory-manager
+module github.com/bonztm/agent-memory-manager
 
 go 1.26.1
 

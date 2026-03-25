@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://amm.dev/spec/v1/mcp.tools.v1.json",
+  "title": "AMM MCP Tools Schema",
+  "description": "Tool definitions for AMM MCP server",
+  "version": "amm.v1",
+  "type": "object",
+  "required": ["version", "tools"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "amm.v1"
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Tool"
+      }
+    }
+  },
+  "definitions": {
+    "Tool": {
+      "type": "object",
+      "required": ["name", "description", "inputSchema"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^amm_[a-z_]+$"
+        },
+        "description": {
+          "type": "string"
+        },
+        "inputSchema": {
+          "type": "object"
+        }
+      }
+    },
+    "JSONSchema": {
+      "type": "object",
+      "description": "JSON Schema for tool input validation"
+    }
+  }
+}

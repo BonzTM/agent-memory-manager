@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/joshd-04/agent-memory-manager/internal/core"
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 func decodeToolResultJSON(t *testing.T, resp jsonrpcResponse, out interface{}) {

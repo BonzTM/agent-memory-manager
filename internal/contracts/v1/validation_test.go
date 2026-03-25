@@ -204,6 +204,12 @@ func TestValidateRunJob(t *testing.T) {
 	if err := ValidateRunJob(&RunJobRequest{Kind: "reprocess_all"}); err != nil {
 		t.Fatalf("expected reprocess_all to be valid, got %v", err)
 	}
+	if err := ValidateRunJob(&RunJobRequest{Kind: "promote_high_value"}); err != nil {
+		t.Fatalf("expected promote_high_value to be valid, got %v", err)
+	}
+	if err := ValidateRunJob(&RunJobRequest{Kind: "archive_session_traces"}); err != nil {
+		t.Fatalf("expected archive_session_traces to be valid, got %v", err)
+	}
 
 	tests := []struct {
 		name     string
@@ -303,6 +309,9 @@ func TestValidatePolicyAdd(t *testing.T) {
 	if err := ValidatePolicyAdd(&PolicyAddRequest{PatternType: "source", Pattern: "svc-*", Mode: "read_only"}); err != nil {
 		t.Fatalf("expected valid request, got %v", err)
 	}
+	if err := ValidatePolicyAdd(&PolicyAddRequest{PatternType: "source", Pattern: "^svc-[a-z]+$", Mode: "read_only", MatchMode: "regex"}); err != nil {
+		t.Fatalf("expected valid regex request, got %v", err)
+	}
 
 	tests := []struct {
 		name     string
@@ -315,6 +324,7 @@ func TestValidatePolicyAdd(t *testing.T) {
 		{name: "missing pattern", req: &PolicyAddRequest{PatternType: "source", Mode: "full"}, contains: "pattern is required"},
 		{name: "missing mode", req: &PolicyAddRequest{PatternType: "source", Pattern: "svc-*"}, contains: "mode is required"},
 		{name: "invalid mode", req: &PolicyAddRequest{PatternType: "source", Pattern: "svc-*", Mode: "drop"}, contains: "invalid mode"},
+		{name: "invalid match mode", req: &PolicyAddRequest{PatternType: "source", Pattern: "svc-*", Mode: "full", MatchMode: "wildcard"}, contains: "invalid match_mode"},
 	}
 
 	for _, tt := range tests {

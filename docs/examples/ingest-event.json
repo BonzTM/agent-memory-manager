@@ -1,0 +1,13 @@
+{
+  "version": "amm.v1",
+  "command": "ingest_event",
+  "request_id": "example-001",
+  "payload": {
+    "kind": "message_user",
+    "source_system": "claude-code",
+    "content": "Let's refactor the authentication module",
+    "session_id": "sess_abc123",
+    "project_id": "myproject",
+    "occurred_at": "2026-03-25T10:00:00Z"
+  }
+}

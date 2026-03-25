@@ -1,0 +1,12 @@
+{
+  "version": "amm.v1",
+  "command": "remember",
+  "request_id": "example-003",
+  "payload": {
+    "type": "preference",
+    "scope": "global",
+    "subject": "communication",
+    "body": "User prefers concise, direct replies without unnecessary pleasantries",
+    "tight_description": "Prefers concise communication"
+  }
+}

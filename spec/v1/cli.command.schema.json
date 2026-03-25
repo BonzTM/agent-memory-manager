@@ -1,0 +1,258 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://amm.dev/spec/v1/cli.command.schema.json",
+  "title": "AMM CLI Command Envelope",
+  "description": "Full JSON envelope for AMM CLI commands (used with amm run)",
+  "version": "amm.v1",
+  "type": "object",
+  "required": ["version", "command"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["amm.v1"],
+      "description": "API version identifier"
+    },
+    "command": {
+      "type": "string",
+      "enum": [
+        "init",
+        "ingest_event",
+        "ingest_transcript",
+        "remember",
+        "recall",
+        "describe",
+        "expand",
+        "history",
+        "get_memory",
+        "update_memory",
+        "policy_list",
+        "policy_add",
+        "policy_remove",
+        "run_job",
+        "explain_recall",
+        "repair",
+        "status"
+      ],
+      "description": "Command to execute"
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Optional client-generated request identifier"
+    },
+    "payload": {
+      "type": "object",
+      "description": "Command-specific payload (see individual command schemas)"
+    }
+  },
+  "definitions": {
+    "Event": {
+      "type": "object",
+      "required": ["kind", "source_system", "content"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "Event kind (e.g., message_user, message_assistant)"
+        },
+        "source_system": {
+          "type": "string",
+          "description": "Source system identifier"
+        },
+        "content": {
+          "type": "string",
+          "description": "Event content"
+        },
+        "surface": {
+          "type": "string",
+          "description": "UI surface where event originated"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "Session identifier"
+        },
+        "project_id": {
+          "type": "string",
+          "description": "Project identifier"
+        },
+        "agent_id": {
+          "type": "string",
+          "description": "Agent identifier"
+        },
+        "actor_type": {
+          "type": "string",
+          "enum": ["user", "assistant", "system", "tool"]
+        },
+        "actor_id": {
+          "type": "string"
+        },
+        "privacy_level": {
+          "type": "string",
+          "enum": ["public", "private", "sensitive"]
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC 3339 timestamp"
+        }
+      }
+    },
+    "Memory": {
+      "type": "object",
+      "required": ["type", "body", "tight_description"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "identity",
+            "preference",
+            "fact",
+            "decision",
+            "episode",
+            "todo",
+            "relationship",
+            "procedure",
+            "constraint",
+            "incident",
+            "artifact",
+            "summary",
+            "active_context",
+            "open_loop",
+            "assumption",
+            "contradiction"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["global", "project", "session"],
+          "default": "global"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tight_description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "importance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "RecallOptions": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ambient",
+            "facts",
+            "episodes",
+            "timeline",
+            "project",
+            "entity",
+            "active",
+            "history",
+            "hybrid"
+          ],
+          "default": "hybrid"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      }
+    },
+    "HistoryOptions": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      }
+    },
+    "IngestionPolicy": {
+      "type": "object",
+      "required": ["pattern_type", "pattern", "mode"],
+      "properties": {
+        "pattern_type": {
+          "type": "string",
+          "enum": ["session", "source", "surface", "agent", "project", "runtime"]
+        },
+        "pattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["full", "read_only", "ignore"]
+        },
+        "metadata": {
+          "type": "object"
+        }
+      }
+    },
+    "ResultEnvelope": {
+      "type": "object",
+      "required": ["ok", "command", "timestamp"],
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "description": "Success indicator"
+        },
+        "command": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "result": {
+          "type": ["object", "array", "null"]
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": ["code", "message"]
+        }
+      }
+    }
+  }
+}

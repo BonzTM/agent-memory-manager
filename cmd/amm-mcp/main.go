@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/joshd-04/agent-memory-manager/internal/adapters/mcp"
+	"github.com/bonztm/agent-memory-manager/internal/adapters/mcp"
 )
 
 func main() {
