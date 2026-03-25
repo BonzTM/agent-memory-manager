@@ -198,6 +198,12 @@ func TestValidateRunJob(t *testing.T) {
 	if err := ValidateRunJob(&RunJobRequest{Kind: "rebuild_indexes"}); err != nil {
 		t.Fatalf("expected valid request, got %v", err)
 	}
+	if err := ValidateRunJob(&RunJobRequest{Kind: "reprocess"}); err != nil {
+		t.Fatalf("expected reprocess to be valid, got %v", err)
+	}
+	if err := ValidateRunJob(&RunJobRequest{Kind: "reprocess_all"}); err != nil {
+		t.Fatalf("expected reprocess_all to be valid, got %v", err)
+	}
 
 	tests := []struct {
 		name     string

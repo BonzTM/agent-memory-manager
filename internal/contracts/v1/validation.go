@@ -68,6 +68,8 @@ var (
 		"decay_stale_memory":     true,
 		"merge_duplicates":       true,
 		"cleanup_recall_history": true,
+		"reprocess":              true,
+		"reprocess_all":          true,
 	}
 
 	validPolicyPatternTypes = map[string]bool{

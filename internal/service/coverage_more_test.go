@@ -19,6 +19,9 @@ func (dummySummarizer) Summarize(context.Context, string, int) (string, error) {
 func (dummySummarizer) ExtractMemoryCandidate(context.Context, string) ([]core.MemoryCandidate, error) {
 	return nil, nil
 }
+func (dummySummarizer) ExtractMemoryCandidateBatch(_ context.Context, events []string) ([]core.MemoryCandidate, error) {
+	return nil, nil
+}
 
 func TestIngestTranscriptGettersAndUpdateMemory(t *testing.T) {
 	svc, repo := testServiceAndRepo(t)

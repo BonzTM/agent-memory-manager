@@ -235,6 +235,38 @@ func TestRunErrorPaths(t *testing.T) {
 		assertEnvelope(t, stderr, false, "jobs_run")
 	})
 
+	t.Run("jobs run reprocess flag", func(t *testing.T) {
+		stdout, stderr, err := captureRun(t, []string{"jobs", "run", "--reprocess"})
+		if err != nil {
+			t.Fatalf("jobs run --reprocess error: %v stderr=%s", err, stderr)
+		}
+		assertEnvelope(t, stdout, true, "jobs_run")
+	})
+
+	t.Run("jobs run reprocess-all flag", func(t *testing.T) {
+		stdout, stderr, err := captureRun(t, []string{"jobs", "run", "--reprocess-all"})
+		if err != nil {
+			t.Fatalf("jobs run --reprocess-all error: %v stderr=%s", err, stderr)
+		}
+		assertEnvelope(t, stdout, true, "jobs_run")
+	})
+
+	t.Run("jobs run conflicting reprocess flags", func(t *testing.T) {
+		_, stderr, err := captureRun(t, []string{"jobs", "run", "--reprocess", "--reprocess-all"})
+		if err == nil {
+			t.Fatal("expected jobs run conflicting reprocess flags error")
+		}
+		assertEnvelope(t, stderr, false, "jobs_run")
+	})
+
+	t.Run("jobs run positional plus reprocess flag", func(t *testing.T) {
+		_, stderr, err := captureRun(t, []string{"jobs", "run", "reflect", "--reprocess"})
+		if err == nil {
+			t.Fatal("expected jobs run positional plus reprocess error")
+		}
+		assertEnvelope(t, stderr, false, "jobs_run")
+	})
+
 	t.Run("ingest event validation failure", func(t *testing.T) {
 		badPath := filepath.Join(t.TempDir(), "bad-event.json")
 		badJSON := `{"kind":"message_user","source_system":"test"}`
