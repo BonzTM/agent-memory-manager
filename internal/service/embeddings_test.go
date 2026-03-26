@@ -66,7 +66,7 @@ func seedEventForSummary(t *testing.T, svc *AMMService) {
 	}
 }
 
-func TestEmbeddings_RememberAndSummaryCreationWriteEmbeddings(t *testing.T) {
+func TestEmbeddings_RememberWritesEmbedding(t *testing.T) {
 	svc, repo := testServiceAndRepoWithSummarizer(t, passthroughSummarizer{})
 	provider := &spyEmbeddingProvider{model: "test-model"}
 	svc.embeddingProvider = provider
@@ -81,6 +81,22 @@ func TestEmbeddings_RememberAndSummaryCreationWriteEmbeddings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Remember: %v", err)
 	}
+
+	if _, err := repo.GetEmbedding(ctx, memory.ID, "memory", provider.Model()); err != nil {
+		t.Fatalf("GetEmbedding memory: %v", err)
+	}
+
+	joined := strings.Join(provider.texts, "\n")
+	if !strings.Contains(joined, "alice") || !strings.Contains(joined, "likes concise replies") || !strings.Contains(joined, "alice preference") {
+		t.Fatalf("expected memory embedding text to include subject/body/tight_description, got %q", joined)
+	}
+}
+
+func TestEmbeddings_RebuildCatchesSummariesFromCompress(t *testing.T) {
+	svc, repo := testServiceAndRepoWithSummarizer(t, passthroughSummarizer{})
+	provider := &spyEmbeddingProvider{model: "test-model"}
+	svc.embeddingProvider = provider
+	ctx := context.Background()
 
 	seedEventForSummary(t, svc)
 	createdSummaries, err := svc.CompressHistory(ctx)
@@ -99,19 +115,16 @@ func TestEmbeddings_RememberAndSummaryCreationWriteEmbeddings(t *testing.T) {
 		t.Fatal("expected at least one summary")
 	}
 
-	if _, err := repo.GetEmbedding(ctx, memory.ID, "memory", provider.Model()); err != nil {
-		t.Fatalf("GetEmbedding memory: %v", err)
-	}
-	if _, err := repo.GetEmbedding(ctx, summaries[0].ID, "summary", provider.Model()); err != nil {
-		t.Fatalf("GetEmbedding summary: %v", err)
+	if _, err := repo.GetEmbedding(ctx, summaries[0].ID, "summary", provider.Model()); err == nil {
+		t.Fatal("expected no summary embedding before rebuild_indexes")
 	}
 
-	joined := strings.Join(provider.texts, "\n")
-	if !strings.Contains(joined, "alice") || !strings.Contains(joined, "likes concise replies") || !strings.Contains(joined, "alice preference") {
-		t.Fatalf("expected memory embedding text to include subject/body/tight_description, got %q", joined)
+	if _, err := svc.RunJob(ctx, "rebuild_indexes"); err != nil {
+		t.Fatalf("rebuild_indexes: %v", err)
 	}
-	if !strings.Contains(joined, "summary source event") {
-		t.Fatalf("expected summary embedding text to include summary content, got %q", joined)
+
+	if _, err := repo.GetEmbedding(ctx, summaries[0].ID, "summary", provider.Model()); err != nil {
+		t.Fatalf("expected summary embedding after rebuild_indexes: %v", err)
 	}
 }
 

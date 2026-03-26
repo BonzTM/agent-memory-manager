@@ -10,7 +10,7 @@ import (
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
-const embeddingBatchSize = 64
+const defaultEmbeddingBatchSize = 64
 
 func buildEmbeddingText(parts ...string) string {
 	filtered := make([]string, 0, len(parts))
@@ -88,114 +88,133 @@ func (s *AMMService) rebuildEmbeddings(ctx context.Context, forceAll bool) error
 	}
 
 	model := s.embeddingProvider.Model()
-
-	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{Limit: 50000})
-	if err != nil {
-		return fmt.Errorf("list memories for embedding rebuild: %w", err)
+	batchSize := s.embeddingBatchSize
+	if batchSize <= 0 {
+		batchSize = defaultEmbeddingBatchSize
 	}
 
-	memorySkipped := 0
-	memoryEmbedded := 0
-	for i := 0; i < len(memories); i += embeddingBatchSize {
-		end := i + embeddingBatchSize
-		if end > len(memories) {
-			end = len(memories)
+	if forceAll {
+		return s.rebuildEmbeddingsFull(ctx, model, batchSize)
+	}
+
+	memoryEmbedded, err := s.embedMissing(ctx, "memory", model, batchSize)
+	if err != nil {
+		return fmt.Errorf("embed missing memories: %w", err)
+	}
+
+	summaryEmbedded, err := s.embedMissing(ctx, "summary", model, batchSize)
+	if err != nil {
+		return fmt.Errorf("embed missing summaries: %w", err)
+	}
+
+	slog.Debug("embeddings rebuild done", "memories_embedded", memoryEmbedded, "summaries_embedded", summaryEmbedded)
+	return nil
+}
+
+func (s *AMMService) embedMissing(ctx context.Context, kind, model string, batchSize int) (int, error) {
+	var items []embeddable
+	switch kind {
+	case "memory":
+		memories, err := s.repo.ListUnembeddedMemories(ctx, model, 50000)
+		if err != nil {
+			return 0, err
 		}
-		batch := memories[i:end]
+		items = make([]embeddable, len(memories))
+		for i := range memories {
+			items[i] = embeddable{id: memories[i].ID, text: buildMemoryEmbeddingText(&memories[i])}
+		}
+	case "summary":
+		summaries, err := s.repo.ListUnembeddedSummaries(ctx, model, 50000)
+		if err != nil {
+			return 0, err
+		}
+		items = make([]embeddable, len(summaries))
+		for i := range summaries {
+			items[i] = embeddable{id: summaries[i].ID, text: buildSummaryEmbeddingText(&summaries[i])}
+		}
+	}
+
+	if len(items) == 0 {
+		return 0, nil
+	}
+
+	return s.embedBatch(ctx, items, kind, model, batchSize)
+}
+
+type embeddable struct {
+	id   string
+	text string
+}
+
+func (s *AMMService) embedBatch(ctx context.Context, items []embeddable, kind, model string, batchSize int) (int, error) {
+	embedded := 0
+	for i := 0; i < len(items); i += batchSize {
+		end := i + batchSize
+		if end > len(items) {
+			end = len(items)
+		}
+		batch := items[i:end]
 		texts := make([]string, 0, len(batch))
 		ids := make([]string, 0, len(batch))
-		for j := range batch {
-			text := buildMemoryEmbeddingText(&batch[j])
-			if strings.TrimSpace(text) == "" {
+		for _, item := range batch {
+			if strings.TrimSpace(item.text) == "" {
 				continue
 			}
-			if !forceAll {
-				if _, err := s.repo.GetEmbedding(ctx, batch[j].ID, "memory", model); err == nil {
-					memorySkipped++
-					continue
-				}
-			}
-			ids = append(ids, batch[j].ID)
-			texts = append(texts, text)
+			ids = append(ids, item.id)
+			texts = append(texts, item.text)
 		}
 		if len(texts) == 0 {
 			continue
 		}
 		vectors, err := s.embeddingProvider.Embed(ctx, texts)
 		if err != nil {
-			slog.Warn("memory batch embedding generation failed", "provider", s.embeddingProvider.Name(), "model", model, "count", len(texts), "error", err)
+			slog.Warn("batch embedding generation failed", "kind", kind, "provider", s.embeddingProvider.Name(), "model", model, "count", len(texts), "error", err)
 			continue
 		}
 		if len(vectors) != len(ids) {
-			slog.Warn("memory batch embedding vector count mismatch", "provider", s.embeddingProvider.Name(), "model", model, "expected", len(ids), "actual", len(vectors))
+			slog.Warn("batch embedding vector count mismatch", "kind", kind, "expected", len(ids), "actual", len(vectors))
 			continue
 		}
 		now := time.Now().UTC()
 		for j := range ids {
-			_ = s.repo.DeleteEmbeddings(ctx, ids[j], "memory", model)
-			record := &core.EmbeddingRecord{ObjectID: ids[j], ObjectKind: "memory", Model: model, Vector: vectors[j], CreatedAt: now}
+			record := &core.EmbeddingRecord{ObjectID: ids[j], ObjectKind: kind, Model: model, Vector: vectors[j], CreatedAt: now}
 			if err := s.repo.UpsertEmbedding(ctx, record); err != nil {
-				slog.Warn("memory embedding rebuild persist failed", "memoryID", ids[j], "model", model, "error", err)
+				slog.Warn("embedding persist failed", "kind", kind, "id", ids[j], "error", err)
 			} else {
-				memoryEmbedded++
+				embedded++
 			}
 		}
 	}
-	slog.Debug("memory embeddings rebuild done", "embedded", memoryEmbedded, "skipped", memorySkipped, "total", len(memories))
+	return embedded, nil
+}
+
+func (s *AMMService) rebuildEmbeddingsFull(ctx context.Context, model string, batchSize int) error {
+	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{Limit: 50000})
+	if err != nil {
+		return fmt.Errorf("list memories for full embedding rebuild: %w", err)
+	}
+	memItems := make([]embeddable, len(memories))
+	for i := range memories {
+		memItems[i] = embeddable{id: memories[i].ID, text: buildMemoryEmbeddingText(&memories[i])}
+	}
+	memEmbedded, err := s.embedBatch(ctx, memItems, "memory", model, batchSize)
+	if err != nil {
+		return err
+	}
 
 	summaries, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{Limit: 50000})
 	if err != nil {
-		return fmt.Errorf("list summaries for embedding rebuild: %w", err)
+		return fmt.Errorf("list summaries for full embedding rebuild: %w", err)
+	}
+	sumItems := make([]embeddable, len(summaries))
+	for i := range summaries {
+		sumItems[i] = embeddable{id: summaries[i].ID, text: buildSummaryEmbeddingText(&summaries[i])}
+	}
+	sumEmbedded, err := s.embedBatch(ctx, sumItems, "summary", model, batchSize)
+	if err != nil {
+		return err
 	}
 
-	summarySkipped := 0
-	summaryEmbedded := 0
-	for i := 0; i < len(summaries); i += embeddingBatchSize {
-		end := i + embeddingBatchSize
-		if end > len(summaries) {
-			end = len(summaries)
-		}
-		batch := summaries[i:end]
-		texts := make([]string, 0, len(batch))
-		ids := make([]string, 0, len(batch))
-		for j := range batch {
-			text := buildSummaryEmbeddingText(&batch[j])
-			if strings.TrimSpace(text) == "" {
-				continue
-			}
-			if !forceAll {
-				if _, err := s.repo.GetEmbedding(ctx, batch[j].ID, "summary", model); err == nil {
-					summarySkipped++
-					continue
-				}
-			}
-			ids = append(ids, batch[j].ID)
-			texts = append(texts, text)
-		}
-		if len(texts) == 0 {
-			continue
-		}
-		vectors, err := s.embeddingProvider.Embed(ctx, texts)
-		if err != nil {
-			slog.Warn("summary batch embedding generation failed", "provider", s.embeddingProvider.Name(), "model", model, "count", len(texts), "error", err)
-			continue
-		}
-		if len(vectors) != len(ids) {
-			slog.Warn("summary batch embedding vector count mismatch", "provider", s.embeddingProvider.Name(), "model", model, "expected", len(ids), "actual", len(vectors))
-			continue
-		}
-		now := time.Now().UTC()
-		for j := range ids {
-			_ = s.repo.DeleteEmbeddings(ctx, ids[j], "summary", model)
-			record := &core.EmbeddingRecord{ObjectID: ids[j], ObjectKind: "summary", Model: model, Vector: vectors[j], CreatedAt: now}
-			if err := s.repo.UpsertEmbedding(ctx, record); err != nil {
-				slog.Warn("summary embedding rebuild persist failed", "summaryID", ids[j], "model", model, "error", err)
-			} else {
-				summaryEmbedded++
-			}
-		}
-	}
-	slog.Debug("summary embeddings rebuild done", "embedded", summaryEmbedded, "skipped", summarySkipped, "total", len(summaries))
-
+	slog.Debug("full embeddings rebuild done", "memories_embedded", memEmbedded, "summaries_embedded", sumEmbedded)
 	return nil
 }
