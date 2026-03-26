@@ -481,6 +481,30 @@ func TestRunAdditionalBranches(t *testing.T) {
 		}
 		assertEnvelope(t, stderr, false, "policy_remove")
 	})
+
+	t.Run("reset-derived requires confirm", func(t *testing.T) {
+		_, stderr, err := captureRun(t, []string{"reset-derived"})
+		if err == nil {
+			t.Fatal("expected reset-derived validation error without --confirm")
+		}
+		assertEnvelope(t, stderr, false, "reset_derived")
+	})
+}
+
+func TestRunResetDerived(t *testing.T) {
+	setTempDBPath(t)
+
+	stdout, stderr, err := captureRun(t, []string{"remember", "--type", "fact", "--scope", "global", "--body", "to reset", "--tight", "to reset"})
+	if err != nil {
+		t.Fatalf("remember error: %v stderr=%s", err, stderr)
+	}
+	assertEnvelope(t, stdout, true, "remember")
+
+	stdout, stderr, err = captureRun(t, []string{"reset-derived", "--confirm"})
+	if err != nil {
+		t.Fatalf("reset-derived error: %v stderr=%s", err, stderr)
+	}
+	assertEnvelope(t, stdout, true, "reset_derived")
 }
 
 func TestPrintUsageAndRunHelp(t *testing.T) {

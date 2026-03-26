@@ -138,6 +138,8 @@ func Run(args []string) error {
 		return runRepair(cmdArgs)
 	case "status":
 		return runStatus(cmdArgs)
+	case "reset-derived":
+		return runResetDerived(cmdArgs)
 	case "run":
 		return runEnvelope(cmdArgs)
 	case "validate":
@@ -177,8 +179,9 @@ func parseFlags(args []string) map[string]string {
 }
 
 var boolFlags = map[string]bool{
-	"json":  true,
-	"check": true,
+	"json":    true,
+	"check":   true,
+	"confirm": true,
 }
 
 func positionalArgs(args []string) []string {
@@ -220,6 +223,7 @@ Core Commands:
   explain-recall          Explain why an item surfaced
   repair                  Run integrity checks/repairs
   status                  Show system status
+  reset-derived           Purge derived data and reset event reflection state
 
 Automation Commands:
   run --in <file>         Execute a full v1 command envelope
@@ -962,6 +966,33 @@ func runStatus(_ []string) error {
 	return nil
 }
 
+func runResetDerived(args []string) error {
+	flags := parseFlags(args)
+	if flags["confirm"] != "true" {
+		err := fmt.Errorf("reset-derived requires --confirm")
+		fail("reset_derived", "VALIDATION_ERROR", "reset-derived will purge all derived data and reset events.reflected_at; rerun with --confirm to proceed")
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli reset_derived failed", err)
+		fail("reset_derived", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	result, err := svc.ResetDerived(context.Background())
+	if err != nil {
+		logCLIError("cli reset_derived failed", err)
+		fail("reset_derived", "RESET_DERIVED_ERROR", err.Error())
+		return err
+	}
+
+	success("reset_derived", result)
+	return nil
+}
+
 // CommandEnvelope is the full amm.v1 command envelope accepted by the run and
 // validate automation commands.
 type CommandEnvelope struct {
@@ -1335,6 +1366,23 @@ func dispatchEnvelope(ctx context.Context, svc core.Service, envelope CommandEnv
 			return err
 		}
 		success("run", status)
+
+	case "reset_derived":
+		var payload v1.ResetDerivedRequest
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			fail("run", "PARSE_ERROR", err.Error())
+			return err
+		}
+		if err := v1.ValidateResetDerived(&payload); err != nil {
+			fail("run", "VALIDATION_ERROR", err.Error())
+			return err
+		}
+		result, err := svc.ResetDerived(ctx)
+		if err != nil {
+			fail("run", "RESET_DERIVED_ERROR", err.Error())
+			return err
+		}
+		success("run", result)
 
 	default:
 		fail("run", "UNKNOWN_COMMAND", fmt.Sprintf("unknown command: %s", envelope.Command))
