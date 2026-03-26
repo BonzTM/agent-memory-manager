@@ -20,6 +20,7 @@ const (
 	CmdGetMemory = "get_memory"
 	// CmdUpdateMemory updates an existing memory.
 	CmdUpdateMemory = "update_memory"
+	CmdShare        = "share"
 	// CmdPolicyList lists ingestion policies.
 	CmdPolicyList = "policy_list"
 	// CmdPolicyAdd adds an ingestion policy.
@@ -83,6 +84,10 @@ var CommandRegistry = map[string]CommandInfo{
 	CmdUpdateMemory: {
 		Name:        CmdUpdateMemory,
 		Description: "Update an existing memory.",
+	},
+	CmdShare: {
+		Name:        CmdShare,
+		Description: "Update the privacy level of an existing memory.",
 	},
 	CmdPolicyList: {
 		Name:        CmdPolicyList,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
@@ -99,6 +100,18 @@ func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallO
 // buildScoringContext creates the scoring context for a recall operation.
 func (s *AMMService) buildScoringContext(ctx context.Context, query string, opts core.RecallOptions) ScoringContext {
 	queryEntities := ExtractEntities(query)
+	queryEntityWeights := s.expandQueryEntities(ctx, queryEntities)
+	if len(queryEntityWeights) == 0 {
+		queryEntityWeights = make(map[string]float64)
+		for _, entity := range queryEntities {
+			addEntityTermWithWeight(queryEntityWeights, entity, 1.0)
+		}
+	}
+	expandedQueryEntities := make([]string, 0, len(queryEntityWeights))
+	for entity := range queryEntityWeights {
+		expandedQueryEntities = append(expandedQueryEntities, entity)
+	}
+	sort.Strings(expandedQueryEntities)
 	queryEmbedding := s.buildQueryEmbedding(ctx, query)
 
 	// Build recent recalls set for repetition suppression.
@@ -112,14 +125,123 @@ func (s *AMMService) buildScoringContext(ctx context.Context, query string, opts
 		}
 	}
 
+	weights := s.getScoringWeights()
+
 	return ScoringContext{
-		Query:          query,
-		QueryEmbedding: queryEmbedding,
-		QueryEntities:  queryEntities,
-		ProjectID:      opts.ProjectID,
-		SessionID:      opts.SessionID,
-		RecentRecalls:  recentRecalls,
-		Now:            time.Now().UTC(),
+		Query:              query,
+		QueryEmbedding:     queryEmbedding,
+		QueryEntities:      expandedQueryEntities,
+		QueryEntityWeights: queryEntityWeights,
+		ProjectID:          opts.ProjectID,
+		SessionID:          opts.SessionID,
+		RecentRecalls:      recentRecalls,
+		Now:                time.Now().UTC(),
+		Weights:            &weights,
+	}
+}
+
+func (s *AMMService) expandQueryEntities(ctx context.Context, queryEntities []string) map[string]float64 {
+	weights := make(map[string]float64)
+	for _, entity := range queryEntities {
+		addEntityTermWithWeight(weights, entity, 1.0)
+	}
+	if len(queryEntities) == 0 {
+		return weights
+	}
+
+	visitedEntityIDs := make(map[string]bool)
+	for _, queryEntity := range queryEntities {
+		trimmed := strings.TrimSpace(queryEntity)
+		if trimmed == "" {
+			continue
+		}
+
+		entities, err := s.repo.SearchEntities(ctx, trimmed, 50)
+		if err != nil {
+			continue
+		}
+
+		for _, entity := range entities {
+			if !entityMatchesTerm(entity, trimmed) {
+				continue
+			}
+			addEntityTermWithWeight(weights, entity.CanonicalName, 1.0)
+			for _, alias := range entity.Aliases {
+				addEntityTermWithWeight(weights, alias, 1.0)
+			}
+
+			if visitedEntityIDs[entity.ID] {
+				continue
+			}
+			visitedEntityIDs[entity.ID] = true
+
+			related, err := s.listRelatedEntitiesForRecall(ctx, entity.ID)
+			if err != nil {
+				continue
+			}
+			for _, rel := range related {
+				hopWeight := relationHopWeight(rel.HopDistance)
+				if hopWeight <= 0 {
+					continue
+				}
+				addEntityTermWithWeight(weights, rel.Entity.CanonicalName, hopWeight)
+				for _, alias := range rel.Entity.Aliases {
+					addEntityTermWithWeight(weights, alias, hopWeight)
+				}
+			}
+		}
+	}
+
+	return weights
+}
+
+func (s *AMMService) listRelatedEntitiesForRecall(ctx context.Context, entityID string) ([]core.RelatedEntity, error) {
+	projected, err := s.repo.ListProjectedRelatedEntities(ctx, entityID)
+	if err == nil && len(projected) > 0 {
+		related := make([]core.RelatedEntity, 0, len(projected))
+		for _, projection := range projected {
+			entity, getErr := s.repo.GetEntity(ctx, projection.RelatedEntityID)
+			if getErr != nil {
+				continue
+			}
+			related = append(related, core.RelatedEntity{
+				Entity:       *entity,
+				HopDistance:  projection.HopDistance,
+				Relationship: projection.RelationshipPath,
+			})
+		}
+		if len(related) > 0 {
+			return related, nil
+		}
+	}
+
+	return s.repo.ListRelatedEntities(ctx, entityID, 2)
+}
+
+func addEntityTermWithWeight(weights map[string]float64, term string, weight float64) {
+	if len(weights) == 0 || weight <= 0 {
+		if weight <= 0 {
+			return
+		}
+	}
+	normalized := normalizeEntityTerm(term)
+	if normalized == "" {
+		return
+	}
+	if existing, ok := weights[normalized]; ok && existing >= weight {
+		return
+	}
+	weights[normalized] = weight
+}
+
+func relationHopWeight(hopDistance int) float64 {
+	switch hopDistance {
+	case 1:
+		return 0.7
+	case 2:
+		return 0.4
+	default:
+		return 0.0
 	}
 }
 
@@ -129,7 +251,7 @@ func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.
 	var candidates []ScoringCandidate
 	candidateIDs := make(map[string]bool)
 
-	memories, err := s.repo.SearchMemories(ctx, query, limit*2)
+	memories, err := s.repo.SearchMemories(ctx, query, core.ListMemoriesOptions{AgentID: opts.AgentID, Limit: limit * 2})
 	if err != nil {
 		return nil, fmt.Errorf("search memories: %w", err)
 	}
@@ -148,7 +270,7 @@ func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.
 				continue
 			}
 			mem, err := s.repo.GetMemory(ctx, id)
-			if err != nil || mem == nil || !isRecallMemoryStatusAllowed(mem.Status) {
+			if err != nil || mem == nil || !isRecallMemoryStatusAllowed(mem.Status) || !memoryVisibleToAgent(mem, opts.AgentID) {
 				continue
 			}
 			c := MemoryToCandidate(*mem, embeddingOnlyFTSPosition)
@@ -208,13 +330,14 @@ func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.
 	}
 
 	s.attachCandidateEmbeddings(ctx, candidates)
+	s.attachCandidateEntities(ctx, candidates)
 
 	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
 }
 
 // recallFacts searches only memories with full scoring.
 func (s *AMMService) recallFacts(ctx context.Context, query string, opts core.RecallOptions, sctx ScoringContext) ([]core.RecallItem, error) {
-	memories, err := s.repo.SearchMemories(ctx, query, opts.Limit*2)
+	memories, err := s.repo.SearchMemories(ctx, query, core.ListMemoriesOptions{AgentID: opts.AgentID, Limit: opts.Limit * 2})
 	if err != nil {
 		return nil, fmt.Errorf("search memories: %w", err)
 	}
@@ -234,7 +357,7 @@ func (s *AMMService) recallFacts(ctx context.Context, query string, opts core.Re
 				continue
 			}
 			mem, err := s.repo.GetMemory(ctx, id)
-			if err != nil || mem == nil || !isRecallMemoryStatusAllowed(mem.Status) {
+			if err != nil || mem == nil || !isRecallMemoryStatusAllowed(mem.Status) || !memoryVisibleToAgent(mem, opts.AgentID) {
 				continue
 			}
 			c := MemoryToCandidate(*mem, embeddingOnlyFTSPosition)
@@ -243,6 +366,7 @@ func (s *AMMService) recallFacts(ctx context.Context, query string, opts core.Re
 		}
 	}
 	s.attachCandidateEmbeddings(ctx, candidates)
+	s.attachCandidateEntities(ctx, candidates)
 	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
 }
 
@@ -257,12 +381,13 @@ func (s *AMMService) recallEpisodes(ctx context.Context, query string, opts core
 		candidates = append(candidates, EpisodeToCandidate(ep, i))
 	}
 	s.attachCandidateEmbeddings(ctx, candidates)
+	s.attachCandidateEntities(ctx, candidates)
 	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
 }
 
 // recallProject searches memories filtered by project_id with full scoring.
 func (s *AMMService) recallProject(ctx context.Context, query string, opts core.RecallOptions, sctx ScoringContext) ([]core.RecallItem, error) {
-	memories, err := s.repo.SearchMemories(ctx, query, opts.Limit*3)
+	memories, err := s.repo.SearchMemories(ctx, query, core.ListMemoriesOptions{AgentID: opts.AgentID, Limit: opts.Limit * 3})
 	if err != nil {
 		return nil, fmt.Errorf("search memories: %w", err)
 	}
@@ -288,6 +413,9 @@ func (s *AMMService) recallProject(ctx context.Context, query string, opts core.
 			if err != nil || mem == nil {
 				continue
 			}
+			if !memoryVisibleToAgent(mem, opts.AgentID) {
+				continue
+			}
 			if opts.ProjectID != "" && mem.ProjectID != opts.ProjectID {
 				continue
 			}
@@ -300,6 +428,7 @@ func (s *AMMService) recallProject(ctx context.Context, query string, opts core.
 		}
 	}
 	s.attachCandidateEmbeddings(ctx, candidates)
+	s.attachCandidateEntities(ctx, candidates)
 	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
 }
 
@@ -308,7 +437,7 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 	var candidates []ScoringCandidate
 	candidateIDs := make(map[string]bool)
 
-	memories, err := s.repo.SearchMemories(ctx, query, opts.Limit*2)
+	memories, err := s.repo.SearchMemories(ctx, query, core.ListMemoriesOptions{AgentID: opts.AgentID, Limit: opts.Limit * 2})
 	if err != nil {
 		return nil, fmt.Errorf("search memories: %w", err)
 	}
@@ -326,7 +455,7 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 				continue
 			}
 			mem, err := s.repo.GetMemory(ctx, id)
-			if err != nil || mem == nil || !isRecallMemoryStatusAllowed(mem.Status) {
+			if err != nil || mem == nil || !isRecallMemoryStatusAllowed(mem.Status) || !memoryVisibleToAgent(mem, opts.AgentID) {
 				continue
 			}
 			c := MemoryToCandidate(*mem, embeddingOnlyFTSPosition)
@@ -335,6 +464,7 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 		}
 	}
 	s.attachCandidateEmbeddings(ctx, candidates)
+	s.attachCandidateEntities(ctx, candidates)
 
 	items := scoreAndConvert(candidates, sctx, defaultRecallFilterOptions())
 	entities, err := s.repo.SearchEntities(ctx, query, opts.Limit)
@@ -364,6 +494,7 @@ func (s *AMMService) recallHistory(ctx context.Context, query string, opts core.
 		candidates = append(candidates, EventToCandidate(evt, i))
 	}
 	s.attachCandidateEmbeddings(ctx, candidates)
+	s.attachCandidateEntities(ctx, candidates)
 	return scoreAndConvert(candidates, sctx, historyRecallFilterOptions()), nil
 }
 
@@ -373,7 +504,7 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 	var candidates []ScoringCandidate
 	candidateIDs := make(map[string]bool)
 
-	memories, err := s.repo.SearchMemories(ctx, query, perType*2)
+	memories, err := s.repo.SearchMemories(ctx, query, core.ListMemoriesOptions{AgentID: opts.AgentID, Limit: perType * 2})
 	if err != nil {
 		return nil, fmt.Errorf("search memories: %w", err)
 	}
@@ -391,7 +522,7 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 				continue
 			}
 			mem, err := s.repo.GetMemory(ctx, id)
-			if err != nil || mem == nil || !isRecallMemoryStatusAllowed(mem.Status) {
+			if err != nil || mem == nil || !isRecallMemoryStatusAllowed(mem.Status) || !memoryVisibleToAgent(mem, opts.AgentID) {
 				continue
 			}
 			c := MemoryToCandidate(*mem, embeddingOnlyFTSPosition)
@@ -457,6 +588,7 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 	}
 
 	s.attachCandidateEmbeddings(ctx, candidates)
+	s.attachCandidateEntities(ctx, candidates)
 
 	return scoreAndConvert(candidates, sctx, hybridRecallFilterOptions()), nil
 }
@@ -529,6 +661,29 @@ func (s *AMMService) attachCandidateEmbeddings(ctx context.Context, candidates [
 			continue
 		}
 		candidates[i].Embedding = rec.Vector
+	}
+}
+
+func (s *AMMService) attachCandidateEntities(ctx context.Context, candidates []ScoringCandidate) {
+	for i := range candidates {
+		if candidates[i].Kind != "memory" {
+			continue
+		}
+		entities, err := s.repo.GetMemoryEntities(ctx, candidates[i].ID)
+		if err != nil {
+			continue
+		}
+		if len(entities) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(entities))
+		aliases := make([]string, 0, len(entities)*2)
+		for _, entity := range entities {
+			names = append(names, entity.CanonicalName)
+			aliases = append(aliases, entity.Aliases...)
+		}
+		candidates[i].EntityNames = names
+		candidates[i].EntityAliases = aliases
 	}
 }
 
@@ -629,6 +784,13 @@ func isRecallMemoryStatusAllowed(status core.MemoryStatus) bool {
 	return status == "" || status == core.MemoryStatusActive
 }
 
+func memoryVisibleToAgent(mem *core.Memory, agentID string) bool {
+	if mem == nil || agentID == "" {
+		return true
+	}
+	return mem.AgentID == "" || mem.AgentID == agentID || mem.PrivacyLevel == core.PrivacyShared || mem.PrivacyLevel == core.PrivacyPublicSafe
+}
+
 // recallTimeline lists events ordered by occurred_at.
 func (s *AMMService) recallTimeline(ctx context.Context, query string, opts core.RecallOptions) ([]core.RecallItem, error) {
 	events, err := s.repo.ListEvents(ctx, core.ListEventsOptions{
@@ -647,9 +809,10 @@ func (s *AMMService) recallTimeline(ctx context.Context, query string, opts core
 // recallActive returns active-context memories.
 func (s *AMMService) recallActive(ctx context.Context, query string, opts core.RecallOptions) ([]core.RecallItem, error) {
 	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
-		Type:   core.MemoryTypeActiveContext,
-		Status: core.MemoryStatusActive,
-		Limit:  opts.Limit,
+		Type:    core.MemoryTypeActiveContext,
+		AgentID: opts.AgentID,
+		Status:  core.MemoryStatusActive,
+		Limit:   opts.Limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list active memories: %w", err)

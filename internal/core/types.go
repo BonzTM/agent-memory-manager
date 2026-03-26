@@ -308,6 +308,10 @@ type ExpandResult struct {
 	Children []Summary `json:"children,omitempty"`
 }
 
+type ExpandOptions struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
 // DescribeResult is a thin description of one item.
 type DescribeResult struct {
 	ID               string       `json:"id"`

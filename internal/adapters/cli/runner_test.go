@@ -206,3 +206,32 @@ func TestMemoryUpdateCommand(t *testing.T) {
 		t.Fatalf("expected updated scope project, got %v", updated["scope"])
 	}
 }
+
+func TestShareCommand(t *testing.T) {
+	setTempDBPath(t)
+
+	stdout, stderr, err := captureRun(t, []string{"remember", "--type", "fact", "--scope", "global", "--body", "share me", "--tight", "share me", "--agent-id", "agent-a"})
+	if err != nil {
+		t.Fatalf("remember error: %v stderr=%s", err, stderr)
+	}
+	created := decodeEnvelopeResult(t, stdout)
+	memoryID, _ := created["id"].(string)
+	if memoryID == "" {
+		t.Fatalf("expected memory ID, got result=%v", created)
+	}
+
+	stdout, stderr, err = captureRun(t, []string{"share", memoryID, "--privacy", "shared"})
+	if err != nil {
+		t.Fatalf("share error: %v stderr=%s", err, stderr)
+	}
+	updated := decodeEnvelopeResult(t, stdout)
+	if updated["privacy_level"] != "shared" {
+		t.Fatalf("expected privacy_level shared, got %v", updated["privacy_level"])
+	}
+
+	_, stderr, err = captureRun(t, []string{"share", memoryID, "--privacy", "team_only"})
+	if err == nil {
+		t.Fatal("expected share validation error")
+	}
+	assertEnvelope(t, stderr, false, "share")
+}

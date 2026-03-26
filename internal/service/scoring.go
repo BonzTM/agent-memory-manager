@@ -13,18 +13,39 @@ import (
 // and candidate embeddings are available. Positive weights are dynamically
 // renormalized to keep total positive contribution stable when optional signals
 // are missing.
-const (
-	wLexical             = 0.25 * (0.75 / 0.57) // ~0.3289
-	wSemantic            = 0.18 * (0.75 / 0.57) // ~0.2368
-	wEntityOverlap       = 0.18 * (0.75 / 0.57) // ~0.2368
-	wScopeFit            = 0.10 * (0.75 / 0.57) // ~0.1316
-	wRecency             = 0.08 * (0.75 / 0.57) // ~0.1053
-	wImportance          = 0.07 * (0.75 / 0.57) // ~0.0921
-	wTemporalValidity    = 0.05 * (0.75 / 0.57) // ~0.0658
-	wStructuralProximity = 0.05 * (0.75 / 0.57) // ~0.0658
-	wFreshness           = 0.04 * (0.75 / 0.57) // ~0.0526
-	wRepetitionPenalty   = 0.10                 // deducted
-)
+const scoringNormalizationFactor = 0.75 / 0.57
+
+// ScoringWeights stores the weighted blend used for recall scoring.
+type ScoringWeights struct {
+	Lexical             float64 `json:"lexical"`
+	ExtractionQuality   float64 `json:"extraction_quality"`
+	Semantic            float64 `json:"semantic"`
+	EntityOverlap       float64 `json:"entity_overlap"`
+	ScopeFit            float64 `json:"scope_fit"`
+	Recency             float64 `json:"recency"`
+	Importance          float64 `json:"importance"`
+	TemporalValidity    float64 `json:"temporal_validity"`
+	StructuralProximity float64 `json:"structural_proximity"`
+	Freshness           float64 `json:"freshness"`
+	RepetitionPenalty   float64 `json:"repetition_penalty"`
+}
+
+// DefaultScoringWeights returns the historical hardcoded scoring constants.
+func DefaultScoringWeights() ScoringWeights {
+	return ScoringWeights{
+		Lexical:             0.17 * scoringNormalizationFactor,
+		ExtractionQuality:   0.08 * scoringNormalizationFactor,
+		Semantic:            0.18 * scoringNormalizationFactor,
+		EntityOverlap:       0.18 * scoringNormalizationFactor,
+		ScopeFit:            0.10 * scoringNormalizationFactor,
+		Recency:             0.08 * scoringNormalizationFactor,
+		Importance:          0.07 * scoringNormalizationFactor,
+		TemporalValidity:    0.05 * scoringNormalizationFactor,
+		StructuralProximity: 0.05 * scoringNormalizationFactor,
+		Freshness:           0.04 * scoringNormalizationFactor,
+		RepetitionPenalty:   0.10,
+	}
+}
 
 // recencyHalfLifeDays controls exponential decay for the recency signal.
 const recencyHalfLifeDays = 14.0
@@ -32,19 +53,22 @@ const recencyHalfLifeDays = 14.0
 // ScoringContext carries the query-time signals needed to rank recall
 // candidates.
 type ScoringContext struct {
-	Query          string
-	QueryEmbedding []float32
-	QueryEntities  []string // extracted from query
-	ProjectID      string
-	SessionID      string
-	RecentRecalls  map[string]bool // item IDs shown recently
-	Now            time.Time
+	Query              string
+	QueryEmbedding     []float32
+	QueryEntities      []string // extracted from query
+	QueryEntityWeights map[string]float64
+	ProjectID          string
+	SessionID          string
+	RecentRecalls      map[string]bool // item IDs shown recently
+	Now                time.Time
+	Weights            *ScoringWeights
 }
 
 // SignalBreakdown records the per-signal contributions used to explain a final
 // recall score.
 type SignalBreakdown struct {
 	Lexical             float64 `json:"lexical"`
+	ExtractionQuality   float64 `json:"extraction_quality"`
 	Semantic            float64 `json:"semantic"`
 	EntityOverlap       float64 `json:"entity_overlap"`
 	ScopeFit            float64 `json:"scope_fit"`
@@ -60,37 +84,46 @@ type SignalBreakdown struct {
 // ScoringCandidate is the normalized representation of a memory-like item used
 // by the recall scoring engine.
 type ScoringCandidate struct {
-	ID               string
-	Kind             string // memory, summary, episode, history-node
-	Type             string
-	Scope            core.Scope
-	Subject          string
-	Body             string
-	TightDescription string
-	Importance       float64
-	Confidence       float64
-	Tags             []string
-	ProjectID        string
-	Status           string
-	ObservedAt       *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	ValidFrom        *time.Time
-	ValidTo          *time.Time
-	LastConfirmedAt  *time.Time
-	SupersededBy     string
-	SourceEventIDs   []string
-	Embedding        []float32
-	FTSPosition      int // position in FTS results (0-based)
+	ID                string
+	Kind              string // memory, summary, episode, history-node
+	Type              string
+	Scope             core.Scope
+	Subject           string
+	Body              string
+	TightDescription  string
+	Importance        float64
+	Confidence        float64
+	Tags              []string
+	ProjectID         string
+	Status            string
+	ObservedAt        *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	ValidFrom         *time.Time
+	ValidTo           *time.Time
+	LastConfirmedAt   *time.Time
+	SupersededBy      string
+	SourceEventIDs    []string
+	EntityNames       []string
+	EntityAliases     []string
+	Embedding         []float32
+	ExtractionQuality string
+	FTSPosition       int // position in FTS results (0-based)
 }
 
 // ScoreItem computes the weighted recall score and signal breakdown for item.
 func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 	var b SignalBreakdown
+	weights := sctx.Weights
+	if weights == nil {
+		defaults := DefaultScoringWeights()
+		weights = &defaults
+	}
 
 	b.Lexical = signalLexical(item.FTSPosition)
+	b.ExtractionQuality = signalExtractionQuality(item)
 	b.Semantic = signalSemantic(item, sctx)
-	b.EntityOverlap = signalEntityOverlap(item, sctx.QueryEntities)
+	b.EntityOverlap = signalEntityOverlap(item, sctx.QueryEntities, sctx.QueryEntityWeights)
 	b.ScopeFit = signalScopeFit(item, sctx)
 	b.Recency = signalRecency(item, sctx.Now)
 	b.Importance = signalImportance(item)
@@ -99,10 +132,10 @@ func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 	b.Freshness = signalFreshness(item, sctx.Now)
 	b.RepetitionPenalty = signalRepetitionPenalty(item, sctx)
 
-	totalPositive := wLexical + wEntityOverlap + wScopeFit + wRecency + wImportance + wTemporalValidity + wStructuralProximity + wFreshness
+	totalPositive := weights.Lexical + weights.ExtractionQuality + weights.EntityOverlap + weights.ScopeFit + weights.Recency + weights.Importance + weights.TemporalValidity + weights.StructuralProximity + weights.Freshness
 	activePositive := totalPositive
 	if semanticSignalAvailable(item, sctx) {
-		activePositive += wSemantic
+		activePositive += weights.Semantic
 	}
 
 	renorm := 1.0
@@ -110,15 +143,16 @@ func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 		renorm = totalPositive / activePositive
 	}
 
-	b.FinalScore = renorm*(wLexical*b.Lexical+
-		wSemantic*b.Semantic+
-		wEntityOverlap*b.EntityOverlap+
-		wScopeFit*b.ScopeFit+
-		wRecency*b.Recency+
-		wImportance*b.Importance+
-		wTemporalValidity*b.TemporalValidity+
-		wStructuralProximity*b.StructuralProximity+
-		wFreshness*b.Freshness) - wRepetitionPenalty*b.RepetitionPenalty
+	b.FinalScore = renorm*(weights.Lexical*b.Lexical+
+		weights.ExtractionQuality*b.ExtractionQuality+
+		weights.Semantic*b.Semantic+
+		weights.EntityOverlap*b.EntityOverlap+
+		weights.ScopeFit*b.ScopeFit+
+		weights.Recency*b.Recency+
+		weights.Importance*b.Importance+
+		weights.TemporalValidity*b.TemporalValidity+
+		weights.StructuralProximity*b.StructuralProximity+
+		weights.Freshness*b.Freshness) - weights.RepetitionPenalty*b.RepetitionPenalty
 
 	// Clamp to [0, 1].
 	if b.FinalScore < 0 {
@@ -140,6 +174,17 @@ func signalLexical(ftsPosition int) float64 {
 		return 1.0
 	}
 	return 1.0 / (1.0 + float64(ftsPosition)*0.2)
+}
+
+func signalExtractionQuality(item ScoringCandidate) float64 {
+	switch strings.ToLower(strings.TrimSpace(item.ExtractionQuality)) {
+	case "provisional":
+		return 0.5
+	case "upgraded":
+		return 0.9
+	default:
+		return 0.7
+	}
 }
 
 // signalSemantic computes cosine similarity between query and candidate
@@ -182,8 +227,8 @@ func cosineSimilarity(a, b []float32) (float64, bool) {
 }
 
 // signalEntityOverlap counts how many query entities appear in the item text.
-func signalEntityOverlap(item ScoringCandidate, queryEntities []string) float64 {
-	if len(queryEntities) == 0 {
+func signalEntityOverlap(item ScoringCandidate, queryEntities []string, queryEntityWeights map[string]float64) float64 {
+	if len(queryEntities) == 0 && len(queryEntityWeights) == 0 {
 		return 0.0
 	}
 
@@ -199,14 +244,47 @@ func signalEntityOverlap(item ScoringCandidate, queryEntities []string) float64 
 		sb.WriteString(strings.ToLower(tag))
 	}
 	haystack := sb.String()
-
-	matches := 0
-	for _, ent := range queryEntities {
-		if strings.Contains(haystack, strings.ToLower(ent)) {
-			matches++
+	linkedEntityTerms := make(map[string]bool, len(item.EntityNames)+len(item.EntityAliases))
+	for _, name := range item.EntityNames {
+		trimmed := strings.ToLower(strings.TrimSpace(name))
+		if trimmed != "" {
+			linkedEntityTerms[trimmed] = true
 		}
 	}
-	return float64(matches) / float64(len(queryEntities))
+	for _, alias := range item.EntityAliases {
+		trimmed := strings.ToLower(strings.TrimSpace(alias))
+		if trimmed != "" {
+			linkedEntityTerms[trimmed] = true
+		}
+	}
+
+	weightedTerms := queryEntityWeights
+	if len(weightedTerms) == 0 {
+		weightedTerms = make(map[string]float64, len(queryEntities))
+		for _, entity := range queryEntities {
+			trimmed := strings.ToLower(strings.TrimSpace(entity))
+			if trimmed == "" {
+				continue
+			}
+			weightedTerms[trimmed] = 1.0
+		}
+	}
+
+	var matchedWeight float64
+	var totalWeight float64
+	for term, weight := range weightedTerms {
+		if weight <= 0 || term == "" {
+			continue
+		}
+		totalWeight += weight
+		if strings.Contains(haystack, term) || linkedEntityTerms[term] {
+			matchedWeight += weight
+		}
+	}
+	if totalWeight == 0 {
+		return 0.0
+	}
+	return matchedWeight / totalWeight
 }
 
 // signalScopeFit returns how well the item scope matches the query context.
@@ -318,27 +396,28 @@ func lastTouchTimestamp(item ScoringCandidate) time.Time {
 // its lexical rank.
 func MemoryToCandidate(m core.Memory, ftsPos int) ScoringCandidate {
 	return ScoringCandidate{
-		ID:               m.ID,
-		Kind:             "memory",
-		Type:             string(m.Type),
-		Scope:            m.Scope,
-		Subject:          m.Subject,
-		Body:             m.Body,
-		TightDescription: m.TightDescription,
-		Importance:       m.Importance,
-		Confidence:       m.Confidence,
-		Tags:             m.Tags,
-		ProjectID:        m.ProjectID,
-		Status:           string(m.Status),
-		ObservedAt:       m.ObservedAt,
-		CreatedAt:        m.CreatedAt,
-		UpdatedAt:        m.UpdatedAt,
-		ValidFrom:        m.ValidFrom,
-		ValidTo:          m.ValidTo,
-		LastConfirmedAt:  m.LastConfirmedAt,
-		SupersededBy:     m.SupersededBy,
-		SourceEventIDs:   m.SourceEventIDs,
-		FTSPosition:      ftsPos,
+		ID:                m.ID,
+		Kind:              "memory",
+		Type:              string(m.Type),
+		Scope:             m.Scope,
+		Subject:           m.Subject,
+		Body:              m.Body,
+		TightDescription:  m.TightDescription,
+		Importance:        m.Importance,
+		Confidence:        m.Confidence,
+		Tags:              m.Tags,
+		ProjectID:         m.ProjectID,
+		Status:            string(m.Status),
+		ObservedAt:        m.ObservedAt,
+		CreatedAt:         m.CreatedAt,
+		UpdatedAt:         m.UpdatedAt,
+		ValidFrom:         m.ValidFrom,
+		ValidTo:           m.ValidTo,
+		LastConfirmedAt:   m.LastConfirmedAt,
+		SupersededBy:      m.SupersededBy,
+		SourceEventIDs:    m.SourceEventIDs,
+		ExtractionQuality: m.Metadata["extraction_quality"],
+		FTSPosition:       ftsPos,
 	}
 }
 

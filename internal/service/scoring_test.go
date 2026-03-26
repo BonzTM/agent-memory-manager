@@ -440,3 +440,42 @@ func TestShouldIncludeRecallCandidate(t *testing.T) {
 		}
 	})
 }
+
+func TestScoring_PenalizesProvisionalMemories(t *testing.T) {
+	now := time.Now().UTC()
+	sctx := ScoringContext{
+		Query:         "sqlite decision",
+		QueryEntities: []string{"SQLite"},
+		RecentRecalls: map[string]bool{},
+		ProjectID:     "proj_1",
+		Now:           now,
+	}
+
+	base := ScoringCandidate{
+		ID:               "mem_verified",
+		Kind:             "memory",
+		Scope:            core.ScopeProject,
+		ProjectID:        "proj_1",
+		Subject:          "database",
+		Body:             "We decided to use SQLite",
+		TightDescription: "Use SQLite",
+		Importance:       0.8,
+		Confidence:       0.9,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		FTSPosition:      0,
+	}
+
+	verified := base
+	verified.ExtractionQuality = "verified"
+	provisional := base
+	provisional.ID = "mem_provisional"
+	provisional.ExtractionQuality = "provisional"
+
+	verifiedBreakdown := ScoreItem(verified, sctx)
+	provisionalBreakdown := ScoreItem(provisional, sctx)
+
+	if provisionalBreakdown.FinalScore >= verifiedBreakdown.FinalScore {
+		t.Fatalf("expected provisional score (%f) < verified score (%f)", provisionalBreakdown.FinalScore, verifiedBreakdown.FinalScore)
+	}
+}

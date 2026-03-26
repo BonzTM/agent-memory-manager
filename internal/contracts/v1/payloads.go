@@ -81,6 +81,7 @@ type RecallRequest struct {
 	Mode      string   `json:"mode,omitempty"`
 	ProjectID string   `json:"project_id,omitempty"`
 	SessionID string   `json:"session_id,omitempty"`
+	AgentID   string   `json:"agent_id,omitempty"`
 	EntityIDs []string `json:"entity_ids,omitempty"`
 	Limit     int      `json:"limit,omitempty"`
 	Explain   bool     `json:"explain,omitempty"`
@@ -151,8 +152,9 @@ type DescribeItemResponse struct {
 // It identifies which item should be expanded and, when known, the item kind
 // used to resolve the correct expansion path.
 type ExpandRequest struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // ExpandResponse is the response payload returned by expand.
@@ -284,6 +286,11 @@ type ExplainRecallResponse struct {
 // It identifies the durable memory record to fetch.
 type GetMemoryRequest struct {
 	ID string `json:"id"`
+}
+
+type ShareRequest struct {
+	ID      string `json:"id"`
+	Privacy string `json:"privacy"`
 }
 
 // UpdateMemoryRequest is the request payload for the update_memory command.

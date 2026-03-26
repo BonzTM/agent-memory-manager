@@ -10,7 +10,7 @@ import (
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
-func TestPromoteHighValueMemories_DisabledReturnsZero(t *testing.T) {
+func TestPromoteHighValueMemories_NoHighRecallReturnsZero(t *testing.T) {
 	svc, _ := testServiceAndRepo(t)
 	ctx := context.Background()
 
@@ -19,7 +19,83 @@ func TestPromoteHighValueMemories_DisabledReturnsZero(t *testing.T) {
 		t.Fatal(err)
 	}
 	if promoted != 0 {
-		t.Fatalf("expected 0 promoted (disabled), got %d", promoted)
+		t.Fatalf("expected 0 promoted (no high-recall memories), got %d", promoted)
+	}
+}
+
+func TestPromoteHighValue_BoostsHighRecallMemories(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "high recall promotion candidate",
+		TightDescription: "high recall promotion candidate",
+		Importance:       0.6,
+		Confidence:       0.8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 5; i++ {
+		if err := repo.RecordRecall(ctx, "sess-promote", mem.ID, "memory"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	promoted, err := svc.PromoteHighValueMemories(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if promoted != 1 {
+		t.Fatalf("expected 1 promoted memory, got %d", promoted)
+	}
+
+	updated, err := repo.GetMemory(ctx, mem.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Importance <= 0.6 {
+		t.Fatalf("expected boosted importance above 0.6, got %f", updated.Importance)
+	}
+}
+
+func TestPromoteHighValue_SkipsAlreadyHighImportance(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "high importance memory",
+		TightDescription: "high importance memory",
+		Importance:       0.9,
+		Confidence:       0.8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 6; i++ {
+		if err := repo.RecordRecall(ctx, "sess-skip", mem.ID, "memory"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	promoted, err := svc.PromoteHighValueMemories(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if promoted != 0 {
+		t.Fatalf("expected 0 promoted memories, got %d", promoted)
+	}
+
+	updated, err := repo.GetMemory(ctx, mem.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Importance != 0.9 {
+		t.Fatalf("expected unchanged importance 0.9, got %f", updated.Importance)
 	}
 }
 

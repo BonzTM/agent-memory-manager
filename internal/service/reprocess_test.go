@@ -4,7 +4,11 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -682,6 +686,76 @@ func TestReprocessAll_UsesConfiguredBatchSize(t *testing.T) {
 		if batchSizes[i] != want[i] {
 			t.Fatalf("expected batch calls %v, got %v", want, batchSizes)
 		}
+	}
+}
+
+func TestReprocess_SetsUpgradedQuality(t *testing.T) {
+	ctx := context.Background()
+	candidatePayload, err := json.Marshal([]core.MemoryCandidate{{
+		Type:             core.MemoryTypePreference,
+		Subject:          "style",
+		Body:             "Prefers concise commit messages",
+		TightDescription: "Prefers concise commit messages",
+		Confidence:       0.95,
+		SourceEventNums:  []int{1},
+	}})
+	if err != nil {
+		t.Fatalf("marshal candidate payload: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+			http.Error(w, "unexpected request", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":` + strconv.Quote(string(candidatePayload)) + `}}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	llm := service.NewLLMSummarizer(server.URL, "test-key", "test-model")
+	svc, repo := testServiceForReprocessWithSummarizer(t, llm)
+	now := time.Now().UTC()
+
+	if err := repo.InsertEvent(ctx, &core.Event{ID: "evt_upgrade", Kind: "message_user", SourceSystem: "test", Content: "I prefer concise commit messages", PrivacyLevel: core.PrivacyPrivate, OccurredAt: now, IngestedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.InsertMemory(ctx, &core.Memory{
+		ID:               "mem_upgrade",
+		Type:             core.MemoryTypePreference,
+		Scope:            core.ScopeGlobal,
+		Subject:          "style",
+		Body:             "Prefers concise commit messages",
+		TightDescription: "Prefers concise commit messages",
+		Confidence:       0.6,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		SourceEventIDs:   []string{"evt_upgrade"},
+		Metadata: map[string]string{
+			"extraction_method":  "heuristic",
+			"extraction_quality": "provisional",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := svc.RunJob(ctx, "reprocess")
+	if err != nil {
+		t.Fatalf("reprocess failed: %v", err)
+	}
+	if job.Status != "completed" {
+		t.Fatalf("reprocess status: %s, error: %s", job.Status, job.ErrorText)
+	}
+
+	upgraded, err := repo.GetMemory(ctx, "mem_upgrade")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upgraded.Metadata["extraction_quality"] != "upgraded" {
+		t.Fatalf("expected extraction_quality=upgraded, got %q", upgraded.Metadata["extraction_quality"])
 	}
 }
 

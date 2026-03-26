@@ -526,6 +526,37 @@ ALTER TABLE ingestion_policies ADD COLUMN match_mode TEXT NOT NULL DEFAULT 'glob
 CREATE INDEX IF NOT EXISTS idx_policies_priority ON ingestion_policies(priority DESC);
 `,
 	},
+	{
+		Version:     7,
+		Description: "add relevance feedback table for implicit ranking signals",
+		SQL: `
+CREATE TABLE IF NOT EXISTS relevance_feedback (
+	session_id TEXT NOT NULL,
+	item_id TEXT NOT NULL,
+	item_kind TEXT NOT NULL,
+	action TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (session_id, item_id, action)
+);
+CREATE INDEX IF NOT EXISTS idx_relevance_feedback_item ON relevance_feedback(item_id);
+`,
+	},
+	{
+		Version:     8,
+		Description: "add derived entity graph projection table",
+		SQL: `
+CREATE TABLE IF NOT EXISTS entity_graph_projection (
+	entity_id TEXT NOT NULL,
+	related_entity_id TEXT NOT NULL,
+	hop_distance INTEGER NOT NULL,
+	relationship_path TEXT,
+	score REAL NOT NULL DEFAULT 1.0,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (entity_id, related_entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_entity_graph_proj_entity ON entity_graph_projection(entity_id);
+`,
+	},
 }
 
 // Migrate runs all pending migrations.

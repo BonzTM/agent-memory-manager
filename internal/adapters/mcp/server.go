@@ -56,6 +56,7 @@ func tools() []Tool {
 		{Name: "amm_history", Description: "Query raw interaction history", InputSchema: historySchema()},
 		{Name: "amm_get_memory", Description: "Get a single memory by ID", InputSchema: idSchema()},
 		{Name: "amm_jobs_run", Description: "Run a maintenance job", InputSchema: jobSchema()},
+		{Name: "amm_share", Description: "Update a memory privacy level", InputSchema: shareSchema()},
 		{Name: "amm_explain_recall", Description: "Explain why an item surfaced", InputSchema: explainSchema()},
 		{Name: "amm_repair", Description: "Run integrity checks and repairs", InputSchema: repairSchema()},
 		{Name: "amm_status", Description: "Get system status", InputSchema: emptySchema()},
@@ -191,11 +192,15 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 
 	case "amm_recall":
 		var args struct {
-			Query string             `json:"query"`
-			Opts  core.RecallOptions `json:"opts"`
+			Query   string             `json:"query"`
+			AgentID string             `json:"agent_id"`
+			Opts    core.RecallOptions `json:"opts"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
 			return invalidArgs(err)
+		}
+		if args.Opts.AgentID == "" && args.AgentID != "" {
+			args.Opts.AgentID = args.AgentID
 		}
 		result, callErr = svc.Recall(ctx, args.Query, args.Opts)
 
@@ -210,13 +215,14 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 
 	case "amm_expand":
 		var args struct {
-			ID   string `json:"id"`
-			Kind string `json:"kind"`
+			ID        string `json:"id"`
+			Kind      string `json:"kind"`
+			SessionID string `json:"session_id,omitempty"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
 			return invalidArgs(err)
 		}
-		result, callErr = svc.Expand(ctx, args.ID, args.Kind)
+		result, callErr = svc.Expand(ctx, args.ID, args.Kind, core.ExpandOptions{SessionID: args.SessionID})
 
 	case "amm_history":
 		var args struct {
@@ -243,6 +249,16 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 			return invalidArgs(err)
 		}
 		result, callErr = svc.UpdateMemory(ctx, &mem)
+
+	case "amm_share":
+		var args v1.ShareRequest
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return invalidArgs(err)
+		}
+		if err := v1.ValidateShare(args); err != nil {
+			return invalidArgs(err)
+		}
+		result, callErr = svc.ShareMemory(ctx, args.ID, core.PrivacyLevel(args.Privacy))
 
 	case "amm_policy_list":
 		result, callErr = svc.ListPolicies(ctx)
@@ -380,6 +396,7 @@ func rememberSchema() map[string]interface{} {
 			"tight_description": map[string]string{"type": "string", "description": "One-line summary"},
 			"subject":           map[string]string{"type": "string", "description": "Subject of the memory"},
 			"project_id":        map[string]string{"type": "string", "description": "Project identifier"},
+			"agent_id":          map[string]string{"type": "string", "description": "Agent identifier"},
 		},
 		"required": []string{"type", "body", "tight_description"},
 	}
@@ -389,13 +406,15 @@ func recallSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
-			"query": map[string]string{"type": "string", "description": "Search query"},
+			"query":    map[string]string{"type": "string", "description": "Search query"},
+			"agent_id": map[string]string{"type": "string", "description": "Agent identifier"},
 			"opts": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"mode":       map[string]string{"type": "string"},
 					"project_id": map[string]string{"type": "string"},
 					"session_id": map[string]string{"type": "string"},
+					"agent_id":   map[string]string{"type": "string"},
 					"limit":      map[string]string{"type": "integer"},
 				},
 			},
@@ -418,8 +437,9 @@ func expandSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
-			"id":   map[string]string{"type": "string", "description": "Item ID to expand"},
-			"kind": map[string]string{"type": "string", "description": "Item kind: memory, summary, episode"},
+			"id":         map[string]string{"type": "string", "description": "Item ID to expand"},
+			"kind":       map[string]string{"type": "string", "description": "Item kind: memory, summary, episode"},
+			"session_id": map[string]string{"type": "string", "description": "Session identifier for relevance feedback"},
 		},
 		"required": []string{"id"},
 	}
@@ -507,6 +527,17 @@ func updateMemorySchema() map[string]interface{} {
 			"status":            map[string]string{"type": "string", "description": "Memory status: active, superseded, archived, retracted"},
 		},
 		"required": []string{"id"},
+	}
+}
+
+func shareSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"id":      map[string]string{"type": "string", "description": "Memory ID to share"},
+			"privacy": map[string]string{"type": "string", "description": "Privacy level: private, shared, public_safe"},
+		},
+		"required": []string{"id", "privacy"},
 	}
 }
 

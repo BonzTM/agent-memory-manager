@@ -111,6 +111,8 @@ func Run(args []string) error {
 			}
 		}
 		return runGetMemory(cmdArgs)
+	case "share":
+		return runShare(cmdArgs)
 	case "policy":
 		if len(cmdArgs) == 0 {
 			return fmt.Errorf("policy requires subcommand: list, add, remove")
@@ -210,6 +212,7 @@ Core Commands:
   history                 Query raw history
   memory [show] <id>      Show a memory
   memory update <id>      Update a memory
+  share <id>              Change memory privacy level
   policy list             List ingestion policies
   policy add              Add an ingestion policy
   policy remove <id>      Remove an ingestion policy
@@ -425,6 +428,7 @@ func runRemember(args []string) error {
 		Type:             core.MemoryType(flags["type"]),
 		Scope:            core.Scope(flags["scope"]),
 		ProjectID:        flags["project"],
+		AgentID:          flags["agent-id"],
 		Subject:          flags["subject"],
 		Body:             flags["body"],
 		TightDescription: flags["tight"],
@@ -476,6 +480,7 @@ func runRecall(args []string) error {
 		Mode:      mode,
 		ProjectID: flags["project"],
 		SessionID: flags["session"],
+		AgentID:   flags["agent-id"],
 	}
 
 	ctx := context.Background()
@@ -549,7 +554,7 @@ func runExpand(args []string) error {
 	slog.Debug("cli expand start", "id", pos[0], "kind", kind)
 
 	ctx := context.Background()
-	result, err := svc.Expand(ctx, pos[0], kind)
+	result, err := svc.Expand(ctx, pos[0], kind, core.ExpandOptions{SessionID: flags["session-id"]})
 	if err != nil {
 		logCLIError("cli expand failed", err, "id", pos[0], "kind", kind)
 		fail("expand", "EXPAND_ERROR", err.Error())
@@ -687,6 +692,42 @@ func runUpdateMemory(args []string) error {
 	}
 	slog.Debug("cli memory update succeeded", "id", pos[0])
 	success("memory_update", updated)
+	return nil
+}
+
+func runShare(args []string) error {
+	flags := parseFlags(args)
+	pos := positionalArgs(args)
+	if len(pos) == 0 {
+		logCLIError("cli share failed", fmt.Errorf("memory ID required"))
+		fail("share", "VALIDATION_ERROR", "memory ID required")
+		return fmt.Errorf("memory ID required")
+	}
+
+	req := v1.ShareRequest{ID: pos[0], Privacy: flags["privacy"]}
+	if err := v1.ValidateShare(req); err != nil {
+		logCLIError("cli share failed", err, "id", req.ID)
+		fail("share", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli share failed", err, "id", req.ID)
+		fail("share", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	result, err := svc.ShareMemory(ctx, req.ID, core.PrivacyLevel(req.Privacy))
+	if err != nil {
+		logCLIError("cli share failed", err, "id", req.ID)
+		fail("share", "SHARE_ERROR", err.Error())
+		return err
+	}
+
+	success("share", result)
 	return nil
 }
 
@@ -1129,14 +1170,15 @@ func dispatchEnvelope(ctx context.Context, svc core.Service, envelope CommandEnv
 
 	case "expand":
 		var payload struct {
-			ID   string `json:"id"`
-			Kind string `json:"kind"`
+			ID        string `json:"id"`
+			Kind      string `json:"kind"`
+			SessionID string `json:"session_id,omitempty"`
 		}
 		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
 			fail("run", "PARSE_ERROR", err.Error())
 			return err
 		}
-		result, err := svc.Expand(ctx, payload.ID, payload.Kind)
+		result, err := svc.Expand(ctx, payload.ID, payload.Kind, core.ExpandOptions{SessionID: payload.SessionID})
 		if err != nil {
 			fail("run", "EXPAND_ERROR", err.Error())
 			return err
@@ -1183,6 +1225,23 @@ func dispatchEnvelope(ctx context.Context, svc core.Service, envelope CommandEnv
 		updated, err := svc.UpdateMemory(ctx, &mem)
 		if err != nil {
 			fail("run", "UPDATE_ERROR", err.Error())
+			return err
+		}
+		success("run", updated)
+
+	case "share":
+		var payload v1.ShareRequest
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			fail("run", "PARSE_ERROR", err.Error())
+			return err
+		}
+		if err := v1.ValidateShare(payload); err != nil {
+			fail("run", "VALIDATION_ERROR", err.Error())
+			return err
+		}
+		updated, err := svc.ShareMemory(ctx, payload.ID, core.PrivacyLevel(payload.Privacy))
+		if err != nil {
+			fail("run", "SHARE_ERROR", err.Error())
 			return err
 		}
 		success("run", updated)

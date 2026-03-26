@@ -150,3 +150,42 @@ func TestHandleToolCallPolicyAddValidation(t *testing.T) {
 		t.Fatalf("expected invalid params code -32602, got %d", resp.Error.Code)
 	}
 }
+
+func TestHandleToolCallShareMemory(t *testing.T) {
+	svc := testMCPService(t)
+
+	rememberResp := handleToolCall(svc, toolReq(t, "amm_remember", map[string]interface{}{
+		"type":              string(core.MemoryTypeFact),
+		"agent_id":          "agent-a",
+		"privacy_level":     string(core.PrivacyPrivate),
+		"body":              "share test memory",
+		"tight_description": "share test memory",
+	}))
+	var created core.Memory
+	if err := json.Unmarshal([]byte(decodeToolResultText(t, rememberResp)), &created); err != nil {
+		t.Fatalf("decode remember result: %v", err)
+	}
+
+	shareResp := handleToolCall(svc, toolReq(t, "amm_share", map[string]interface{}{
+		"id":      created.ID,
+		"privacy": "shared",
+	}))
+	var shared core.Memory
+	if err := json.Unmarshal([]byte(decodeToolResultText(t, shareResp)), &shared); err != nil {
+		t.Fatalf("decode share result: %v", err)
+	}
+	if shared.PrivacyLevel != core.PrivacyShared {
+		t.Fatalf("expected shared privacy level, got %q", shared.PrivacyLevel)
+	}
+
+	badPrivacy := handleToolCall(svc, toolReq(t, "amm_share", map[string]interface{}{
+		"id":      created.ID,
+		"privacy": "team_only",
+	}))
+	if badPrivacy.Error == nil {
+		t.Fatalf("expected invalid params for bad privacy")
+	}
+	if badPrivacy.Error.Code != -32602 {
+		t.Fatalf("expected invalid params code -32602, got %d", badPrivacy.Error.Code)
+	}
+}

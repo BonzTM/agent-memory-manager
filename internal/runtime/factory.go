@@ -22,6 +22,18 @@ func buildSummarizer(cfg Config) core.Summarizer {
 	return nil
 }
 
+func buildIntelligenceProvider(cfg Config, summarizer core.Summarizer) core.IntelligenceProvider {
+	if llm, ok := summarizer.(*service.LLMSummarizer); ok {
+		return service.NewLLMIntelligenceProviderWithReviewConfig(
+			llm,
+			cfg.Summarizer.ReviewEndpoint,
+			cfg.Summarizer.ReviewAPIKey,
+			cfg.Summarizer.ReviewModel,
+		)
+	}
+	return service.NewSummarizerIntelligenceAdapter(summarizer)
+}
+
 func buildEmbeddingProvider(cfg Config) core.EmbeddingProvider {
 	if !cfg.Embeddings.Enabled {
 		return nil
@@ -58,8 +70,13 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	}
 
 	repo := &sqlite.SQLiteRepository{DB: db}
-	svc := service.New(repo, cfg.Storage.DBPath, buildSummarizer(cfg), buildEmbeddingProvider(cfg))
+	summarizer := buildSummarizer(cfg)
+	svc := service.New(repo, cfg.Storage.DBPath, summarizer, buildEmbeddingProvider(cfg))
+	svc.SetIntelligenceProvider(buildIntelligenceProvider(cfg, summarizer))
 	svc.SetReprocessBatchSize(cfg.Summarizer.BatchSize)
+	svc.SetReflectBatchSize(cfg.Summarizer.ReflectBatchSize)
+	svc.SetReflectLLMBatchSize(cfg.Summarizer.ReflectLLMBatchSize)
+	svc.SetLifecycleReviewBatchSize(cfg.Summarizer.LifecycleReviewBatchSize)
 
 	cleanup := func() {
 		db.Close()

@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
@@ -27,12 +29,18 @@ func generateID(prefix string) string {
 // AMMService implements core.Service by coordinating repository access,
 // summarization, and maintenance workflows for durable memory operations.
 type AMMService struct {
-	repo               core.Repository
-	dbPath             string
-	summarizer         core.Summarizer
-	hasLLMSummarizer   bool
-	embeddingProvider  core.EmbeddingProvider
-	reprocessBatchSize int
+	repo                     core.Repository
+	dbPath                   string
+	summarizer               core.Summarizer
+	intelligence             core.IntelligenceProvider
+	hasLLMSummarizer         bool
+	embeddingProvider        core.EmbeddingProvider
+	reprocessBatchSize       int
+	reflectBatchSize         int
+	reflectLLMBatchSize      int
+	lifecycleReviewBatchSize int
+	scoringWeights           ScoringWeights
+	scoringWeightsMu         sync.RWMutex
 }
 
 // Compile-time check that AMMService implements core.Service.
@@ -47,14 +55,28 @@ func New(repo core.Repository, dbPath string, summarizer core.Summarizer, embedd
 	if summarizer != nil {
 		selected = summarizer
 	}
-	return &AMMService{
-		repo:               repo,
-		dbPath:             dbPath,
-		summarizer:         selected,
-		hasLLMSummarizer:   hasLLM,
-		embeddingProvider:  embeddingProvider,
-		reprocessBatchSize: defaultBatchSize,
+	intelligence := NewSummarizerIntelligenceAdapter(selected)
+	svc := &AMMService{
+		repo:                     repo,
+		dbPath:                   dbPath,
+		summarizer:               selected,
+		intelligence:             intelligence,
+		hasLLMSummarizer:         hasLLM,
+		embeddingProvider:        embeddingProvider,
+		reprocessBatchSize:       defaultBatchSize,
+		reflectBatchSize:         defaultReflectBatchSize,
+		reflectLLMBatchSize:      defaultReflectLLMBatchSize,
+		lifecycleReviewBatchSize: defaultLifecycleReviewBatchSize,
+		scoringWeights:           DefaultScoringWeights(),
 	}
+	if repo != nil && dbPath != "" {
+		if _, err := os.Stat(dbPath); err == nil {
+			if err := svc.loadScoringWeights(context.Background()); err != nil {
+				slog.Warn("New service defaulting scoring weights after load failure", "error", err)
+			}
+		}
+	}
+	return svc
 }
 
 // SetReprocessBatchSize configures the batch size used by Reprocess.
@@ -65,6 +87,30 @@ func (s *AMMService) SetReprocessBatchSize(batchSize int) {
 		return
 	}
 	s.reprocessBatchSize = batchSize
+}
+
+func (s *AMMService) SetReflectBatchSize(batchSize int) {
+	if batchSize <= 0 {
+		s.reflectBatchSize = defaultReflectBatchSize
+		return
+	}
+	s.reflectBatchSize = batchSize
+}
+
+func (s *AMMService) SetReflectLLMBatchSize(batchSize int) {
+	if batchSize <= 0 {
+		s.reflectLLMBatchSize = defaultReflectLLMBatchSize
+		return
+	}
+	s.reflectLLMBatchSize = batchSize
+}
+
+func (s *AMMService) SetIntelligenceProvider(provider core.IntelligenceProvider) {
+	if provider == nil {
+		s.intelligence = NewSummarizerIntelligenceAdapter(s.summarizer)
+		return
+	}
+	s.intelligence = provider
 }
 
 // Init initializes the database at dbPath by creating parent directories,
@@ -85,6 +131,10 @@ func (s *AMMService) Init(ctx context.Context, dbPath string) error {
 	if err := s.repo.Migrate(ctx); err != nil {
 		slog.Error("Init failed", "dbPath", dbPath, "error", err)
 		return fmt.Errorf("run migrations: %w", err)
+	}
+	if err := s.loadScoringWeights(ctx); err != nil {
+		slog.Error("Init failed", "dbPath", dbPath, "error", err)
+		return fmt.Errorf("load scoring weights: %w", err)
 	}
 	slog.Debug("Init completed successfully", "dbPath", dbPath)
 	return nil
@@ -195,6 +245,10 @@ func (s *AMMService) Remember(ctx context.Context, memory *core.Memory) (*core.M
 	if memory.Scope == "" {
 		memory.Scope = core.ScopeGlobal
 	}
+	if memory.Metadata == nil {
+		memory.Metadata = make(map[string]string)
+	}
+	setProcessingMeta(memory, MetaExtractionQuality, QualityVerified)
 
 	if memory.Supersedes == "" {
 		activeMemories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
@@ -226,6 +280,10 @@ func (s *AMMService) Remember(ctx context.Context, memory *core.Memory) (*core.M
 				bodySimilarity := jaccardSimilarity(normalizeMemoryText(keeper.Body), normalizeMemoryText(memory.Body))
 				if embeddingDuplicateMatch || bodySimilarity >= 0.85 {
 					keeper.SourceEventIDs = mergeUniqueStrings(keeper.SourceEventIDs, memory.SourceEventIDs)
+					if keeper.Metadata == nil {
+						keeper.Metadata = make(map[string]string)
+					}
+					setProcessingMeta(keeper, MetaExtractionQuality, QualityVerified)
 					if memory.Confidence > keeper.Confidence {
 						keeper.Confidence = memory.Confidence
 					}
@@ -274,6 +332,44 @@ func (s *AMMService) GetMemory(ctx context.Context, id string) (*core.Memory, er
 		return nil, err
 	}
 	slog.Debug("GetMemory completed successfully", "id", id, "found", true)
+	return memory, nil
+}
+
+func (s *AMMService) ShareMemory(ctx context.Context, id string, privacy core.PrivacyLevel) (*core.Memory, error) {
+	slog.Debug("ShareMemory called", "id", id, "privacy", privacy)
+
+	if strings.TrimSpace(id) == "" {
+		err := fmt.Errorf("%w: id is required", core.ErrInvalidInput)
+		slog.Error("ShareMemory failed", "id", id, "privacy", privacy, "error", err)
+		return nil, err
+	}
+
+	switch privacy {
+	case core.PrivacyPrivate, core.PrivacyShared, core.PrivacyPublicSafe:
+	default:
+		err := fmt.Errorf("%w: invalid privacy_level %q: must be one of private, shared, public_safe", core.ErrInvalidInput, privacy)
+		slog.Error("ShareMemory failed", "id", id, "privacy", privacy, "error", err)
+		return nil, err
+	}
+
+	memory, err := s.repo.GetMemory(ctx, id)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			err = fmt.Errorf("%w: memory %q", core.ErrNotFound, id)
+		}
+		slog.Error("ShareMemory failed", "id", id, "privacy", privacy, "error", err)
+		return nil, err
+	}
+
+	memory.PrivacyLevel = privacy
+	memory.UpdatedAt = time.Now().UTC()
+
+	if err := s.repo.UpdateMemory(ctx, memory); err != nil {
+		slog.Error("ShareMemory failed", "id", id, "privacy", privacy, "error", err)
+		return nil, fmt.Errorf("update memory: %w", err)
+	}
+
+	slog.Debug("ShareMemory completed successfully", "id", id, "privacy", privacy)
 	return memory, nil
 }
 
@@ -396,7 +492,7 @@ func (s *AMMService) Describe(ctx context.Context, ids []string) ([]core.Describ
 
 // Expand returns the full expansion of a memory, summary, or episode,
 // including linked children where available.
-func (s *AMMService) Expand(ctx context.Context, id string, kind string) (*core.ExpandResult, error) {
+func (s *AMMService) Expand(ctx context.Context, id string, kind string, opts core.ExpandOptions) (*core.ExpandResult, error) {
 	slog.Debug("Expand called", "id", id, "kind", kind)
 
 	result := &core.ExpandResult{}
@@ -482,6 +578,12 @@ func (s *AMMService) Expand(ctx context.Context, id string, kind string) (*core.
 		return nil, err
 	}
 
+	if opts.SessionID != "" {
+		if err := s.repo.InsertRelevanceFeedback(ctx, opts.SessionID, id, kind, "expanded"); err != nil {
+			slog.Debug("Expand relevance feedback insert failed", "id", id, "kind", kind, "sessionID", opts.SessionID, "error", err)
+		}
+	}
+
 	slog.Debug("Expand completed successfully", "id", id, "kind", kind)
 	return result, nil
 }
@@ -564,6 +666,12 @@ func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error)
 		if jobErr == nil {
 			job.Result = map[string]string{"action": "consolidate_sessions", "summaries_created": fmt.Sprintf("%d", count)}
 		}
+	case "build_topic_summaries":
+		count, err := s.BuildTopicSummaries(ctx)
+		jobErr = err
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "build_topic_summaries", "summaries_created": fmt.Sprintf("%d", count)}
+		}
 	case "rebuild_indexes":
 		jobErr = s.repo.RebuildFTSIndexes(ctx)
 		if jobErr == nil {
@@ -585,6 +693,17 @@ func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error)
 		jobErr = err
 		if jobErr == nil {
 			job.Result = map[string]string{"action": "extract_claims", "claims_created": fmt.Sprintf("%d", count)}
+		}
+	case "enrich_memories":
+		count, err := s.EnrichMemories(ctx)
+		jobErr = err
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "enrich_memories", "memories_enriched": fmt.Sprintf("%d", count)}
+		}
+	case "rebuild_entity_graph":
+		jobErr = s.repo.RebuildEntityGraphProjection(ctx)
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "rebuild_entity_graph", "status": "completed"}
 		}
 	case "form_episodes":
 		count, err := s.FormEpisodes(ctx)
@@ -634,11 +753,33 @@ func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error)
 		if jobErr == nil {
 			job.Result = map[string]string{"action": "promote_high_value", "memories_promoted": fmt.Sprintf("%d", count)}
 		}
+	case "lifecycle_review":
+		count, err := s.LifecycleReview(ctx)
+		jobErr = err
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "lifecycle_review", "memories_affected": fmt.Sprintf("%d", count)}
+		}
+	case "cross_project_transfer":
+		count, err := s.CrossProjectTransfer(ctx)
+		jobErr = err
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "cross_project_transfer", "memories_promoted": fmt.Sprintf("%d", count)}
+		}
 	case "archive_session_traces":
 		count, err := s.ArchiveLowSalienceSessionTraces(ctx)
 		jobErr = err
 		if jobErr == nil {
 			job.Result = map[string]string{"action": "archive_session_traces", "memories_archived": fmt.Sprintf("%d", count)}
+		}
+	case "update_ranking_weights":
+		count, err := s.UpdateRankingWeights(ctx)
+		jobErr = err
+		if jobErr == nil {
+			job.Result = map[string]string{
+				"action":          "update_ranking_weights",
+				"weights_updated": fmt.Sprintf("%d", count),
+				"scoring_weights": s.scoringWeightsJSON(),
+			}
 		}
 	default:
 		jobErr = fmt.Errorf("%w: unknown job kind %q", core.ErrInvalidInput, kind)
@@ -735,7 +876,10 @@ func (s *AMMService) ExplainRecall(ctx context.Context, query string, itemID str
 		QueryEntities:  queryEntities,
 		Now:            time.Now().UTC(),
 		RecentRecalls:  recentRecalls,
+		Weights:        nil,
 	}
+	weights := s.getScoringWeights()
+	sctx.Weights = &weights
 
 	// Try to find the item as memory, summary, episode, or event.
 	var candidate ScoringCandidate
@@ -763,6 +907,7 @@ func (s *AMMService) ExplainRecall(ctx context.Context, query string, itemID str
 
 	candidates := []ScoringCandidate{candidate}
 	s.attachCandidateEmbeddings(ctx, candidates)
+	s.attachCandidateEntities(ctx, candidates)
 	candidate = candidates[0]
 
 	breakdown := ScoreItem(candidate, sctx)

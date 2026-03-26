@@ -195,20 +195,33 @@ func TestValidateHistory(t *testing.T) {
 }
 
 func TestValidateRunJob(t *testing.T) {
-	if err := ValidateRunJob(&RunJobRequest{Kind: "rebuild_indexes"}); err != nil {
-		t.Fatalf("expected valid request, got %v", err)
+	validKinds := []string{
+		"reflect",
+		"compress_history",
+		"consolidate_sessions",
+		"build_topic_summaries",
+		"rebuild_indexes",
+		"rebuild_indexes_full",
+		"extract_claims",
+		"enrich_memories",
+		"rebuild_entity_graph",
+		"form_episodes",
+		"detect_contradictions",
+		"decay_stale_memory",
+		"merge_duplicates",
+		"cleanup_recall_history",
+		"reprocess",
+		"reprocess_all",
+		"promote_high_value",
+		"lifecycle_review",
+		"cross_project_transfer",
+		"archive_session_traces",
+		"update_ranking_weights",
 	}
-	if err := ValidateRunJob(&RunJobRequest{Kind: "reprocess"}); err != nil {
-		t.Fatalf("expected reprocess to be valid, got %v", err)
-	}
-	if err := ValidateRunJob(&RunJobRequest{Kind: "reprocess_all"}); err != nil {
-		t.Fatalf("expected reprocess_all to be valid, got %v", err)
-	}
-	if err := ValidateRunJob(&RunJobRequest{Kind: "promote_high_value"}); err != nil {
-		t.Fatalf("expected promote_high_value to be valid, got %v", err)
-	}
-	if err := ValidateRunJob(&RunJobRequest{Kind: "archive_session_traces"}); err != nil {
-		t.Fatalf("expected archive_session_traces to be valid, got %v", err)
+	for _, kind := range validKinds {
+		if err := ValidateRunJob(&RunJobRequest{Kind: kind}); err != nil {
+			t.Fatalf("expected %s to be valid, got %v", kind, err)
+		}
 	}
 
 	tests := []struct {
@@ -298,6 +311,30 @@ func TestValidateUpdateMemory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateUpdateMemory(tt.req)
+			if err == nil || !strings.Contains(err.Error(), tt.contains) {
+				t.Fatalf("expected error containing %q, got %v", tt.contains, err)
+			}
+		})
+	}
+}
+
+func TestValidateShare(t *testing.T) {
+	if err := ValidateShare(ShareRequest{ID: "m1", Privacy: "shared"}); err != nil {
+		t.Fatalf("expected valid request, got %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		req      ShareRequest
+		contains string
+	}{
+		{name: "missing id", req: ShareRequest{Privacy: "shared"}, contains: "id is required"},
+		{name: "invalid privacy", req: ShareRequest{ID: "m1", Privacy: "team_only"}, contains: "invalid privacy"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateShare(tt.req)
 			if err == nil || !strings.Contains(err.Error(), tt.contains) {
 				t.Fatalf("expected error containing %q, got %v", tt.contains, err)
 			}

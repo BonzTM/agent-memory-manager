@@ -739,6 +739,10 @@ func (r *SQLiteRepository) ListMemories(ctx context.Context, opts core.ListMemor
 		query += " AND project_id = ?"
 		args = append(args, opts.ProjectID)
 	}
+	if opts.AgentID != "" {
+		query += " AND (agent_id = ? OR agent_id = '' OR agent_id IS NULL OR privacy_level IN ('shared', 'public_safe'))"
+		args = append(args, opts.AgentID)
+	}
 	if opts.Status != "" {
 		query += " AND status = ?"
 		args = append(args, string(opts.Status))
@@ -763,17 +767,24 @@ func (r *SQLiteRepository) ListMemories(ctx context.Context, opts core.ListMemor
 	return memories, rows.Err()
 }
 
-func (r *SQLiteRepository) SearchMemories(ctx context.Context, query string, limit int) ([]core.Memory, error) {
+func (r *SQLiteRepository) SearchMemories(ctx context.Context, query string, opts core.ListMemoriesOptions) ([]core.Memory, error) {
 	sq := sanitizeFTS5Query(query)
 	if sq == "" {
 		return nil, nil
 	}
 	q := "SELECT " + prefixCols("m", memoryCols) + `
 		FROM memories_fts f JOIN memories m ON f.id = m.id
-		WHERE memories_fts MATCH ?
+		WHERE memories_fts MATCH ?`
+	args := []interface{}{sq}
+	if opts.AgentID != "" {
+		q += " AND (m.agent_id = ? OR m.agent_id = '' OR m.agent_id IS NULL OR m.privacy_level IN ('shared', 'public_safe'))"
+		args = append(args, opts.AgentID)
+	}
+	q += `
 		ORDER BY rank
 		LIMIT ?`
-	rows, err := r.QueryContext(ctx, q, sq, defaultLimit(limit))
+	args = append(args, defaultLimit(opts.Limit))
+	rows, err := r.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -924,6 +935,22 @@ func (r *SQLiteRepository) InsertEntity(ctx context.Context, entity *core.Entity
 		marshalSliceJSON(entity.Aliases), nullStr(entity.Description),
 		marshalMapJSON(entity.Metadata),
 		timeToStr(entity.CreatedAt), timeToStr(entity.UpdatedAt),
+	)
+	return err
+}
+
+func (r *SQLiteRepository) UpdateEntity(ctx context.Context, entity *core.Entity) error {
+	_, err := r.ExecContext(ctx, `
+		UPDATE entities
+		SET type = ?, canonical_name = ?, aliases_json = ?, description = ?, metadata_json = ?, updated_at = ?
+		WHERE id = ?`,
+		entity.Type,
+		entity.CanonicalName,
+		marshalSliceJSON(entity.Aliases),
+		nullStr(entity.Description),
+		marshalMapJSON(entity.Metadata),
+		timeToStr(entity.UpdatedAt),
+		entity.ID,
 	)
 	return err
 }
@@ -1198,6 +1225,215 @@ func (r *SQLiteRepository) ListRelationships(ctx context.Context, opts core.List
 		relationships = append(relationships, rel)
 	}
 	return relationships, rows.Err()
+}
+
+func (r *SQLiteRepository) ListRelatedEntities(ctx context.Context, entityID string, depth int) ([]core.RelatedEntity, error) {
+	if strings.TrimSpace(entityID) == "" {
+		return nil, nil
+	}
+	if depth <= 0 {
+		return nil, nil
+	}
+	if depth > 3 {
+		depth = 3
+	}
+
+	rows, err := r.QueryContext(ctx, `
+		WITH RECURSIVE related(entity_id, hop, rel_type, visited) AS (
+			SELECT ?, 0, '', ',' || ? || ','
+			UNION ALL
+			SELECT
+				CASE
+					WHEN r.from_entity_id = related.entity_id THEN r.to_entity_id
+					ELSE r.from_entity_id
+				END,
+				related.hop + 1,
+				r.relationship_type,
+				related.visited || CASE
+					WHEN r.from_entity_id = related.entity_id THEN r.to_entity_id
+					ELSE r.from_entity_id
+				END || ','
+			FROM relationships r
+			JOIN related ON (r.from_entity_id = related.entity_id OR r.to_entity_id = related.entity_id)
+			WHERE related.hop < ?
+				AND related.visited NOT LIKE '%,' || CASE
+					WHEN r.from_entity_id = related.entity_id THEN r.to_entity_id
+					ELSE r.from_entity_id
+				END || ',%'
+		)
+		SELECT DISTINCT
+			e.id,
+			e.type,
+			e.canonical_name,
+			e.aliases_json,
+			COALESCE(e.description,''),
+			e.metadata_json,
+			e.created_at,
+			e.updated_at,
+			related.hop,
+			related.rel_type
+		FROM related
+		JOIN entities e ON e.id = related.entity_id
+		WHERE related.hop > 0
+		ORDER BY related.hop ASC`, entityID, entityID, depth)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	resultsByEntity := make(map[string]core.RelatedEntity)
+	orderedIDs := make([]string, 0)
+	for rows.Next() {
+		var ent core.Entity
+		var aliasesJSON, metaJSON, createdAt, updatedAt, relType string
+		var hop int
+		if err := rows.Scan(&ent.ID, &ent.Type, &ent.CanonicalName, &aliasesJSON,
+			&ent.Description, &metaJSON, &createdAt, &updatedAt, &hop, &relType); err != nil {
+			return nil, err
+		}
+		ent.Aliases = unmarshalSlice(aliasesJSON)
+		ent.Metadata = unmarshalMap(metaJSON)
+		ent.CreatedAt = strToTime(createdAt)
+		ent.UpdatedAt = strToTime(updatedAt)
+
+		existing, ok := resultsByEntity[ent.ID]
+		if !ok || hop < existing.HopDistance {
+			if !ok {
+				orderedIDs = append(orderedIDs, ent.ID)
+			}
+			resultsByEntity[ent.ID] = core.RelatedEntity{
+				Entity:       ent,
+				HopDistance:  hop,
+				Relationship: relType,
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	related := make([]core.RelatedEntity, 0, len(resultsByEntity))
+	for _, id := range orderedIDs {
+		related = append(related, resultsByEntity[id])
+	}
+	return related, nil
+}
+
+func (r *SQLiteRepository) RebuildEntityGraphProjection(ctx context.Context) error {
+	tx, err := r.Conn().BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin projection rebuild transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM entity_graph_projection`); err != nil {
+		return fmt.Errorf("truncate entity_graph_projection: %w", err)
+	}
+
+	createdAt := timeToStr(time.Now().UTC())
+	if _, err := tx.ExecContext(ctx, `
+		WITH RECURSIVE walk(root_entity_id, entity_id, hop_distance, relationship_path, visited) AS (
+			SELECT id, id, 0, '', ',' || id || ','
+			FROM entities
+
+			UNION ALL
+
+			SELECT
+				walk.root_entity_id,
+				CASE
+					WHEN rel.from_entity_id = walk.entity_id THEN rel.to_entity_id
+					ELSE rel.from_entity_id
+				END,
+				walk.hop_distance + 1,
+				CASE
+					WHEN walk.relationship_path = '' THEN rel.relationship_type
+					ELSE walk.relationship_path || '>' || rel.relationship_type
+				END,
+				walk.visited || CASE
+					WHEN rel.from_entity_id = walk.entity_id THEN rel.to_entity_id
+					ELSE rel.from_entity_id
+				END || ','
+			FROM walk
+			JOIN relationships rel
+				ON rel.from_entity_id = walk.entity_id OR rel.to_entity_id = walk.entity_id
+			WHERE walk.hop_distance < 2
+				AND walk.visited NOT LIKE '%,' || CASE
+					WHEN rel.from_entity_id = walk.entity_id THEN rel.to_entity_id
+					ELSE rel.from_entity_id
+				END || ',%'
+		),
+		ranked AS (
+			SELECT
+				root_entity_id AS entity_id,
+				entity_id AS related_entity_id,
+				hop_distance,
+				relationship_path,
+				CASE
+					WHEN hop_distance = 1 THEN 1.0
+					WHEN hop_distance = 2 THEN 0.5
+					ELSE 0.0
+				END AS score,
+				ROW_NUMBER() OVER (
+					PARTITION BY root_entity_id, entity_id
+					ORDER BY hop_distance ASC
+				) AS row_num
+			FROM walk
+			WHERE hop_distance > 0
+		)
+		INSERT INTO entity_graph_projection (
+			entity_id,
+			related_entity_id,
+			hop_distance,
+			relationship_path,
+			score,
+			created_at
+		)
+		SELECT
+			entity_id,
+			related_entity_id,
+			hop_distance,
+			relationship_path,
+			score,
+			?
+		FROM ranked
+		WHERE row_num = 1`, createdAt); err != nil {
+		return fmt.Errorf("rebuild entity_graph_projection rows: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit projection rebuild: %w", err)
+	}
+
+	return nil
+}
+
+func (r *SQLiteRepository) ListProjectedRelatedEntities(ctx context.Context, entityID string) ([]core.ProjectedRelation, error) {
+	if strings.TrimSpace(entityID) == "" {
+		return nil, nil
+	}
+
+	rows, err := r.QueryContext(ctx, `
+		SELECT related_entity_id, hop_distance, COALESCE(relationship_path, ''), score
+		FROM entity_graph_projection
+		WHERE entity_id = ?
+		ORDER BY hop_distance ASC, score DESC, related_entity_id ASC`, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	projected := make([]core.ProjectedRelation, 0)
+	for rows.Next() {
+		var rel core.ProjectedRelation
+		if err := rows.Scan(&rel.RelatedEntityID, &rel.HopDistance, &rel.RelationshipPath, &rel.Score); err != nil {
+			return nil, err
+		}
+		projected = append(projected, rel)
+	}
+
+	return projected, rows.Err()
 }
 
 func (r *SQLiteRepository) DeleteRelationship(ctx context.Context, id string) error {
@@ -1687,6 +1923,29 @@ func (r *SQLiteRepository) GetRecentRecalls(ctx context.Context, sessionID strin
 	return entries, rows.Err()
 }
 
+func (r *SQLiteRepository) ListMemoryAccessStats(ctx context.Context, since time.Time) ([]core.MemoryAccessStat, error) {
+	rows, err := r.QueryContext(ctx, `
+		SELECT item_id, COUNT(*) AS access_count, MAX(shown_at) AS last_accessed_at
+		FROM recall_history
+		WHERE item_kind = 'memory' AND shown_at >= ?
+		GROUP BY item_id`, since.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	stats := make([]core.MemoryAccessStat, 0)
+	for rows.Next() {
+		var stat core.MemoryAccessStat
+		if err := rows.Scan(&stat.MemoryID, &stat.AccessCount, &stat.LastAccessedAt); err != nil {
+			return nil, err
+		}
+		stats = append(stats, stat)
+	}
+
+	return stats, rows.Err()
+}
+
 func (r *SQLiteRepository) CleanupRecallHistory(ctx context.Context, olderThanDays int) (int64, error) {
 	cutoff := time.Now().UTC().AddDate(0, 0, -olderThanDays).Format(time.RFC3339)
 	result, err := r.ExecContext(ctx, `
@@ -1695,6 +1954,38 @@ func (r *SQLiteRepository) CleanupRecallHistory(ctx context.Context, olderThanDa
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+func (r *SQLiteRepository) InsertRelevanceFeedback(ctx context.Context, sessionID, itemID, itemKind, action string) error {
+	_, err := r.ExecContext(ctx, `
+		INSERT OR IGNORE INTO relevance_feedback (session_id, item_id, item_kind, action, created_at)
+		VALUES (?,?,?,?,?)`,
+		sessionID, itemID, itemKind, action, timeToStr(time.Now().UTC()))
+	return err
+}
+
+func (r *SQLiteRepository) ListRelevanceFeedback(ctx context.Context, itemID string) ([]core.RelevanceFeedbackEntry, error) {
+	rows, err := r.QueryContext(ctx, `
+		SELECT session_id, item_id, item_kind, action, created_at
+		FROM relevance_feedback
+		WHERE item_id = ?
+		ORDER BY created_at DESC`, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	entries := make([]core.RelevanceFeedbackEntry, 0)
+	for rows.Next() {
+		var entry core.RelevanceFeedbackEntry
+		var createdAt string
+		if err := rows.Scan(&entry.SessionID, &entry.ItemID, &entry.ItemKind, &entry.Action, &createdAt); err != nil {
+			return nil, err
+		}
+		entry.CreatedAt = strToTime(createdAt)
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
 }
 
 func (r *SQLiteRepository) UpsertEmbedding(ctx context.Context, embedding *core.EmbeddingRecord) error {

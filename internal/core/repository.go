@@ -55,7 +55,7 @@ type Repository interface {
 	// ListMemories returns memories matching the supplied options.
 	ListMemories(ctx context.Context, opts ListMemoriesOptions) ([]Memory, error)
 	// SearchMemories searches memories by text query.
-	SearchMemories(ctx context.Context, query string, limit int) ([]Memory, error)
+	SearchMemories(ctx context.Context, query string, opts ListMemoriesOptions) ([]Memory, error)
 
 	// InsertClaim stores a claim.
 	InsertClaim(ctx context.Context, claim *Claim) error
@@ -66,6 +66,7 @@ type Repository interface {
 
 	// InsertEntity stores an entity.
 	InsertEntity(ctx context.Context, entity *Entity) error
+	UpdateEntity(ctx context.Context, entity *Entity) error
 	// GetEntity retrieves an entity by ID.
 	GetEntity(ctx context.Context, id string) (*Entity, error)
 	// ListEntities returns entities matching the supplied options.
@@ -92,6 +93,9 @@ type Repository interface {
 	GetRelationship(ctx context.Context, id string) (*Relationship, error)
 	// ListRelationships returns relationships, optionally filtered by entity.
 	ListRelationships(ctx context.Context, opts ListRelationshipsOptions) ([]Relationship, error)
+	ListRelatedEntities(ctx context.Context, entityID string, depth int) ([]RelatedEntity, error)
+	RebuildEntityGraphProjection(ctx context.Context) error
+	ListProjectedRelatedEntities(ctx context.Context, entityID string) ([]ProjectedRelation, error)
 	// DeleteRelationship deletes a relationship by ID.
 	DeleteRelationship(ctx context.Context, id string) error
 
@@ -133,8 +137,11 @@ type Repository interface {
 	RecordRecall(ctx context.Context, sessionID, itemID, itemKind string) error
 	// GetRecentRecalls returns the most recent recall history entries.
 	GetRecentRecalls(ctx context.Context, sessionID string, limit int) ([]RecallHistoryEntry, error)
+	ListMemoryAccessStats(ctx context.Context, since time.Time) ([]MemoryAccessStat, error)
 	// CleanupRecallHistory removes old recall history entries.
 	CleanupRecallHistory(ctx context.Context, olderThanDays int) (int64, error)
+	InsertRelevanceFeedback(ctx context.Context, sessionID, itemID, itemKind, action string) error
+	ListRelevanceFeedback(ctx context.Context, itemID string) ([]RelevanceFeedbackEntry, error)
 
 	UpsertEmbedding(ctx context.Context, embedding *EmbeddingRecord) error
 	GetEmbedding(ctx context.Context, objectID, objectKind, model string) (*EmbeddingRecord, error)
@@ -164,12 +171,39 @@ type SummaryEdge struct {
 	EdgeOrder       int    `json:"edge_order,omitempty"`
 }
 
+type RelatedEntity struct {
+	Entity       Entity `json:"entity"`
+	HopDistance  int    `json:"hop_distance"`
+	Relationship string `json:"relationship"`
+}
+
+type ProjectedRelation struct {
+	RelatedEntityID string  `json:"related_entity_id"`
+	HopDistance     int     `json:"hop_distance"`
+	RelationshipPath string `json:"relationship_path,omitempty"`
+	Score           float64 `json:"score"`
+}
+
 // RecallHistoryEntry tracks a displayed recall item for repetition suppression.
 type RecallHistoryEntry struct {
 	SessionID string `json:"session_id"`
 	ItemID    string `json:"item_id"`
 	ItemKind  string `json:"item_kind"`
 	ShownAt   string `json:"shown_at"`
+}
+
+type MemoryAccessStat struct {
+	MemoryID       string `json:"memory_id"`
+	AccessCount    int    `json:"access_count"`
+	LastAccessedAt string `json:"last_accessed_at"`
+}
+
+type RelevanceFeedbackEntry struct {
+	SessionID string    `json:"session_id"`
+	ItemID    string    `json:"item_id"`
+	ItemKind  string    `json:"item_kind"`
+	Action    string    `json:"action"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type EmbeddingRecord struct {
@@ -207,6 +241,7 @@ type ListMemoriesOptions struct {
 	Type      MemoryType
 	Scope     Scope
 	ProjectID string
+	AgentID   string
 	Status    MemoryStatus
 	Limit     int
 }

@@ -24,7 +24,7 @@ type Service interface {
 	Describe(ctx context.Context, ids []string) ([]DescribeResult, error)
 
 	// Expand returns the full expansion of a single item.
-	Expand(ctx context.Context, id string, kind string) (*ExpandResult, error)
+	Expand(ctx context.Context, id string, kind string, opts ExpandOptions) (*ExpandResult, error)
 
 	// History retrieves raw history by query or session.
 	History(ctx context.Context, query string, opts HistoryOptions) ([]Event, error)
@@ -34,6 +34,9 @@ type Service interface {
 
 	// UpdateMemory updates an existing memory.
 	UpdateMemory(ctx context.Context, memory *Memory) (*Memory, error)
+
+	// ShareMemory updates a memory's privacy level.
+	ShareMemory(ctx context.Context, id string, privacy PrivacyLevel) (*Memory, error)
 
 	// ListPolicies returns all configured ingestion policies.
 	ListPolicies(ctx context.Context) ([]IngestionPolicy, error)
@@ -95,6 +98,7 @@ type RecallOptions struct {
 	Mode      RecallMode `json:"mode"`
 	ProjectID string     `json:"project_id,omitempty"`
 	SessionID string     `json:"session_id,omitempty"`
+	AgentID   string     `json:"agent_id,omitempty"`
 	EntityIDs []string   `json:"entity_ids,omitempty"`
 	Limit     int        `json:"limit,omitempty"`
 	Explain   bool       `json:"explain,omitempty"`

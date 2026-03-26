@@ -61,8 +61,11 @@ var (
 		"reflect":                true,
 		"compress_history":       true,
 		"consolidate_sessions":   true,
+		"build_topic_summaries":  true,
 		"rebuild_indexes":        true,
+		"rebuild_indexes_full":   true,
 		"extract_claims":         true,
+		"enrich_memories":        true,
 		"form_episodes":          true,
 		"detect_contradictions":  true,
 		"decay_stale_memory":     true,
@@ -71,7 +74,11 @@ var (
 		"reprocess":              true,
 		"reprocess_all":          true,
 		"promote_high_value":     true,
+		"lifecycle_review":       true,
+		"cross_project_transfer": true,
+		"rebuild_entity_graph":   true,
 		"archive_session_traces": true,
+		"update_ranking_weights": true,
 	}
 
 	validPolicyPatternTypes = map[string]bool{
@@ -278,6 +285,16 @@ func ValidateGetMemory(req *GetMemoryRequest) error {
 	}
 	if strings.TrimSpace(req.ID) == "" {
 		return fmt.Errorf("id is required")
+	}
+	return nil
+}
+
+func ValidateShare(req ShareRequest) error {
+	if strings.TrimSpace(req.ID) == "" {
+		return fmt.Errorf("id is required")
+	}
+	if !validPrivacyLevels[req.Privacy] {
+		return fmt.Errorf("invalid privacy %q: must be one of private, shared, public_safe", req.Privacy)
 	}
 	return nil
 }

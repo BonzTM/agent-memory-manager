@@ -56,7 +56,7 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 					continue
 				}
 
-				candidates, err := s.repo.SearchMemories(ctx, query, 10)
+				candidates, err := s.repo.SearchMemories(ctx, query, core.ListMemoriesOptions{Limit: 10})
 				if err != nil {
 					continue
 				}

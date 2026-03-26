@@ -31,7 +31,7 @@ func shouldUpgradeDuplicateContent(existing *core.Memory, candidate core.Memory,
 	if existing == nil {
 		return false
 	}
-	if extractionMethod == "llm" && (existing.Metadata == nil || existing.Metadata["extraction_method"] != "llm") {
+	if extractionMethod == MethodLLM && !hasLLMProcessingStep(existing, MetaExtractionMethod) {
 		return true
 	}
 	return candidate.Confidence >= existing.Confidence

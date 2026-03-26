@@ -42,6 +42,7 @@ func TestToolsContainsExpectedNames(t *testing.T) {
 		"amm_history",
 		"amm_get_memory",
 		"amm_update_memory",
+		"amm_share",
 		"amm_jobs_run",
 		"amm_repair",
 		"amm_explain_recall",
@@ -84,6 +85,7 @@ func TestSchemaHelpersNonNil(t *testing.T) {
 		repairSchema(),
 		transcriptSchema(),
 		updateMemorySchema(),
+		shareSchema(),
 		policyListSchema(),
 		policyAddSchema(),
 		policyRemoveSchema(),
@@ -162,6 +164,7 @@ func TestHandleToolCallInvalidArgumentsPerTool(t *testing.T) {
 		"amm_history",
 		"amm_get_memory",
 		"amm_update_memory",
+		"amm_share",
 		"amm_policy_add",
 		"amm_policy_remove",
 		"amm_jobs_run",
@@ -343,6 +346,16 @@ func TestHandleToolCallCoversAllTools(t *testing.T) {
 	decodeToolResultJSON(t, updateResp, &updateResult)
 	if updateResult.ID != createdMemory.ID || updateResult.Body != updatedMemory.Body {
 		t.Fatalf("unexpected update result: %#v", updateResult)
+	}
+
+	shareResp := handleToolCall(svc, toolReq(t, "amm_share", map[string]interface{}{
+		"id":      createdMemory.ID,
+		"privacy": "shared",
+	}))
+	var sharedResult core.Memory
+	decodeToolResultJSON(t, shareResp, &sharedResult)
+	if sharedResult.ID != createdMemory.ID || sharedResult.PrivacyLevel != core.PrivacyShared {
+		t.Fatalf("unexpected share result: %#v", sharedResult)
 	}
 
 	jobResp := handleToolCall(svc, toolReq(t, "amm_jobs_run", map[string]interface{}{"kind": "rebuild_indexes"}))

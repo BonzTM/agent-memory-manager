@@ -10,7 +10,12 @@ import (
 	"strings"
 )
 
-const defaultSummarizerBatchSize = 20
+const (
+	defaultSummarizerBatchSize      = 20
+	defaultReflectBatchSize         = 100
+	defaultReflectLLMBatchSize      = 20
+	defaultLifecycleReviewBatchSize = 50
+)
 
 // Config holds all runtime configuration for amm.
 // Matches blueprint section 15.
@@ -24,10 +29,16 @@ type Config struct {
 }
 
 type SummarizerConfig struct {
-	Endpoint  string `json:"endpoint"`
-	APIKey    string `json:"api_key"`
-	Model     string `json:"model"`
-	BatchSize int    `json:"batch_size"`
+	Endpoint                 string `json:"endpoint"`
+	APIKey                   string `json:"api_key"`
+	Model                    string `json:"model"`
+	ReviewEndpoint           string `json:"review_endpoint"`
+	ReviewAPIKey             string `json:"review_api_key"`
+	ReviewModel              string `json:"review_model"`
+	BatchSize                int    `json:"batch_size"`
+	ReflectBatchSize         int    `json:"reflect_batch_size"`
+	ReflectLLMBatchSize      int    `json:"reflect_llm_batch_size"`
+	LifecycleReviewBatchSize int    `json:"lifecycle_review_batch_size"`
 }
 
 type EmbeddingsConfig struct {
@@ -90,7 +101,10 @@ func DefaultConfig() Config {
 			AutoDetectContradictions: true,
 		},
 		Summarizer: SummarizerConfig{
-			BatchSize: defaultSummarizerBatchSize,
+			BatchSize:                defaultSummarizerBatchSize,
+			ReflectBatchSize:         defaultReflectBatchSize,
+			ReflectLLMBatchSize:      defaultReflectLLMBatchSize,
+			LifecycleReviewBatchSize: defaultLifecycleReviewBatchSize,
 		},
 		Embeddings: EmbeddingsConfig{
 			Enabled: false,
@@ -199,6 +213,24 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 		case "summarizer.batch_size":
 			if n, err := strconv.Atoi(val); err == nil && n > 0 {
 				cfg.Summarizer.BatchSize = n
+			}
+		case "summarizer.review_endpoint":
+			cfg.Summarizer.ReviewEndpoint = val
+		case "summarizer.review_api_key":
+			cfg.Summarizer.ReviewAPIKey = val
+		case "summarizer.review_model":
+			cfg.Summarizer.ReviewModel = val
+		case "summarizer.reflect_batch_size":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.Summarizer.ReflectBatchSize = n
+			}
+		case "summarizer.reflect_llm_batch_size":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.Summarizer.ReflectLLMBatchSize = n
+			}
+		case "summarizer.lifecycle_review_batch_size":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.Summarizer.LifecycleReviewBatchSize = n
 			}
 		case "embeddings.enabled":
 			if b, err := strconv.ParseBool(val); err == nil {
@@ -319,6 +351,30 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_SUMMARIZER_BATCH_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			base.Summarizer.BatchSize = n
+		}
+	}
+	if v := os.Getenv("AMM_REVIEW_ENDPOINT"); v != "" {
+		base.Summarizer.ReviewEndpoint = v
+	}
+	if v := os.Getenv("AMM_REVIEW_API_KEY"); v != "" {
+		base.Summarizer.ReviewAPIKey = v
+	}
+	if v := os.Getenv("AMM_REVIEW_MODEL"); v != "" {
+		base.Summarizer.ReviewModel = v
+	}
+	if v := os.Getenv("AMM_REFLECT_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Summarizer.ReflectBatchSize = n
+		}
+	}
+	if v := os.Getenv("AMM_REFLECT_LLM_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Summarizer.ReflectLLMBatchSize = n
+		}
+	}
+	if v := os.Getenv("AMM_LIFECYCLE_REVIEW_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Summarizer.LifecycleReviewBatchSize = n
 		}
 	}
 	if v := os.Getenv("AMM_EMBEDDINGS_ENABLED"); v != "" {

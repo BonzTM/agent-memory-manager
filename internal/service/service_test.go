@@ -4,6 +4,7 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -128,6 +129,295 @@ func TestRemember(t *testing.T) {
 	}
 	if got.UpdatedAt.IsZero() {
 		t.Error("expected UpdatedAt to be set")
+	}
+}
+
+func TestRemember_SetsVerifiedExtractionQuality(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	got, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "AMM uses SQLite",
+		TightDescription: "AMM uses SQLite",
+	})
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+	if got.Metadata == nil {
+		t.Fatal("expected metadata to be initialized")
+	}
+	if got.Metadata["extraction_quality"] != "verified" {
+		t.Fatalf("expected extraction_quality=verified, got %q", got.Metadata["extraction_quality"])
+	}
+}
+
+func TestRemember_SetsAgentID(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	got, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		AgentID:          "agent-a",
+		Body:             "agent scoped memory",
+		TightDescription: "agent scoped memory",
+	})
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+	if got.AgentID != "agent-a" {
+		t.Fatalf("expected remembered agent_id=agent-a, got %q", got.AgentID)
+	}
+
+	stored, err := svc.GetMemory(ctx, got.ID)
+	if err != nil {
+		t.Fatalf("GetMemory: %v", err)
+	}
+	if stored.AgentID != "agent-a" {
+		t.Fatalf("expected stored agent_id=agent-a, got %q", stored.AgentID)
+	}
+}
+
+func TestRecall_FiltersByAgentID(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	memA, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		AgentID:          "agent-a",
+		Body:             "phase7a shared query agent a private",
+		TightDescription: "agent-a private",
+	})
+	if err != nil {
+		t.Fatalf("Remember agent-a: %v", err)
+	}
+	memB, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		AgentID:          "agent-b",
+		Body:             "phase7a shared query agent b private",
+		TightDescription: "agent-b private",
+	})
+	if err != nil {
+		t.Fatalf("Remember agent-b: %v", err)
+	}
+	memUnscoped, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "phase7a shared query unscoped memory",
+		TightDescription: "unscoped memory",
+	})
+	if err != nil {
+		t.Fatalf("Remember unscoped: %v", err)
+	}
+
+	result, err := svc.Recall(ctx, "phase7a shared query", core.RecallOptions{Mode: core.RecallModeFacts, AgentID: "agent-a", Limit: 20})
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+
+	foundA, foundB, foundUnscoped := false, false, false
+	for _, item := range result.Items {
+		switch item.ID {
+		case memA.ID:
+			foundA = true
+		case memB.ID:
+			foundB = true
+		case memUnscoped.ID:
+			foundUnscoped = true
+		}
+	}
+	if !foundA {
+		t.Fatalf("expected agent-a private memory to be visible")
+	}
+	if !foundUnscoped {
+		t.Fatalf("expected unscoped memory to be visible")
+	}
+	if foundB {
+		t.Fatalf("expected agent-b private memory to be hidden")
+	}
+}
+
+func TestRecall_SharedPrivacyCrossesAgentBoundary(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	shared, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		AgentID:          "agent-b",
+		PrivacyLevel:     core.PrivacyShared,
+		Body:             "phase7a shared privacy bridge",
+		TightDescription: "shared bridge memory",
+	})
+	if err != nil {
+		t.Fatalf("Remember shared: %v", err)
+	}
+
+	result, err := svc.Recall(ctx, "phase7a shared privacy bridge", core.RecallOptions{Mode: core.RecallModeFacts, AgentID: "agent-a", Limit: 10})
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+
+	foundShared := false
+	for _, item := range result.Items {
+		if item.ID == shared.ID {
+			foundShared = true
+			break
+		}
+	}
+	if !foundShared {
+		t.Fatalf("expected shared memory from agent-b to be visible to agent-a")
+	}
+}
+
+func TestShareMemory_ChangesPrivacyLevel(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	privateMem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		AgentID:          "agent-a",
+		PrivacyLevel:     core.PrivacyPrivate,
+		Body:             "phase7b share target",
+		TightDescription: "phase7b share target",
+	})
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+
+	before := privateMem.UpdatedAt
+	sharedMem, err := svc.ShareMemory(ctx, privateMem.ID, core.PrivacyShared)
+	if err != nil {
+		t.Fatalf("ShareMemory: %v", err)
+	}
+	if sharedMem.PrivacyLevel != core.PrivacyShared {
+		t.Fatalf("expected privacy level %q, got %q", core.PrivacyShared, sharedMem.PrivacyLevel)
+	}
+	if !sharedMem.UpdatedAt.After(before) {
+		t.Fatalf("expected UpdatedAt to increase: before=%s after=%s", before, sharedMem.UpdatedAt)
+	}
+
+	stored, err := svc.GetMemory(ctx, privateMem.ID)
+	if err != nil {
+		t.Fatalf("GetMemory: %v", err)
+	}
+	if stored.PrivacyLevel != core.PrivacyShared {
+		t.Fatalf("expected stored privacy level %q, got %q", core.PrivacyShared, stored.PrivacyLevel)
+	}
+}
+
+func TestShareMemory_InvalidID(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	_, err := svc.ShareMemory(ctx, "mem_missing", core.PrivacyShared)
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestShareMemory_InvalidPrivacy(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		AgentID:          "agent-a",
+		Body:             "phase7b invalid privacy",
+		TightDescription: "phase7b invalid privacy",
+	})
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+
+	_, err = svc.ShareMemory(ctx, mem.ID, core.PrivacyLevel("internal_only"))
+	if !errors.Is(err, core.ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestShareMemory_SharedCrossesAgentBoundary(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	privateMem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		AgentID:          "agent-a",
+		PrivacyLevel:     core.PrivacyPrivate,
+		Body:             "phase7b cross-agent share",
+		TightDescription: "phase7b cross-agent share",
+	})
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+
+	beforeShare, err := svc.Recall(ctx, "phase7b cross-agent share", core.RecallOptions{Mode: core.RecallModeFacts, AgentID: "agent-b", Limit: 10})
+	if err != nil {
+		t.Fatalf("Recall before share: %v", err)
+	}
+	for _, item := range beforeShare.Items {
+		if item.ID == privateMem.ID {
+			t.Fatalf("expected private memory to be hidden before sharing")
+		}
+	}
+
+	if _, err := svc.ShareMemory(ctx, privateMem.ID, core.PrivacyShared); err != nil {
+		t.Fatalf("ShareMemory: %v", err)
+	}
+
+	afterShare, err := svc.Recall(ctx, "phase7b cross-agent share", core.RecallOptions{Mode: core.RecallModeFacts, AgentID: "agent-b", Limit: 10})
+	if err != nil {
+		t.Fatalf("Recall after share: %v", err)
+	}
+	found := false
+	for _, item := range afterShare.Items {
+		if item.ID == privateMem.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected shared memory to cross agent boundary")
+	}
+}
+
+func TestRecall_NoAgentID_ReturnsAll(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	memA, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		AgentID:          "agent-a",
+		Body:             "phase7a no-agent-id query a",
+		TightDescription: "no-agent-id a",
+	})
+	if err != nil {
+		t.Fatalf("Remember agent-a: %v", err)
+	}
+	memB, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		AgentID:          "agent-b",
+		Body:             "phase7a no-agent-id query b",
+		TightDescription: "no-agent-id b",
+	})
+	if err != nil {
+		t.Fatalf("Remember agent-b: %v", err)
+	}
+
+	result, err := svc.Recall(ctx, "phase7a no-agent-id query", core.RecallOptions{Mode: core.RecallModeFacts, Limit: 20})
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+
+	foundA, foundB := false, false
+	for _, item := range result.Items {
+		switch item.ID {
+		case memA.ID:
+			foundA = true
+		case memB.ID:
+			foundB = true
+		}
+	}
+	if !foundA || !foundB {
+		t.Fatalf("expected recall without agent_id to return both agent memories; foundA=%t foundB=%t", foundA, foundB)
 	}
 }
 
@@ -397,7 +687,7 @@ func TestExpand(t *testing.T) {
 		t.Fatalf("Remember: %v", err)
 	}
 
-	result, err := svc.Expand(ctx, mem.ID, "memory")
+	result, err := svc.Expand(ctx, mem.ID, "memory", core.ExpandOptions{})
 	if err != nil {
 		t.Fatalf("Expand: %v", err)
 	}

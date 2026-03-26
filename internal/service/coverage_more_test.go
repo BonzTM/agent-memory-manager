@@ -299,10 +299,10 @@ func TestDescribeExpandHistoryExplainAndConversionHelpers(t *testing.T) {
 		t.Fatalf("expected 3 describe results, got %d", len(described))
 	}
 
-	if _, err := svc.Expand(ctx, ep.ID, "episode"); err != nil {
+	if _, err := svc.Expand(ctx, ep.ID, "episode", core.ExpandOptions{}); err != nil {
 		t.Fatalf("expand episode failed: %v", err)
 	}
-	if _, err := svc.Expand(ctx, mem.ID, "unknown-kind"); !errors.Is(err, core.ErrInvalidInput) {
+	if _, err := svc.Expand(ctx, mem.ID, "unknown-kind", core.ExpandOptions{}); !errors.Is(err, core.ErrInvalidInput) {
 		t.Fatalf("expected invalid input for unknown expand kind, got %v", err)
 	}
 
@@ -376,6 +376,52 @@ func TestRunJobDispatchForRemainingKinds(t *testing.T) {
 				t.Fatalf("expected completed status for %s, got %+v", kind, job)
 			}
 		})
+	}
+}
+
+func TestRebuildEntityGraph_RunJob(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	a := &core.Entity{ID: "ent_job_proj_a", Type: "topic", CanonicalName: "A", CreatedAt: now, UpdatedAt: now}
+	b := &core.Entity{ID: "ent_job_proj_b", Type: "topic", CanonicalName: "B", CreatedAt: now, UpdatedAt: now}
+	for _, entity := range []*core.Entity{a, b} {
+		if err := repo.InsertEntity(ctx, entity); err != nil {
+			t.Fatalf("insert entity %s: %v", entity.ID, err)
+		}
+	}
+	if err := repo.InsertRelationship(ctx, &core.Relationship{
+		ID:               "rel_job_proj_ab",
+		FromEntityID:     a.ID,
+		ToEntityID:       b.ID,
+		RelationshipType: "uses",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatalf("insert relationship: %v", err)
+	}
+
+	job, err := svc.RunJob(ctx, "rebuild_entity_graph")
+	if err != nil {
+		t.Fatalf("run rebuild_entity_graph job: %v", err)
+	}
+	if job.Status != "completed" {
+		t.Fatalf("expected completed rebuild_entity_graph job, got %+v", job)
+	}
+	if job.Result["action"] != "rebuild_entity_graph" {
+		t.Fatalf("unexpected rebuild_entity_graph result payload: %+v", job.Result)
+	}
+
+	projected, err := repo.ListProjectedRelatedEntities(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("list projected related entities: %v", err)
+	}
+	if len(projected) != 1 {
+		t.Fatalf("expected one projected relation for A, got %+v", projected)
+	}
+	if projected[0].RelatedEntityID != b.ID || projected[0].HopDistance != 1 {
+		t.Fatalf("expected A->B hop 1 projection, got %+v", projected[0])
 	}
 }
 
@@ -521,7 +567,7 @@ func TestExpandSummaryChildAndFallbackSourceSpan(t *testing.T) {
 		t.Fatalf("insert summary child edge: %v", err)
 	}
 
-	parentExpanded, err := svc.Expand(ctx, parent.ID, "summary")
+	parentExpanded, err := svc.Expand(ctx, parent.ID, "summary", core.ExpandOptions{})
 	if err != nil {
 		t.Fatalf("expand parent summary: %v", err)
 	}
@@ -529,12 +575,106 @@ func TestExpandSummaryChildAndFallbackSourceSpan(t *testing.T) {
 		t.Fatalf("expected expanded child summary, got %+v", parentExpanded.Children)
 	}
 
-	fallbackExpanded, err := svc.Expand(ctx, fallback.ID, "summary")
+	fallbackExpanded, err := svc.Expand(ctx, fallback.ID, "summary", core.ExpandOptions{})
 	if err != nil {
 		t.Fatalf("expand fallback summary: %v", err)
 	}
 	if len(fallbackExpanded.Events) != 1 || fallbackExpanded.Events[0].ID != evt.ID {
 		t.Fatalf("expected source-span fallback events, got %+v", fallbackExpanded.Events)
+	}
+}
+
+type relevanceFeedbackFailRepo struct {
+	core.Repository
+}
+
+func (r *relevanceFeedbackFailRepo) InsertRelevanceFeedback(context.Context, string, string, string, string) error {
+	return errors.New("feedback insert failed")
+}
+
+func TestExpand_RecordsFeedback(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "feedback capture memory",
+		TightDescription: "feedback capture",
+	})
+	if err != nil {
+		t.Fatalf("remember: %v", err)
+	}
+
+	if _, err := svc.Expand(ctx, mem.ID, "memory", core.ExpandOptions{SessionID: "sess_feedback"}); err != nil {
+		t.Fatalf("expand with session id: %v", err)
+	}
+
+	entries, err := repo.ListRelevanceFeedback(ctx, mem.ID)
+	if err != nil {
+		t.Fatalf("list relevance feedback: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one relevance feedback entry, got %d", len(entries))
+	}
+	if entries[0].SessionID != "sess_feedback" || entries[0].ItemID != mem.ID || entries[0].ItemKind != "memory" || entries[0].Action != "expanded" {
+		t.Fatalf("unexpected relevance feedback entry: %+v", entries[0])
+	}
+}
+
+func TestExpand_NoSessionID_NoFeedback(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "no feedback memory",
+		TightDescription: "no feedback",
+	})
+	if err != nil {
+		t.Fatalf("remember: %v", err)
+	}
+
+	if _, err := svc.Expand(ctx, mem.ID, "memory", core.ExpandOptions{}); err != nil {
+		t.Fatalf("expand without session id: %v", err)
+	}
+
+	entries, err := repo.ListRelevanceFeedback(ctx, mem.ID)
+	if err != nil {
+		t.Fatalf("list relevance feedback: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no relevance feedback entries, got %d", len(entries))
+	}
+}
+
+func TestExpand_StillWorksOnFeedbackError(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	failingSvc := New(&relevanceFeedbackFailRepo{Repository: repo}, svc.dbPath, nil, nil)
+	mem, err := failingSvc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "feedback failure memory",
+		TightDescription: "feedback failure",
+	})
+	if err != nil {
+		t.Fatalf("remember: %v", err)
+	}
+
+	result, err := failingSvc.Expand(ctx, mem.ID, "memory", core.ExpandOptions{SessionID: "sess_fail"})
+	if err != nil {
+		t.Fatalf("expand should succeed even when feedback insert fails: %v", err)
+	}
+	if result == nil || result.Memory == nil || result.Memory.ID != mem.ID {
+		t.Fatalf("unexpected expand result: %+v", result)
+	}
+
+	entries, err := repo.ListRelevanceFeedback(ctx, mem.ID)
+	if err != nil {
+		t.Fatalf("list relevance feedback: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no relevance feedback entries after feedback failure, got %d", len(entries))
 	}
 }
 

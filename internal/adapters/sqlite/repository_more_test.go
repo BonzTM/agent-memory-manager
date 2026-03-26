@@ -559,3 +559,263 @@ func TestEmbeddingsRoundTrip(t *testing.T) {
 		t.Fatal("expected all object embeddings to be deleted")
 	}
 }
+
+func TestListRelatedEntities_OneHop(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	a := &core.Entity{ID: "ent_graph_a_1hop", Type: "topic", CanonicalName: "A", CreatedAt: now, UpdatedAt: now}
+	b := &core.Entity{ID: "ent_graph_b_1hop", Type: "topic", CanonicalName: "B", CreatedAt: now, UpdatedAt: now}
+	c := &core.Entity{ID: "ent_graph_c_1hop", Type: "topic", CanonicalName: "C", CreatedAt: now, UpdatedAt: now}
+	for _, entity := range []*core.Entity{a, b, c} {
+		if err := repo.InsertEntity(ctx, entity); err != nil {
+			t.Fatalf("insert entity %s: %v", entity.ID, err)
+		}
+	}
+	for _, rel := range []*core.Relationship{
+		{ID: "rel_graph_ab_1hop", FromEntityID: a.ID, ToEntityID: b.ID, RelationshipType: "connected", CreatedAt: now, UpdatedAt: now},
+		{ID: "rel_graph_bc_1hop", FromEntityID: b.ID, ToEntityID: c.ID, RelationshipType: "connected", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := repo.InsertRelationship(ctx, rel); err != nil {
+			t.Fatalf("insert relationship %s: %v", rel.ID, err)
+		}
+	}
+
+	related, err := repo.ListRelatedEntities(ctx, a.ID, 1)
+	if err != nil {
+		t.Fatalf("list related entities: %v", err)
+	}
+	if len(related) != 1 {
+		t.Fatalf("expected one 1-hop entity, got %+v", related)
+	}
+	if related[0].Entity.ID != b.ID || related[0].HopDistance != 1 {
+		t.Fatalf("expected only B at hop 1, got %+v", related)
+	}
+}
+
+func TestListRelatedEntities_TwoHop(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	a := &core.Entity{ID: "ent_graph_a_2hop", Type: "topic", CanonicalName: "A", CreatedAt: now, UpdatedAt: now}
+	b := &core.Entity{ID: "ent_graph_b_2hop", Type: "topic", CanonicalName: "B", CreatedAt: now, UpdatedAt: now}
+	c := &core.Entity{ID: "ent_graph_c_2hop", Type: "topic", CanonicalName: "C", CreatedAt: now, UpdatedAt: now}
+	for _, entity := range []*core.Entity{a, b, c} {
+		if err := repo.InsertEntity(ctx, entity); err != nil {
+			t.Fatalf("insert entity %s: %v", entity.ID, err)
+		}
+	}
+	for _, rel := range []*core.Relationship{
+		{ID: "rel_graph_ab_2hop", FromEntityID: a.ID, ToEntityID: b.ID, RelationshipType: "connected", CreatedAt: now, UpdatedAt: now},
+		{ID: "rel_graph_bc_2hop", FromEntityID: b.ID, ToEntityID: c.ID, RelationshipType: "connected", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := repo.InsertRelationship(ctx, rel); err != nil {
+			t.Fatalf("insert relationship %s: %v", rel.ID, err)
+		}
+	}
+
+	related, err := repo.ListRelatedEntities(ctx, a.ID, 2)
+	if err != nil {
+		t.Fatalf("list related entities: %v", err)
+	}
+	if len(related) != 2 {
+		t.Fatalf("expected two related entities at depth 2, got %+v", related)
+	}
+	got := map[string]int{}
+	for _, rel := range related {
+		got[rel.Entity.ID] = rel.HopDistance
+	}
+	if got[b.ID] != 1 || got[c.ID] != 2 {
+		t.Fatalf("expected B hop=1 and C hop=2, got %+v", got)
+	}
+}
+
+func TestListRelatedEntities_NoCycles(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	a := &core.Entity{ID: "ent_graph_a_cycle", Type: "topic", CanonicalName: "A", CreatedAt: now, UpdatedAt: now}
+	b := &core.Entity{ID: "ent_graph_b_cycle", Type: "topic", CanonicalName: "B", CreatedAt: now, UpdatedAt: now}
+	for _, entity := range []*core.Entity{a, b} {
+		if err := repo.InsertEntity(ctx, entity); err != nil {
+			t.Fatalf("insert entity %s: %v", entity.ID, err)
+		}
+	}
+	for _, rel := range []*core.Relationship{
+		{ID: "rel_graph_ab_cycle", FromEntityID: a.ID, ToEntityID: b.ID, RelationshipType: "connected", CreatedAt: now, UpdatedAt: now},
+		{ID: "rel_graph_ba_cycle", FromEntityID: b.ID, ToEntityID: a.ID, RelationshipType: "connected", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := repo.InsertRelationship(ctx, rel); err != nil {
+			t.Fatalf("insert relationship %s: %v", rel.ID, err)
+		}
+	}
+
+	related, err := repo.ListRelatedEntities(ctx, a.ID, 3)
+	if err != nil {
+		t.Fatalf("list related entities: %v", err)
+	}
+	if len(related) != 1 {
+		t.Fatalf("expected cycle traversal to return only B once, got %+v", related)
+	}
+	if related[0].Entity.ID != b.ID {
+		t.Fatalf("expected B in cycle traversal, got %+v", related)
+	}
+}
+
+func TestListRelatedEntities_MaxDepthCapped(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	a := &core.Entity{ID: "ent_graph_a_cap", Type: "topic", CanonicalName: "A", CreatedAt: now, UpdatedAt: now}
+	b := &core.Entity{ID: "ent_graph_b_cap", Type: "topic", CanonicalName: "B", CreatedAt: now, UpdatedAt: now}
+	c := &core.Entity{ID: "ent_graph_c_cap", Type: "topic", CanonicalName: "C", CreatedAt: now, UpdatedAt: now}
+	d := &core.Entity{ID: "ent_graph_d_cap", Type: "topic", CanonicalName: "D", CreatedAt: now, UpdatedAt: now}
+	e := &core.Entity{ID: "ent_graph_e_cap", Type: "topic", CanonicalName: "E", CreatedAt: now, UpdatedAt: now}
+	for _, entity := range []*core.Entity{a, b, c, d, e} {
+		if err := repo.InsertEntity(ctx, entity); err != nil {
+			t.Fatalf("insert entity %s: %v", entity.ID, err)
+		}
+	}
+	for _, rel := range []*core.Relationship{
+		{ID: "rel_graph_ab_cap", FromEntityID: a.ID, ToEntityID: b.ID, RelationshipType: "connected", CreatedAt: now, UpdatedAt: now},
+		{ID: "rel_graph_bc_cap", FromEntityID: b.ID, ToEntityID: c.ID, RelationshipType: "connected", CreatedAt: now, UpdatedAt: now},
+		{ID: "rel_graph_cd_cap", FromEntityID: c.ID, ToEntityID: d.ID, RelationshipType: "connected", CreatedAt: now, UpdatedAt: now},
+		{ID: "rel_graph_de_cap", FromEntityID: d.ID, ToEntityID: e.ID, RelationshipType: "connected", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := repo.InsertRelationship(ctx, rel); err != nil {
+			t.Fatalf("insert relationship %s: %v", rel.ID, err)
+		}
+	}
+
+	related, err := repo.ListRelatedEntities(ctx, a.ID, 10)
+	if err != nil {
+		t.Fatalf("list related entities: %v", err)
+	}
+	if len(related) != 3 {
+		t.Fatalf("expected max-depth cap to return only hops 1..3, got %+v", related)
+	}
+	ids := map[string]bool{}
+	for _, rel := range related {
+		ids[rel.Entity.ID] = true
+	}
+	if !ids[b.ID] || !ids[c.ID] || !ids[d.ID] || ids[e.ID] {
+		t.Fatalf("expected B/C/D only from capped depth traversal, got %+v", ids)
+	}
+}
+
+func TestRebuildEntityGraph_Projection(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	a := &core.Entity{ID: "ent_proj_a", Type: "topic", CanonicalName: "A", CreatedAt: now, UpdatedAt: now}
+	b := &core.Entity{ID: "ent_proj_b", Type: "topic", CanonicalName: "B", CreatedAt: now, UpdatedAt: now}
+	c := &core.Entity{ID: "ent_proj_c", Type: "topic", CanonicalName: "C", CreatedAt: now, UpdatedAt: now}
+	for _, entity := range []*core.Entity{a, b, c} {
+		if err := repo.InsertEntity(ctx, entity); err != nil {
+			t.Fatalf("insert entity %s: %v", entity.ID, err)
+		}
+	}
+	for _, rel := range []*core.Relationship{
+		{ID: "rel_proj_ab", FromEntityID: a.ID, ToEntityID: b.ID, RelationshipType: "uses", CreatedAt: now, UpdatedAt: now},
+		{ID: "rel_proj_bc", FromEntityID: b.ID, ToEntityID: c.ID, RelationshipType: "depends-on", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := repo.InsertRelationship(ctx, rel); err != nil {
+			t.Fatalf("insert relationship %s: %v", rel.ID, err)
+		}
+	}
+
+	if err := repo.RebuildEntityGraphProjection(ctx); err != nil {
+		t.Fatalf("rebuild projection: %v", err)
+	}
+
+	projected, err := repo.ListProjectedRelatedEntities(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("list projected related entities: %v", err)
+	}
+	if len(projected) != 2 {
+		t.Fatalf("expected 2 projected entities from A, got %+v", projected)
+	}
+
+	byID := make(map[string]core.ProjectedRelation, len(projected))
+	for _, rel := range projected {
+		byID[rel.RelatedEntityID] = rel
+	}
+
+	if got := byID[b.ID]; got.HopDistance != 1 || got.Score != 1.0 {
+		t.Fatalf("expected B hop=1 score=1.0, got %+v", got)
+	}
+	if got := byID[c.ID]; got.HopDistance != 2 || got.Score != 0.5 {
+		t.Fatalf("expected C hop=2 score=0.5, got %+v", got)
+	}
+}
+
+func TestGraphProjection_Rebuildable(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	a := &core.Entity{ID: "ent_rebuild_a", Type: "topic", CanonicalName: "A", CreatedAt: now, UpdatedAt: now}
+	b := &core.Entity{ID: "ent_rebuild_b", Type: "topic", CanonicalName: "B", CreatedAt: now, UpdatedAt: now}
+	c := &core.Entity{ID: "ent_rebuild_c", Type: "topic", CanonicalName: "C", CreatedAt: now, UpdatedAt: now}
+	for _, entity := range []*core.Entity{a, b, c} {
+		if err := repo.InsertEntity(ctx, entity); err != nil {
+			t.Fatalf("insert entity %s: %v", entity.ID, err)
+		}
+	}
+	for _, rel := range []*core.Relationship{
+		{ID: "rel_rebuild_ab", FromEntityID: a.ID, ToEntityID: b.ID, RelationshipType: "connected", CreatedAt: now, UpdatedAt: now},
+		{ID: "rel_rebuild_bc", FromEntityID: b.ID, ToEntityID: c.ID, RelationshipType: "connected", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := repo.InsertRelationship(ctx, rel); err != nil {
+			t.Fatalf("insert relationship %s: %v", rel.ID, err)
+		}
+	}
+
+	if err := repo.RebuildEntityGraphProjection(ctx); err != nil {
+		t.Fatalf("initial rebuild projection: %v", err)
+	}
+
+	initial, err := repo.ListProjectedRelatedEntities(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("list initial projected entities: %v", err)
+	}
+	if len(initial) == 0 {
+		t.Fatal("expected non-empty initial projection")
+	}
+
+	initialByID := make(map[string]core.ProjectedRelation, len(initial))
+	for _, rel := range initial {
+		initialByID[rel.RelatedEntityID] = rel
+	}
+
+	if _, err := repo.ExecContext(ctx, `DELETE FROM entity_graph_projection`); err != nil {
+		t.Fatalf("delete projection rows: %v", err)
+	}
+
+	if err := repo.RebuildEntityGraphProjection(ctx); err != nil {
+		t.Fatalf("second rebuild projection: %v", err)
+	}
+
+	rebuilt, err := repo.ListProjectedRelatedEntities(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("list rebuilt projected entities: %v", err)
+	}
+	if len(rebuilt) != len(initial) {
+		t.Fatalf("expected rebuilt projection count %d, got %d", len(initial), len(rebuilt))
+	}
+
+	for _, rel := range rebuilt {
+		want, ok := initialByID[rel.RelatedEntityID]
+		if !ok {
+			t.Fatalf("unexpected related entity after rebuild: %+v", rel)
+		}
+		if want.HopDistance != rel.HopDistance || want.Score != rel.Score || want.RelationshipPath != rel.RelationshipPath {
+			t.Fatalf("projection mismatch after rebuild for %s: want=%+v got=%+v", rel.RelatedEntityID, want, rel)
+		}
+	}
+}

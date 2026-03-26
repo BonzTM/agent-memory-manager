@@ -58,7 +58,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 			mems := eventToMemories[evt.ID]
 			allLLM := len(mems) > 0
 			for _, m := range mems {
-				if m.Metadata == nil || m.Metadata["extraction_method"] != "llm" {
+				if !hasLLMProcessingStep(m, MetaExtractionMethod) {
 					allLLM = false
 					break
 				}
@@ -150,12 +150,13 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 					duplicate.Body = candidateMemory.Body
 					duplicate.TightDescription = candidateMemory.TightDescription
 				}
-				if duplicate.Metadata == nil {
-					duplicate.Metadata = make(map[string]string)
-				}
 				method := s.extractionMethod()
-				if duplicate.Metadata["extraction_method"] == "" || method == "llm" {
-					duplicate.Metadata["extraction_method"] = method
+				markUpgraded := shouldMarkAsUpgraded(duplicate, method)
+				if getProcessingMeta(duplicate, MetaExtractionMethod) == "" || method == MethodLLM {
+					markExtracted(duplicate, method, s.extractionModelName())
+					if markUpgraded {
+						setProcessingMeta(duplicate, MetaExtractionQuality, QualityUpgraded)
+					}
 				}
 				duplicate.UpdatedAt = now
 				if err := s.repo.UpdateMemory(ctx, duplicate); err != nil {
@@ -184,6 +185,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 			}
 
 			now := time.Now().UTC()
+			method := s.extractionMethod()
 			mem := &core.Memory{
 				ID:               generateID("mem_"),
 				Type:             candidate.Type,
@@ -197,9 +199,12 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 				PrivacyLevel:     core.PrivacyPrivate,
 				Status:           core.MemoryStatusActive,
 				SourceEventIDs:   sourceEventIDs,
-				Metadata:         map[string]string{"extraction_method": s.extractionMethod()},
 				CreatedAt:        now,
 				UpdatedAt:        now,
+			}
+			markExtracted(mem, method, s.extractionModelName())
+			if shouldMarkInsertedAsUpgraded(eventToMemories, sourceEventIDs, method) {
+				setProcessingMeta(mem, MetaExtractionQuality, QualityUpgraded)
 			}
 
 			if err := s.repo.InsertMemory(ctx, mem); err != nil {
@@ -220,7 +225,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 					if old.ID == mem.ID {
 						continue
 					}
-					if old.Metadata != nil && old.Metadata["extraction_method"] == "llm" && !reprocessAll {
+					if hasLLMProcessingStep(old, MetaExtractionMethod) && !reprocessAll {
 						continue
 					}
 					if !memoriesLikelyDuplicate(*old, *mem) {
@@ -245,9 +250,41 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 
 func (s *AMMService) extractionMethod() string {
 	if _, ok := s.summarizer.(*LLMSummarizer); ok {
-		return "llm"
+		return MethodLLM
 	}
-	return "heuristic"
+	return MethodHeuristic
+}
+
+func (s *AMMService) extractionModelName() string {
+	llm, ok := s.summarizer.(*LLMSummarizer)
+	if !ok || llm == nil {
+		return ""
+	}
+	return llm.model
+}
+
+func shouldMarkAsUpgraded(mem *core.Memory, method string) bool {
+	if method != MethodLLM || mem == nil {
+		return false
+	}
+	return needsLLMUpgrade(mem, MetaExtractionMethod) || getProcessingMeta(mem, MetaExtractionQuality) == QualityProvisional
+}
+
+func shouldMarkInsertedAsUpgraded(eventToMemories map[string][]*core.Memory, sourceEventIDs []string, method string) bool {
+	if method != MethodLLM {
+		return false
+	}
+	for _, eid := range sourceEventIDs {
+		for _, mem := range eventToMemories[eid] {
+			if mem == nil {
+				continue
+			}
+			if needsLLMUpgrade(mem, MetaExtractionMethod) || getProcessingMeta(mem, MetaExtractionQuality) == QualityProvisional {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func resolveCandidateEvents(batch []core.Event, sourceEventNums []int) ([]core.Event, bool) {

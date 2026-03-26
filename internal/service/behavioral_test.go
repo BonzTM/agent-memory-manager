@@ -75,7 +75,11 @@ func testServiceAndRepoWithEmbeddingProvider(t *testing.T, provider core.Embeddi
 }
 
 type reflectTestSummarizer struct {
-	extract func(string) ([]core.MemoryCandidate, error)
+	extract         func(string) ([]core.MemoryCandidate, error)
+	extractBatch    func([]string) ([]core.MemoryCandidate, error)
+	individualCalls *int
+	batchCalls      *int
+	batchSizes      *[]int
 }
 
 type staticEmbeddingProvider struct {
@@ -118,6 +122,13 @@ type consolidateTestSummarizer struct {
 	summarize func(content string, maxLen int) (string, error)
 }
 
+type consolidateTestIntelligence struct {
+	summarize    func(content string, maxLen int) (string, error)
+	consolidate  func(events []core.EventContent, existingMemories []core.MemorySummary) (*core.NarrativeResult, error)
+	triage       func(events []core.EventContent) (map[int]core.TriageDecision, error)
+	callCountPtr *int32
+}
+
 func (s consolidateTestSummarizer) Summarize(_ context.Context, content string, maxLen int) (string, error) {
 	if s.summarize == nil {
 		return content, nil
@@ -133,19 +144,96 @@ func (consolidateTestSummarizer) ExtractMemoryCandidateBatch(context.Context, []
 	return nil, nil
 }
 
+func (m consolidateTestIntelligence) Summarize(_ context.Context, content string, maxLen int) (string, error) {
+	if m.summarize != nil {
+		return m.summarize(content, maxLen)
+	}
+	return content, nil
+}
+
+func (consolidateTestIntelligence) ExtractMemoryCandidate(context.Context, string) ([]core.MemoryCandidate, error) {
+	return nil, nil
+}
+
+func (consolidateTestIntelligence) ExtractMemoryCandidateBatch(context.Context, []string) ([]core.MemoryCandidate, error) {
+	return nil, nil
+}
+
+func (consolidateTestIntelligence) AnalyzeEvents(context.Context, []core.EventContent) (*core.AnalysisResult, error) {
+	return &core.AnalysisResult{}, nil
+}
+
+func (consolidateTestIntelligence) ReviewMemories(context.Context, []core.MemoryReview) (*core.ReviewResult, error) {
+	return &core.ReviewResult{}, nil
+}
+
+func (m consolidateTestIntelligence) TriageEvents(_ context.Context, events []core.EventContent) (map[int]core.TriageDecision, error) {
+	if m.triage != nil {
+		return m.triage(events)
+	}
+	decisions := make(map[int]core.TriageDecision, len(events))
+	for i, evt := range events {
+		index := evt.Index
+		if index <= 0 {
+			index = i + 1
+		}
+		decisions[index] = core.TriageReflect
+	}
+	return decisions, nil
+}
+
+func (m consolidateTestIntelligence) ConsolidateNarrative(_ context.Context, events []core.EventContent, existingMemories []core.MemorySummary) (*core.NarrativeResult, error) {
+	if m.callCountPtr != nil {
+		atomic.AddInt32(m.callCountPtr, 1)
+	}
+	if m.consolidate != nil {
+		return m.consolidate(events, existingMemories)
+	}
+	return &core.NarrativeResult{}, nil
+}
+
 func (s reflectTestSummarizer) Summarize(context.Context, string, int) (string, error) {
 	return "", nil
 }
 
 func (s reflectTestSummarizer) ExtractMemoryCandidate(_ context.Context, content string) ([]core.MemoryCandidate, error) {
+	if s.individualCalls != nil {
+		(*s.individualCalls)++
+	}
 	if s.extract == nil {
 		return nil, nil
 	}
 	return s.extract(content)
 }
 
-func (s reflectTestSummarizer) ExtractMemoryCandidateBatch(context.Context, []string) ([]core.MemoryCandidate, error) {
-	return nil, nil
+func (s reflectTestSummarizer) ExtractMemoryCandidateBatch(_ context.Context, contents []string) ([]core.MemoryCandidate, error) {
+	if s.batchCalls != nil {
+		(*s.batchCalls)++
+	}
+	if s.batchSizes != nil {
+		*s.batchSizes = append(*s.batchSizes, len(contents))
+	}
+	if s.extractBatch != nil {
+		return s.extractBatch(contents)
+	}
+
+	all := make([]core.MemoryCandidate, 0, len(contents))
+	for i, content := range contents {
+		if s.extract == nil {
+			continue
+		}
+		candidates, err := s.extract(content)
+		if err != nil {
+			return nil, err
+		}
+		for j := range candidates {
+			if len(candidates[j].SourceEventNums) == 0 {
+				candidates[j].SourceEventNums = []int{i + 1}
+			}
+		}
+		all = append(all, candidates...)
+	}
+	return all, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -438,6 +526,94 @@ func TestReflect_CreatesEntities(t *testing.T) {
 	}
 }
 
+func TestReflect_SetsProvisionalWhenHeuristic(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	evt, err := svc.IngestEvent(ctx, &core.Event{
+		Kind:         "message_user",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "I prefer concise commit messages",
+		OccurredAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created < 1 {
+		t.Fatalf("expected at least one reflected memory, got %d", created)
+	}
+
+	mems, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusActive, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mem := range mems {
+		if len(mem.SourceEventIDs) == 1 && mem.SourceEventIDs[0] == evt.ID {
+			if mem.Metadata["extraction_quality"] != "provisional" {
+				t.Fatalf("expected extraction_quality=provisional, got %q", mem.Metadata["extraction_quality"])
+			}
+			return
+		}
+	}
+	t.Fatalf("expected reflected memory linked to event %s", evt.ID)
+}
+
+func TestReflect_SetsVerifiedWhenLLM(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+			http.Error(w, "unexpected request", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(mockChatResponse(`[{"type":"preference","subject":"style","body":"Prefers concise commit messages","tight_description":"Prefers concise commit messages","confidence":0.92}]`)))
+	}))
+	t.Cleanup(server.Close)
+
+	llm := NewLLMSummarizer(server.URL, "test-key", "test-model")
+	svc, _ := testServiceAndRepoWithSummarizer(t, llm)
+
+	evt, err := svc.IngestEvent(ctx, &core.Event{
+		Kind:         "message_user",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "I prefer concise commit messages",
+		OccurredAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 reflected memory, got %d", created)
+	}
+
+	mems, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mem := range mems {
+		if len(mem.SourceEventIDs) == 1 && mem.SourceEventIDs[0] == evt.ID {
+			if mem.Metadata["extraction_quality"] != "verified" {
+				t.Fatalf("expected extraction_quality=verified, got %q", mem.Metadata["extraction_quality"])
+			}
+			return
+		}
+	}
+	t.Fatalf("expected reflected memory linked to event %s", evt.ID)
+}
+
 func TestReflect_PaginatesBacklogBeyond100(t *testing.T) {
 	summarizer := reflectTestSummarizer{extract: func(content string) ([]core.MemoryCandidate, error) {
 		return []core.MemoryCandidate{{
@@ -702,6 +878,220 @@ func TestReflect_SupersedesConflictingExistingMemory(t *testing.T) {
 	}
 	if !postgresFound {
 		t.Fatal("expected reflected postgres memory to be inserted")
+	}
+}
+
+func TestReflect_UsesBatchExtraction(t *testing.T) {
+	batchCalls := 0
+	individualCalls := 0
+	summarizer := reflectTestSummarizer{
+		extract: func(content string) ([]core.MemoryCandidate, error) {
+			return []core.MemoryCandidate{{
+				Type:             core.MemoryTypeFact,
+				Subject:          "batch",
+				Body:             content,
+				TightDescription: content,
+				Confidence:       0.9,
+			}}, nil
+		},
+		batchCalls:      &batchCalls,
+		individualCalls: &individualCalls,
+	}
+
+	svc, repo := testServiceAndRepoWithSummarizer(t, summarizer)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	for i := 0; i < 5; i++ {
+		evt := &core.Event{
+			ID:           fmt.Sprintf("evt_reflect_batch_%d", i),
+			Kind:         "message_user",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("batched reflect event %d", i),
+			OccurredAt:   now,
+			IngestedAt:   now,
+		}
+		if err := repo.InsertEvent(ctx, evt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 5 {
+		t.Fatalf("expected 5 memories created, got %d", created)
+	}
+	if batchCalls != 1 {
+		t.Fatalf("expected exactly 1 batch extraction call, got %d", batchCalls)
+	}
+	if individualCalls != 0 {
+		t.Fatalf("expected 0 per-event extraction calls, got %d", individualCalls)
+	}
+}
+
+func TestReflect_BatchSourceEventTracking(t *testing.T) {
+	summarizer := reflectTestSummarizer{
+		extractBatch: func(_ []string) ([]core.MemoryCandidate, error) {
+			return []core.MemoryCandidate{
+				{
+					Type:             core.MemoryTypeFact,
+					Subject:          "combined",
+					Body:             "combined source memory",
+					TightDescription: "combined source memory",
+					Confidence:       0.9,
+					SourceEventNums:  []int{1, 3},
+				},
+				{
+					Type:             core.MemoryTypeFact,
+					Subject:          "single",
+					Body:             "single source memory",
+					TightDescription: "single source memory",
+					Confidence:       0.9,
+					SourceEventNums:  []int{2},
+				},
+			}, nil
+		},
+	}
+	svc, repo := testServiceAndRepoWithSummarizer(t, summarizer)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	eventIDs := []string{"evt_batch_src_1", "evt_batch_src_2", "evt_batch_src_3"}
+	for i, id := range eventIDs {
+		evt := &core.Event{
+			ID:           id,
+			Kind:         "message_user",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("source event %d", i+1),
+			OccurredAt:   now,
+			IngestedAt:   now,
+		}
+		if err := repo.InsertEvent(ctx, evt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 2 {
+		t.Fatalf("expected 2 created memories, got %d", created)
+	}
+
+	mems, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Type: core.MemoryTypeFact, Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mems) != 2 {
+		t.Fatalf("expected 2 active memories, got %d", len(mems))
+	}
+
+	byBody := make(map[string]core.Memory, len(mems))
+	for _, mem := range mems {
+		byBody[mem.Body] = mem
+	}
+
+	combined := byBody["combined source memory"]
+	if len(combined.SourceEventIDs) != 2 || combined.SourceEventIDs[0] != eventIDs[0] || combined.SourceEventIDs[1] != eventIDs[2] {
+		t.Fatalf("expected combined memory source_event_ids [%s %s], got %v", eventIDs[0], eventIDs[2], combined.SourceEventIDs)
+	}
+
+	single := byBody["single source memory"]
+	if len(single.SourceEventIDs) != 1 || single.SourceEventIDs[0] != eventIDs[1] {
+		t.Fatalf("expected single memory source_event_ids [%s], got %v", eventIDs[1], single.SourceEventIDs)
+	}
+}
+
+func TestReflect_SingleEvent_StillBatched(t *testing.T) {
+	batchCalls := 0
+	individualCalls := 0
+	summarizer := reflectTestSummarizer{
+		extract: func(content string) ([]core.MemoryCandidate, error) {
+			return []core.MemoryCandidate{{
+				Type:             core.MemoryTypeFact,
+				Body:             content,
+				TightDescription: content,
+				Confidence:       0.9,
+			}}, nil
+		},
+		batchCalls:      &batchCalls,
+		individualCalls: &individualCalls,
+	}
+
+	svc, repo := testServiceAndRepoWithSummarizer(t, summarizer)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	if err := repo.InsertEvent(ctx, &core.Event{ID: "evt_reflect_single_batch", Kind: "message_user", SourceSystem: "test", PrivacyLevel: core.PrivacyPrivate, Content: "single event", OccurredAt: now, IngestedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 created memory, got %d", created)
+	}
+	if batchCalls != 1 {
+		t.Fatalf("expected 1 batch extraction call, got %d", batchCalls)
+	}
+	if individualCalls != 0 {
+		t.Fatalf("expected 0 per-event extraction calls, got %d", individualCalls)
+	}
+}
+
+func TestReflect_ConfigurableBatchSize(t *testing.T) {
+	batchSizes := []int{}
+	summarizer := reflectTestSummarizer{
+		extract: func(content string) ([]core.MemoryCandidate, error) {
+			return []core.MemoryCandidate{{
+				Type:             core.MemoryTypeFact,
+				Body:             content,
+				TightDescription: content,
+				Confidence:       0.9,
+			}}, nil
+		},
+		batchSizes: &batchSizes,
+	}
+
+	svc, repo := testServiceAndRepoWithSummarizer(t, summarizer)
+	svc.SetReflectLLMBatchSize(3)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	for i := 0; i < 7; i++ {
+		evt := &core.Event{
+			ID:           fmt.Sprintf("evt_reflect_cfg_batch_%d", i),
+			Kind:         "message_user",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("configurable reflect event %d", i),
+			OccurredAt:   now,
+			IngestedAt:   now,
+		}
+		if err := repo.InsertEvent(ctx, evt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 7 {
+		t.Fatalf("expected 7 created memories, got %d", created)
+	}
+	if len(batchSizes) != 3 {
+		t.Fatalf("expected 3 batch calls (3+3+1), got %d calls: %v", len(batchSizes), batchSizes)
+	}
+	if batchSizes[0] != 3 || batchSizes[1] != 3 || batchSizes[2] != 1 {
+		t.Fatalf("expected batch sizes [3 3 1], got %v", batchSizes)
 	}
 }
 
@@ -978,6 +1368,478 @@ func TestConsolidateSessions_GeneratesTightDescription(t *testing.T) {
 	}
 	if strings.HasPrefix(summaries[0].TightDescription, "Session summary:") {
 		t.Fatalf("expected non-fallback tight description, got %q", summaries[0].TightDescription)
+	}
+}
+
+func TestConsolidateSessions_CreatesEpisode(t *testing.T) {
+	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{})
+	ctx := context.Background()
+
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		consolidate: func(events []core.EventContent, _ []core.MemorySummary) (*core.NarrativeResult, error) {
+			if len(events) != 3 {
+				t.Fatalf("expected 3 events, got %d", len(events))
+			}
+			return &core.NarrativeResult{
+				Summary:   "session narrative summary",
+				TightDesc: "session narrative tight",
+				Episode: &core.EpisodeCandidate{
+					Title:        "Narrative Episode",
+					Body:         "Episode body from narrative",
+					Participants: []string{"agent", "user"},
+					Outcomes:     []string{"implemented phase 5A"},
+					Unresolved:   []string{"wire into phase 5B"},
+				},
+			}, nil
+		},
+	})
+
+	sessID := "sess_consolidate_episode"
+	for i := 0; i < 3; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			SessionID:    sessID,
+			ProjectID:    "proj_episode",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("episode event %d", i),
+			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.ConsolidateSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 session summary, got %d", created)
+	}
+
+	episodes, err := svc.repo.ListEpisodes(ctx, core.ListEpisodesOptions{Scope: core.ScopeProject, ProjectID: "proj_episode", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(episodes) != 1 {
+		t.Fatalf("expected 1 episode, got %d", len(episodes))
+	}
+	ep := episodes[0]
+	if ep.SessionID != sessID {
+		t.Fatalf("expected episode session_id %q, got %q", sessID, ep.SessionID)
+	}
+	if ep.Title != "Narrative Episode" || ep.Summary != "Episode body from narrative" {
+		t.Fatalf("unexpected episode values: %+v", ep)
+	}
+}
+
+func TestConsolidateSessions_AutoExtractsDecisions(t *testing.T) {
+	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{})
+	ctx := context.Background()
+
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		consolidate: func(_ []core.EventContent, _ []core.MemorySummary) (*core.NarrativeResult, error) {
+			return &core.NarrativeResult{
+				Summary:      "decision summary",
+				TightDesc:    "decision tight",
+				KeyDecisions: []string{"Adopt IntelligenceProvider for session consolidation"},
+			}, nil
+		},
+	})
+
+	sessID := "sess_consolidate_decisions"
+	var sourceEventID string
+	for i := 0; i < 2; i++ {
+		evt, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			SessionID:    sessID,
+			ProjectID:    "proj_decisions",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("decision event %d", i),
+			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			sourceEventID = evt.ID
+		}
+	}
+
+	seeded, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeProject,
+		ProjectID:        "proj_decisions",
+		Body:             "seed memory linked to source event",
+		TightDescription: "seed linked memory",
+		SourceEventIDs:   []string{sourceEventID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.ConsolidateSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	mems, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{Type: core.MemoryTypeDecision, Scope: core.ScopeProject, ProjectID: "proj_decisions", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 decision memory, got %d", len(mems))
+	}
+	if mems[0].Body != "Adopt IntelligenceProvider for session consolidation" {
+		t.Fatalf("unexpected decision body: %q", mems[0].Body)
+	}
+	if mems[0].Metadata[MetaExtractionQuality] != QualityProvisional {
+		t.Fatalf("expected extraction quality provisional, got %q", mems[0].Metadata[MetaExtractionQuality])
+	}
+
+	seededAfter, err := svc.repo.GetMemory(ctx, seeded.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seededAfter.Metadata[MetaNarrativeIncluded] != "true" {
+		t.Fatalf("expected seeded memory narrative_included=true, got %q", seededAfter.Metadata[MetaNarrativeIncluded])
+	}
+}
+
+func TestConsolidateSessions_AutoExtractsOpenLoops(t *testing.T) {
+	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{})
+	ctx := context.Background()
+
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		consolidate: func(_ []core.EventContent, _ []core.MemorySummary) (*core.NarrativeResult, error) {
+			return &core.NarrativeResult{
+				Summary:    "open loop summary",
+				TightDesc:  "open loop tight",
+				Unresolved: []string{"How should we route model-specific narrative prompts?"},
+			}, nil
+		},
+	})
+
+	sessID := "sess_consolidate_open_loops"
+	for i := 0; i < 2; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			SessionID:    sessID,
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("open loop event %d", i),
+			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := svc.ConsolidateSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	mems, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{Type: core.MemoryTypeOpenLoop, Scope: core.ScopeGlobal, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 open_loop memory, got %d", len(mems))
+	}
+	if mems[0].Body != "How should we route model-specific narrative prompts?" {
+		t.Fatalf("unexpected open_loop body: %q", mems[0].Body)
+	}
+	if mems[0].Metadata[MetaExtractionQuality] != QualityProvisional {
+		t.Fatalf("expected extraction quality provisional, got %q", mems[0].Metadata[MetaExtractionQuality])
+	}
+}
+
+func TestConsolidateSessions_FallsBackOnError(t *testing.T) {
+	var summarizeCalls int32
+	var consolidateCalls int32
+	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: func(content string, maxLen int) (string, error) {
+		atomic.AddInt32(&summarizeCalls, 1)
+		if maxLen == sessionBodyMaxChars {
+			return "fallback summary body", nil
+		}
+		if maxLen == 100 {
+			return "fallback tight", nil
+		}
+		return content, nil
+	}})
+	ctx := context.Background()
+
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		callCountPtr: &consolidateCalls,
+		consolidate: func(_ []core.EventContent, _ []core.MemorySummary) (*core.NarrativeResult, error) {
+			return nil, fmt.Errorf("provider unavailable")
+		},
+	})
+
+	sessID := "sess_consolidate_fallback"
+	for i := 0; i < 2; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			SessionID:    sessID,
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("fallback event %d", i),
+			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := svc.ConsolidateSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt32(&consolidateCalls) != 1 {
+		t.Fatalf("expected 1 consolidate narrative call, got %d", atomic.LoadInt32(&consolidateCalls))
+	}
+	if atomic.LoadInt32(&summarizeCalls) != 2 {
+		t.Fatalf("expected fallback summarize path (2 calls), got %d", atomic.LoadInt32(&summarizeCalls))
+	}
+
+	summaries, err := svc.repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "session", SessionID: sessID, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 session summary, got %d", len(summaries))
+	}
+	if summaries[0].Body != "fallback summary body" || summaries[0].TightDescription != "fallback tight" {
+		t.Fatalf("expected fallback summary outputs, got body=%q tight=%q", summaries[0].Body, summaries[0].TightDescription)
+	}
+}
+
+func TestConsolidateSessions_RunJob(t *testing.T) {
+	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{})
+	ctx := context.Background()
+
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		consolidate: func(_ []core.EventContent, _ []core.MemorySummary) (*core.NarrativeResult, error) {
+			return &core.NarrativeResult{
+				Summary:      "job consolidate summary",
+				TightDesc:    "job consolidate tight",
+				KeyDecisions: []string{"Use consolidate_sessions job pathway"},
+			}, nil
+		},
+	})
+
+	for i := 0; i < 3; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			SessionID:    "sess_consolidate_job",
+			ProjectID:    "proj_job",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("job consolidate event %d", i),
+			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	job, err := svc.RunJob(ctx, "consolidate_sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != "completed" {
+		t.Fatalf("expected completed job, got %+v", job)
+	}
+	if job.Result["action"] != "consolidate_sessions" {
+		t.Fatalf("unexpected job result: %+v", job.Result)
+	}
+
+	mems, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{Type: core.MemoryTypeDecision, Scope: core.ScopeProject, ProjectID: "proj_job", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected one decision memory from run job path, got %d", len(mems))
+	}
+}
+
+func TestBuildTopicSummaries_GroupsByEntity(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	for i, body := range []string{
+		"Alice and Bob mapped SQLite migration risks for AMM rollout",
+		"Bob asked Alice to verify SQLite WAL settings for AMM",
+		"AMM reliability review: Alice and Bob aligned on SQLite recovery",
+	} {
+		summary := &core.Summary{
+			ID:               fmt.Sprintf("sum_topic_group_%d", i),
+			Kind:             "leaf",
+			Scope:            core.ScopeGlobal,
+			Body:             body,
+			TightDescription: fmt.Sprintf("leaf %d", i),
+			PrivacyLevel:     core.PrivacyPrivate,
+			CreatedAt:        time.Now().UTC().Add(time.Duration(i) * time.Second),
+			UpdatedAt:        time.Now().UTC().Add(time.Duration(i) * time.Second),
+		}
+		if err := repo.InsertSummary(ctx, summary); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.BuildTopicSummaries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 topic summary created, got %d", created)
+	}
+
+	topics, err := repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "topic", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topics) != 1 {
+		t.Fatalf("expected 1 topic summary, got %d", len(topics))
+	}
+	if len(topics[0].SourceSpan.SummaryIDs) != 3 {
+		t.Fatalf("expected 3 child summary IDs in source span, got %d", len(topics[0].SourceSpan.SummaryIDs))
+	}
+
+	edges, err := repo.GetSummaryChildren(ctx, topics[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 3 {
+		t.Fatalf("expected 3 topic->leaf edges, got %d", len(edges))
+	}
+}
+
+func TestBuildTopicSummaries_Idempotent(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	for i, body := range []string{
+		"Alice and Bob reviewed SQLite constraints for AMM",
+		"Bob and Alice documented SQLite indexing for AMM",
+		"AMM check-in: Alice Bob SQLite backup discussion",
+	} {
+		summary := &core.Summary{
+			ID:               fmt.Sprintf("sum_topic_idempotent_%d", i),
+			Kind:             "leaf",
+			Scope:            core.ScopeGlobal,
+			Body:             body,
+			TightDescription: fmt.Sprintf("leaf idempotent %d", i),
+			PrivacyLevel:     core.PrivacyPrivate,
+			CreatedAt:        time.Now().UTC().Add(time.Duration(i) * time.Second),
+			UpdatedAt:        time.Now().UTC().Add(time.Duration(i) * time.Second),
+		}
+		if err := repo.InsertSummary(ctx, summary); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	firstCreated, err := svc.BuildTopicSummaries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstCreated != 1 {
+		t.Fatalf("expected first run to create 1 topic summary, got %d", firstCreated)
+	}
+
+	secondCreated, err := svc.BuildTopicSummaries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondCreated != 0 {
+		t.Fatalf("expected second run to create 0 topic summaries, got %d", secondCreated)
+	}
+
+	topics, err := repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "topic", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topics) != 1 {
+		t.Fatalf("expected exactly 1 topic summary after rerun, got %d", len(topics))
+	}
+}
+
+func TestBuildTopicSummaries_SkipsSmallGroups(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	for i, body := range []string{
+		"Alice and Bob discussed SQLite tuning for AMM",
+		"Bob asked Alice about SQLite cache settings in AMM",
+	} {
+		summary := &core.Summary{
+			ID:               fmt.Sprintf("sum_topic_small_%d", i),
+			Kind:             "leaf",
+			Scope:            core.ScopeGlobal,
+			Body:             body,
+			TightDescription: fmt.Sprintf("leaf small %d", i),
+			PrivacyLevel:     core.PrivacyPrivate,
+			CreatedAt:        time.Now().UTC().Add(time.Duration(i) * time.Second),
+			UpdatedAt:        time.Now().UTC().Add(time.Duration(i) * time.Second),
+		}
+		if err := repo.InsertSummary(ctx, summary); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.BuildTopicSummaries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 0 {
+		t.Fatalf("expected 0 topic summaries for small group, got %d", created)
+	}
+
+	topics, err := repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "topic", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topics) != 0 {
+		t.Fatalf("expected no topic summaries, got %d", len(topics))
+	}
+}
+
+func TestBuildTopicSummaries_RunJob(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	for i, body := range []string{
+		"Alice and Bob aligned SQLite safeguards for AMM",
+		"Bob and Alice validated SQLite restore flow for AMM",
+		"AMM postmortem captured by Alice and Bob on SQLite",
+	} {
+		summary := &core.Summary{
+			ID:               fmt.Sprintf("sum_topic_job_%d", i),
+			Kind:             "leaf",
+			Scope:            core.ScopeGlobal,
+			Body:             body,
+			TightDescription: fmt.Sprintf("leaf job %d", i),
+			PrivacyLevel:     core.PrivacyPrivate,
+			CreatedAt:        time.Now().UTC().Add(time.Duration(i) * time.Second),
+			UpdatedAt:        time.Now().UTC().Add(time.Duration(i) * time.Second),
+		}
+		if err := repo.InsertSummary(ctx, summary); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	job, err := svc.RunJob(ctx, "build_topic_summaries")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != "completed" {
+		t.Fatalf("expected completed job, got %+v", job)
+	}
+	if job.Result["action"] != "build_topic_summaries" {
+		t.Fatalf("unexpected job result: %+v", job.Result)
+	}
+	if job.Result["summaries_created"] != "1" {
+		t.Fatalf("expected summaries_created=1, got %+v", job.Result)
 	}
 }
 
@@ -1370,6 +2232,63 @@ func TestReflect_SkipsNoiseEventsWithoutLLMSummarizer(t *testing.T) {
 	}
 	if len(mems) != 0 {
 		t.Fatalf("expected no memories from skipped read_only event, got %#v", mems)
+	}
+}
+
+func TestReflect_SkipsTriagedNoiseEvents(t *testing.T) {
+	summarizer := reflectTestSummarizer{extract: func(content string) ([]core.MemoryCandidate, error) {
+		return []core.MemoryCandidate{{
+			Type:             core.MemoryTypeFact,
+			Body:             content,
+			TightDescription: content,
+			Confidence:       0.9,
+		}}, nil
+	}}
+	svc, repo := testServiceAndRepoWithSummarizer(t, summarizer)
+	svc.hasLLMSummarizer = true
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		triage: func(events []core.EventContent) (map[int]core.TriageDecision, error) {
+			decisions := make(map[int]core.TriageDecision, len(events))
+			for _, evt := range events {
+				if strings.Contains(strings.ToLower(evt.Content), "heartbeat") {
+					decisions[evt.Index] = core.TriageSkip
+					continue
+				}
+				decisions[evt.Index] = core.TriageReflect
+			}
+			return decisions, nil
+		},
+	})
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	events := []core.Event{
+		{ID: "evt_triage_noise", Kind: "message_user", SourceSystem: "test", PrivacyLevel: core.PrivacyPrivate, Content: "heartbeat status update", OccurredAt: now, IngestedAt: now},
+		{ID: "evt_triage_signal", Kind: "message_user", SourceSystem: "test", PrivacyLevel: core.PrivacyPrivate, Content: "We decided to use Postgres for production", OccurredAt: now, IngestedAt: now},
+	}
+	for i := range events {
+		if err := repo.InsertEvent(ctx, &events[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected only one reflected memory after triage skip, got %d", created)
+	}
+
+	mems, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Type: core.MemoryTypeFact, Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 active memory, got %d", len(mems))
+	}
+	if !strings.Contains(strings.ToLower(mems[0].Body), "decided") {
+		t.Fatalf("expected non-noise memory body, got %q", mems[0].Body)
 	}
 }
 
@@ -2301,7 +3220,7 @@ func TestExpandSummaryHierarchy(t *testing.T) {
 	}
 
 	// Call Expand.
-	result, err := svc.Expand(ctx, sum.ID, "summary")
+	result, err := svc.Expand(ctx, sum.ID, "summary", core.ExpandOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

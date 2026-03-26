@@ -207,7 +207,7 @@ func TestSearchMemories(t *testing.T) {
 		}
 	}
 
-	results, err := repo.SearchMemories(ctx, "Kubernetes", 10)
+	results, err := repo.SearchMemories(ctx, "Kubernetes", core.ListMemoriesOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("search memories: %v", err)
 	}
@@ -533,7 +533,7 @@ func TestRebuildFTSIndexes(t *testing.T) {
 	}
 
 	// Search should still work.
-	results, err := repo.SearchMemories(ctx, "gophers", 10)
+	results, err := repo.SearchMemories(ctx, "gophers", core.ListMemoriesOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("search after rebuild: %v", err)
 	}
@@ -581,14 +581,14 @@ func TestSearchMemories_FTS5SpecialCharacters(t *testing.T) {
 
 	for _, tt := range queries {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := repo.SearchMemories(ctx, tt.query, 10)
+			_, err := repo.SearchMemories(ctx, tt.query, core.ListMemoriesOptions{Limit: 10})
 			if err != nil {
 				t.Errorf("SearchMemories(%q) returned error: %v", tt.query, err)
 			}
 		})
 	}
 
-	results, err := repo.SearchMemories(ctx, "concise replies", 10)
+	results, err := repo.SearchMemories(ctx, "concise replies", core.ListMemoriesOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("SearchMemories(clean query) error: %v", err)
 	}
