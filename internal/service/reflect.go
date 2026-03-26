@@ -100,9 +100,10 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 					SourceEventIDs:   sourceEventIDs,
 				}
 
-				existing, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{Type: candidate.Type, Scope: scope, ProjectID: projectID, Status: core.MemoryStatusActive, Limit: 50000})
+				fuzzyText := strings.TrimSpace(strings.Join([]string{candidateMemory.Subject, candidateMemory.TightDescription, candidateMemory.Body}, " "))
+				existing, err := s.repo.SearchMemoriesFuzzy(ctx, fuzzyText, core.ListMemoriesOptions{Type: candidate.Type, Scope: scope, ProjectID: projectID, Status: core.MemoryStatusActive, Limit: 100})
 				if err != nil {
-					return created, fmt.Errorf("list memories for reflect duplicate detection: %w", err)
+					return created, fmt.Errorf("search memories for reflect duplicate detection: %w", err)
 				}
 				activeMemories := make([]*core.Memory, 0, len(existing))
 				for i := range existing {
@@ -110,9 +111,6 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 				}
 
 				duplicates := findDuplicateActiveMemories(activeMemories, candidateMemory)
-				if len(duplicates) == 0 {
-					duplicates = s.findDuplicatesByEmbedding(ctx, candidateMemory, activeMemories)
-				}
 				if len(duplicates) > 0 {
 					duplicate := selectDuplicateKeeper(duplicates)
 					duplicate.SourceEventIDs = mergeUniqueStrings(duplicate.SourceEventIDs, candidateMemory.SourceEventIDs)
@@ -141,7 +139,6 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 					if err := s.repo.UpdateMemory(ctx, duplicate); err != nil {
 						return created, fmt.Errorf("update duplicate reflected memory %s: %w", duplicate.ID, err)
 					}
-					s.upsertMemoryEmbeddingBestEffort(ctx, duplicate)
 
 					for _, sibling := range duplicates {
 						if sibling == nil || sibling.ID == duplicate.ID || sibling.Status == core.MemoryStatusSuperseded {
@@ -155,7 +152,6 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 						if err := s.repo.UpdateMemory(ctx, sibling); err != nil {
 							return created, fmt.Errorf("supersede duplicate reflected sibling %s: %w", sibling.ID, err)
 						}
-						s.upsertMemoryEmbeddingBestEffort(ctx, sibling)
 					}
 
 					if err := s.linkEntitiesToMemory(ctx, duplicate.ID, sourceContent); err != nil {
@@ -185,7 +181,6 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 				if err := s.repo.InsertMemory(ctx, mem); err != nil {
 					return created, fmt.Errorf("insert reflected memory: %w", err)
 				}
-				s.upsertMemoryEmbeddingBestEffort(ctx, mem)
 
 				if err := s.linkEntitiesToMemory(ctx, mem.ID, sourceContent); err != nil {
 					return created, fmt.Errorf("link reflected entities: %w", err)
@@ -290,6 +285,8 @@ func joinEventContent(events []core.Event) string {
 
 func (s *AMMService) linkEntitiesToMemory(ctx context.Context, memoryID, content string) error {
 	names := ExtractEntities(content)
+	links := make([]core.MemoryEntityLink, 0, len(names))
+	linked := make(map[string]bool, len(names))
 	for _, name := range names {
 		entity, err := s.findOrCreateEntity(ctx, name)
 		if err != nil {
@@ -298,14 +295,24 @@ func (s *AMMService) linkEntitiesToMemory(ctx context.Context, memoryID, content
 		if entity == nil {
 			continue
 		}
-		if err := s.repo.LinkMemoryEntity(ctx, memoryID, entity.ID, "mentioned"); err != nil {
-			return err
+		if linked[entity.ID] {
+			continue
 		}
+		linked[entity.ID] = true
+		links = append(links, core.MemoryEntityLink{MemoryID: memoryID, EntityID: entity.ID, Role: "mentioned"})
+	}
+	if len(links) == 0 {
+		return nil
+	}
+	if err := s.repo.LinkMemoryEntitiesBatch(ctx, links); err != nil {
+		return err
 	}
 	return nil
 }
 
 func (s *AMMService) linkEntitiesFromAnalysis(ctx context.Context, memoryID string, entities []core.EntityCandidate) error {
+	links := make([]core.MemoryEntityLink, 0, len(entities))
+	linked := make(map[string]bool, len(entities))
 	for _, candidate := range entities {
 		entity, err := s.findOrCreateEntityWithDetails(ctx, candidate)
 		if err != nil {
@@ -314,14 +321,25 @@ func (s *AMMService) linkEntitiesFromAnalysis(ctx context.Context, memoryID stri
 		if entity == nil {
 			continue
 		}
-		if err := s.repo.LinkMemoryEntity(ctx, memoryID, entity.ID, "mentioned"); err != nil {
-			return err
+		if linked[entity.ID] {
+			continue
 		}
+		linked[entity.ID] = true
+		links = append(links, core.MemoryEntityLink{MemoryID: memoryID, EntityID: entity.ID, Role: "mentioned"})
+	}
+	if len(links) == 0 {
+		return nil
+	}
+	if err := s.repo.LinkMemoryEntitiesBatch(ctx, links); err != nil {
+		return err
 	}
 	return nil
 }
 
 func (s *AMMService) createRelationshipsFromAnalysis(ctx context.Context, relationships []core.RelationshipCandidate) error {
+	pending := make([]*core.Relationship, 0, len(relationships))
+	involvedEntityIDs := make(map[string]bool)
+
 	for _, rel := range relationships {
 		fromName := strings.TrimSpace(rel.FromEntity)
 		toName := strings.TrimSpace(rel.ToEntity)
@@ -342,22 +360,6 @@ func (s *AMMService) createRelationshipsFromAnalysis(ctx context.Context, relati
 			continue
 		}
 
-		existing, err := s.repo.ListRelationships(ctx, core.ListRelationshipsOptions{EntityID: fromEntity.ID, RelationshipType: relType, Limit: 1000})
-		if err != nil {
-			return err
-		}
-
-		duplicate := false
-		for i := range existing {
-			if existing[i].FromEntityID == fromEntity.ID && existing[i].ToEntityID == toEntity.ID && strings.EqualFold(existing[i].RelationshipType, relType) {
-				duplicate = true
-				break
-			}
-		}
-		if duplicate {
-			continue
-		}
-
 		now := time.Now().UTC()
 		relModel := &core.Relationship{
 			ID:               generateID("rel_"),
@@ -370,9 +372,45 @@ func (s *AMMService) createRelationshipsFromAnalysis(ctx context.Context, relati
 		if strings.TrimSpace(rel.Description) != "" {
 			relModel.Metadata = map[string]string{"description": strings.TrimSpace(rel.Description)}
 		}
-		if err := s.repo.InsertRelationship(ctx, relModel); err != nil {
-			return err
+		pending = append(pending, relModel)
+		involvedEntityIDs[fromEntity.ID] = true
+		involvedEntityIDs[toEntity.ID] = true
+	}
+
+	if len(pending) == 0 {
+		return nil
+	}
+
+	entityIDs := make([]string, 0, len(involvedEntityIDs))
+	for entityID := range involvedEntityIDs {
+		entityIDs = append(entityIDs, entityID)
+	}
+	existing, err := s.repo.ListRelationshipsByEntityIDs(ctx, entityIDs)
+	if err != nil {
+		return err
+	}
+
+	existingKeys := make(map[string]bool, len(existing)+len(pending))
+	for i := range existing {
+		existingKeys[relationshipDedupKey(existing[i].FromEntityID, existing[i].ToEntityID, existing[i].RelationshipType)] = true
+	}
+
+	toInsert := make([]*core.Relationship, 0, len(pending))
+	for _, rel := range pending {
+		key := relationshipDedupKey(rel.FromEntityID, rel.ToEntityID, rel.RelationshipType)
+		if existingKeys[key] {
+			continue
 		}
+		existingKeys[key] = true
+		toInsert = append(toInsert, rel)
+	}
+
+	if len(toInsert) == 0 {
+		return nil
+	}
+
+	if err := s.repo.InsertRelationshipsBatch(ctx, toInsert); err != nil {
+		return err
 	}
 
 	return nil
@@ -424,25 +462,6 @@ func (s *AMMService) findOrCreateEntityWithDetails(ctx context.Context, candidat
 			break
 		}
 	}
-	if matched == nil {
-		allEntities, err := s.repo.ListEntities(ctx, core.ListEntitiesOptions{Limit: 50000})
-		if err != nil {
-			return nil, err
-		}
-		for i := range allEntities {
-			for _, term := range searchTerms {
-				if entityMatchesTerm(allEntities[i], term) {
-					entity := allEntities[i]
-					matched = &entity
-					break
-				}
-			}
-			if matched != nil {
-				break
-			}
-		}
-	}
-
 	if matched != nil {
 		changed := false
 
@@ -504,17 +523,11 @@ func (s *AMMService) findEntityByNameOrAlias(ctx context.Context, name string) (
 			return &entity, nil
 		}
 	}
-	allEntities, err := s.repo.ListEntities(ctx, core.ListEntitiesOptions{Limit: 50000})
-	if err != nil {
-		return nil, err
-	}
-	for i := range allEntities {
-		if entityMatchesTerm(allEntities[i], term) {
-			entity := allEntities[i]
-			return &entity, nil
-		}
-	}
 	return nil, nil
+}
+
+func relationshipDedupKey(fromEntityID, toEntityID, relationshipType string) string {
+	return strings.TrimSpace(fromEntityID) + "|" + strings.TrimSpace(toEntityID) + "|" + strings.ToLower(strings.TrimSpace(relationshipType))
 }
 
 func entityMatchesTerm(entity core.Entity, term string) bool {

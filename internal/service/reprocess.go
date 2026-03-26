@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
@@ -87,15 +88,52 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 			end = len(toProcess)
 		}
 		batch := toProcess[i:end]
+		if len(batch) == 0 {
+			continue
+		}
 
-		contents := make([]string, len(batch))
-		for j, evt := range batch {
+		filtered := batch
+		if s.hasLLMSummarizer && s.intelligence != nil {
+			triaged, triageErr := s.filterReflectEventsByTriage(ctx, batch)
+			if triageErr == nil {
+				filtered = triaged
+			}
+		}
+		if len(filtered) == 0 {
+			continue
+		}
+
+		contents := make([]string, len(filtered))
+		for j, evt := range filtered {
 			contents[j] = evt.Content
 		}
 
-		candidates, err := s.summarizer.ExtractMemoryCandidateBatch(ctx, contents)
-		if err != nil {
-			return created, superseded, fmt.Errorf("batch extract (batch %d): %w", i/batchSize, err)
+		candidates := make([]core.MemoryCandidate, 0)
+		analysisEntities := make([]core.EntityCandidate, 0)
+		if s.intelligence != nil && s.hasLLMSummarizer {
+			analysisInputs := make([]core.EventContent, 0, len(filtered))
+			for idx, evt := range filtered {
+				analysisInputs = append(analysisInputs, core.EventContent{
+					Index:     idx + 1,
+					Content:   evt.Content,
+					ProjectID: evt.ProjectID,
+					SessionID: evt.SessionID,
+				})
+			}
+			analysis, err := s.intelligence.AnalyzeEvents(ctx, analysisInputs)
+			if err != nil {
+				return created, superseded, fmt.Errorf("batch analyze (batch %d): %w", i/batchSize, err)
+			}
+			if analysis != nil {
+				candidates = append(candidates, analysis.Memories...)
+				analysisEntities = append(analysisEntities, analysis.Entities...)
+			}
+		} else {
+			extracted, err := s.summarizer.ExtractMemoryCandidateBatch(ctx, contents)
+			if err != nil {
+				return created, superseded, fmt.Errorf("batch extract (batch %d): %w", i/batchSize, err)
+			}
+			candidates = append(candidates, extracted...)
 		}
 
 		for _, candidate := range candidates {
@@ -104,12 +142,13 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 				continue
 			}
 
-			candidateEvents, ok := resolveCandidateEvents(batch, candidate.SourceEventNums)
+			candidateEvents, ok := resolveCandidateEvents(filtered, candidate.SourceEventNums)
 			if !ok {
 				continue
 			}
 			scope, projectID := inferScopeFromEvents(candidateEvents)
 			sourceEventIDs := eventIDsFromEvents(candidateEvents)
+			sourceContent := joinEventContent(candidateEvents)
 			importance := importanceForCandidate(candidate)
 
 			candidateMemory := core.Memory{
@@ -126,9 +165,6 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 			}
 
 			duplicates := findDuplicateActiveMemories(activeMemories, candidateMemory)
-			if len(duplicates) == 0 {
-				duplicates = s.findDuplicatesByEmbedding(ctx, candidateMemory, activeMemories)
-			}
 			if len(duplicates) > 0 {
 				now := time.Now().UTC()
 				duplicate := selectDuplicateKeeper(duplicates)
@@ -162,7 +198,6 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 				if err := s.repo.UpdateMemory(ctx, duplicate); err != nil {
 					return created, superseded, fmt.Errorf("update duplicate memory %s: %w", duplicate.ID, err)
 				}
-				s.upsertMemoryEmbeddingBestEffort(ctx, duplicate)
 				for _, sibling := range duplicates {
 					if sibling == nil || sibling.ID == duplicate.ID || sibling.Status == core.MemoryStatusSuperseded {
 						continue
@@ -175,11 +210,22 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 					if err := s.repo.UpdateMemory(ctx, sibling); err != nil {
 						return created, superseded, fmt.Errorf("supersede duplicate sibling %s: %w", sibling.ID, err)
 					}
-					s.upsertMemoryEmbeddingBestEffort(ctx, sibling)
 					superseded++
 				}
 				for _, eid := range duplicate.SourceEventIDs {
 					eventToMemories[eid] = appendMemoryRefIfMissing(eventToMemories[eid], duplicate)
+				}
+
+				if len(analysisEntities) > 0 {
+					candidateEntities := selectAnalysisEntitiesForContent(analysisEntities, sourceContent)
+					if len(candidateEntities) > 0 {
+						if err := s.linkEntitiesFromAnalysis(ctx, duplicate.ID, candidateEntities); err != nil {
+							return created, superseded, fmt.Errorf("link reprocessed analysis entities: %w", err)
+						}
+					}
+				}
+				if err := s.linkEntitiesToMemory(ctx, duplicate.ID, sourceContent); err != nil {
+					return created, superseded, fmt.Errorf("link reprocessed entities: %w", err)
 				}
 				continue
 			}
@@ -210,7 +256,17 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 			if err := s.repo.InsertMemory(ctx, mem); err != nil {
 				return created, superseded, fmt.Errorf("insert reprocessed memory: %w", err)
 			}
-			s.upsertMemoryEmbeddingBestEffort(ctx, mem)
+			if len(analysisEntities) > 0 {
+				candidateEntities := selectAnalysisEntitiesForContent(analysisEntities, sourceContent)
+				if len(candidateEntities) > 0 {
+					if err := s.linkEntitiesFromAnalysis(ctx, mem.ID, candidateEntities); err != nil {
+						return created, superseded, fmt.Errorf("link reprocessed analysis entities: %w", err)
+					}
+				}
+			}
+			if err := s.linkEntitiesToMemory(ctx, mem.ID, sourceContent); err != nil {
+				return created, superseded, fmt.Errorf("link reprocessed entities: %w", err)
+			}
 			created++
 			activeMemories = append(activeMemories, mem)
 			for _, eid := range sourceEventIDs {
@@ -235,11 +291,10 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 					old.Status = core.MemoryStatusSuperseded
 					old.SupersededBy = mem.ID
 					old.SupersededAt = &supNow
-					if err := s.repo.UpdateMemory(ctx, old); err != nil {
-						return created, superseded, fmt.Errorf("supersede memory %s: %w", old.ID, err)
-					}
-					s.upsertMemoryEmbeddingBestEffort(ctx, old)
-					superseded++
+				if err := s.repo.UpdateMemory(ctx, old); err != nil {
+					return created, superseded, fmt.Errorf("supersede memory %s: %w", old.ID, err)
+				}
+				superseded++
 				}
 			}
 		}
@@ -335,4 +390,40 @@ func appendMemoryRefIfMissing(existing []*core.Memory, mem *core.Memory) []*core
 		}
 	}
 	return append(existing, mem)
+}
+
+func selectAnalysisEntitiesForContent(entities []core.EntityCandidate, sourceContent string) []core.EntityCandidate {
+	if len(entities) == 0 {
+		return nil
+	}
+	content := strings.ToLower(strings.TrimSpace(sourceContent))
+	if content == "" {
+		return nil
+	}
+	selected := make([]core.EntityCandidate, 0, len(entities))
+	for _, entity := range entities {
+		if analysisEntityMatchesContent(entity, content) {
+			selected = append(selected, entity)
+		}
+	}
+	return selected
+}
+
+func analysisEntityMatchesContent(entity core.EntityCandidate, content string) bool {
+	if strings.TrimSpace(content) == "" {
+		return false
+	}
+	candidates := make([]string, 0, len(entity.Aliases)+1)
+	candidates = append(candidates, entity.CanonicalName)
+	candidates = append(candidates, entity.Aliases...)
+	for _, candidate := range candidates {
+		term := strings.ToLower(strings.TrimSpace(candidate))
+		if term == "" {
+			continue
+		}
+		if strings.Contains(content, term) {
+			return true
+		}
+	}
+	return false
 }

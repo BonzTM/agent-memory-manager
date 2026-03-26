@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,14 @@ type stubBatchSummarizer struct {
 
 type recordingBatchSummarizer struct {
 	batchSizes *[]int
+}
+
+type reprocessIntelligenceStub struct {
+	analysisResult   *core.AnalysisResult
+	triageDecisions  map[int]core.TriageDecision
+	triageByContains map[string]core.TriageDecision
+	analyzeBatchLens []int
+	triageBatchLens  []int
 }
 
 func testImportancePtr(v float64) *float64 {
@@ -58,6 +67,78 @@ func (s recordingBatchSummarizer) ExtractMemoryCandidateBatch(_ context.Context,
 		*s.batchSizes = append(*s.batchSizes, len(events))
 	}
 	return nil, nil
+}
+
+func (s *reprocessIntelligenceStub) Summarize(context.Context, string, int) (string, error) {
+	return "", nil
+}
+
+func (s *reprocessIntelligenceStub) ExtractMemoryCandidate(context.Context, string) ([]core.MemoryCandidate, error) {
+	return nil, nil
+}
+
+func (s *reprocessIntelligenceStub) ExtractMemoryCandidateBatch(context.Context, []string) ([]core.MemoryCandidate, error) {
+	return nil, nil
+}
+
+func (s *reprocessIntelligenceStub) AnalyzeEvents(_ context.Context, events []core.EventContent) (*core.AnalysisResult, error) {
+	s.analyzeBatchLens = append(s.analyzeBatchLens, len(events))
+	if s.analysisResult == nil {
+		return &core.AnalysisResult{}, nil
+	}
+	return s.analysisResult, nil
+}
+
+func (s *reprocessIntelligenceStub) TriageEvents(_ context.Context, events []core.EventContent) (map[int]core.TriageDecision, error) {
+	s.triageBatchLens = append(s.triageBatchLens, len(events))
+	decisions := make(map[int]core.TriageDecision, len(events))
+	for i, evt := range events {
+		idx := evt.Index
+		if idx <= 0 {
+			idx = i + 1
+		}
+		decision := core.TriageReflect
+		content := strings.ToLower(strings.TrimSpace(evt.Content))
+		for needle, configured := range s.triageByContains {
+			if needle == "" {
+				continue
+			}
+			if strings.Contains(content, strings.ToLower(strings.TrimSpace(needle))) {
+				decision = configured
+			}
+		}
+		if s.triageDecisions != nil {
+			if configured, ok := s.triageDecisions[idx]; ok {
+				decision = configured
+			}
+		}
+		decisions[idx] = decision
+	}
+	return decisions, nil
+}
+
+func (s *reprocessIntelligenceStub) ReviewMemories(context.Context, []core.MemoryReview) (*core.ReviewResult, error) {
+	return &core.ReviewResult{}, nil
+}
+
+func (s *reprocessIntelligenceStub) CompressEventBatches(_ context.Context, chunks []core.EventChunk) ([]core.CompressionResult, error) {
+	results := make([]core.CompressionResult, 0, len(chunks))
+	for _, chunk := range chunks {
+		results = append(results, core.CompressionResult{Index: chunk.Index})
+	}
+	return results, nil
+}
+
+func (s *reprocessIntelligenceStub) SummarizeTopicBatches(_ context.Context, topics []core.TopicChunk) ([]core.CompressionResult, error) {
+	results := make([]core.CompressionResult, 0, len(topics))
+	for _, topic := range topics {
+		results = append(results, core.CompressionResult{Index: topic.Index})
+	}
+	return results, nil
+}
+
+func (s *reprocessIntelligenceStub) ConsolidateNarrative(context.Context, []core.EventContent, []core.MemorySummary) (*core.NarrativeResult, error) {
+	return &core.NarrativeResult{}, nil
 }
 
 func testServiceForReprocessWithSummarizer(t *testing.T, summarizer core.Summarizer) (core.Service, *sqlite.SQLiteRepository) {
@@ -691,14 +772,19 @@ func TestReprocessAll_UsesConfiguredBatchSize(t *testing.T) {
 
 func TestReprocess_SetsUpgradedQuality(t *testing.T) {
 	ctx := context.Background()
-	candidatePayload, err := json.Marshal([]core.MemoryCandidate{{
-		Type:             core.MemoryTypePreference,
-		Subject:          "style",
-		Body:             "Prefers concise commit messages",
-		TightDescription: "Prefers concise commit messages",
-		Confidence:       0.95,
-		SourceEventNums:  []int{1},
-	}})
+	candidatePayload, err := json.Marshal(map[string]any{
+		"memories": []core.MemoryCandidate{{
+			Type:             core.MemoryTypePreference,
+			Subject:          "style",
+			Body:             "Prefers concise commit messages",
+			TightDescription: "Prefers concise commit messages",
+			Confidence:       0.95,
+			SourceEventNums:  []int{1},
+		}},
+		"entities":      []core.EntityCandidate{},
+		"relationships": []core.RelationshipCandidate{},
+		"event_quality": map[string]string{"1": "durable"},
+	})
 	if err != nil {
 		t.Fatalf("marshal candidate payload: %v", err)
 	}
@@ -756,6 +842,163 @@ func TestReprocess_SetsUpgradedQuality(t *testing.T) {
 	}
 	if upgraded.Metadata["extraction_quality"] != "upgraded" {
 		t.Fatalf("expected extraction_quality=upgraded, got %q", upgraded.Metadata["extraction_quality"])
+	}
+}
+
+func TestReprocessAll_UsesIntelligenceAnalyzeAfterTriageAndLinksEntities(t *testing.T) {
+	ctx := context.Background()
+	llm := service.NewLLMSummarizer("http://127.0.0.1:1", "test-key", "test-model")
+	svc, repo := testServiceForReprocessWithSummarizer(t, llm)
+	concreteSvc, ok := svc.(*service.AMMService)
+	if !ok {
+		t.Fatal("expected concrete AMMService")
+	}
+
+	intel := &reprocessIntelligenceStub{
+		analysisResult: &core.AnalysisResult{
+			Memories: []core.MemoryCandidate{{
+				Type:             core.MemoryTypeDecision,
+				Subject:          "cache",
+				Body:             "Use Redis cache for rate limiting",
+				TightDescription: "Use Redis cache",
+				Confidence:       0.91,
+				SourceEventNums:  []int{1},
+			}},
+			Entities: []core.EntityCandidate{{
+				CanonicalName: "Redis Cache",
+				Type:          "technology",
+				Aliases:       []string{"redis"},
+			}},
+		},
+		triageByContains: map[string]core.TriageDecision{
+			"status ping": core.TriageSkip,
+		},
+	}
+	concreteSvc.SetIntelligenceProvider(intel)
+
+	now := time.Now().UTC()
+	events := []*core.Event{
+		{ID: "evt_triage_skip", Kind: "message_user", SourceSystem: "test", Content: "status ping", PrivacyLevel: core.PrivacyPrivate, OccurredAt: now, IngestedAt: now},
+		{ID: "evt_triage_keep", Kind: "message_user", SourceSystem: "test", Content: "We decided to use redis cache for API rate limits", PrivacyLevel: core.PrivacyPrivate, OccurredAt: now.Add(time.Minute), IngestedAt: now},
+	}
+	for _, evt := range events {
+		if err := repo.InsertEvent(ctx, evt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	job, err := svc.RunJob(ctx, "reprocess_all")
+	if err != nil {
+		t.Fatalf("reprocess_all failed: %v", err)
+	}
+	if job.Status != "completed" {
+		t.Fatalf("unexpected job status: %s", job.Status)
+	}
+
+	if len(intel.triageBatchLens) == 0 || intel.triageBatchLens[0] != 2 {
+		t.Fatalf("expected triage to see full batch size 2, got %#v", intel.triageBatchLens)
+	}
+	if len(intel.analyzeBatchLens) == 0 || intel.analyzeBatchLens[0] != 1 {
+		t.Fatalf("expected analyze to run on triaged batch size 1, got %#v", intel.analyzeBatchLens)
+	}
+
+	mems, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected one active memory, got %d", len(mems))
+	}
+	if len(mems[0].SourceEventIDs) != 1 || mems[0].SourceEventIDs[0] != "evt_triage_keep" {
+		t.Fatalf("expected memory sourced from triaged event only, got %#v", mems[0].SourceEventIDs)
+	}
+
+	linked, err := repo.GetMemoryEntities(ctx, mems[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundRedisCache := false
+	for _, entity := range linked {
+		if entity.CanonicalName == "Redis Cache" {
+			foundRedisCache = true
+			break
+		}
+	}
+	if !foundRedisCache {
+		t.Fatalf("expected memory entity link from analysis candidates, got %#v", linked)
+	}
+}
+
+func TestReprocessAll_LinksEntitiesForDuplicateUpdates(t *testing.T) {
+	ctx := context.Background()
+	llm := service.NewLLMSummarizer("http://127.0.0.1:1", "test-key", "test-model")
+	svc, repo := testServiceForReprocessWithSummarizer(t, llm)
+	concreteSvc, ok := svc.(*service.AMMService)
+	if !ok {
+		t.Fatal("expected concrete AMMService")
+	}
+
+	intel := &reprocessIntelligenceStub{
+		analysisResult: &core.AnalysisResult{
+			Memories: []core.MemoryCandidate{{
+				Type:             core.MemoryTypeDecision,
+				Subject:          "platform",
+				Body:             "ACME uses managed PostgreSQL",
+				TightDescription: "ACME uses managed PostgreSQL",
+				Confidence:       0.93,
+				SourceEventNums:  []int{1},
+			}},
+			Entities: []core.EntityCandidate{{
+				CanonicalName: "ACME Platform",
+				Type:          "project",
+				Aliases:       []string{"acme"},
+			}},
+		},
+	}
+	concreteSvc.SetIntelligenceProvider(intel)
+
+	now := time.Now().UTC()
+	if err := repo.InsertEvent(ctx, &core.Event{ID: "evt_dup_link", Kind: "message_user", SourceSystem: "test", Content: "ACME uses managed PostgreSQL for reliability", PrivacyLevel: core.PrivacyPrivate, OccurredAt: now, IngestedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.InsertMemory(ctx, &core.Memory{
+		ID:               "mem_dup_link",
+		Type:             core.MemoryTypeDecision,
+		Scope:            core.ScopeGlobal,
+		Subject:          "platform",
+		Body:             "ACME uses managed PostgreSQL",
+		TightDescription: "ACME uses managed PostgreSQL",
+		Confidence:       0.6,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := svc.RunJob(ctx, "reprocess_all")
+	if err != nil {
+		t.Fatalf("reprocess_all failed: %v", err)
+	}
+	if job.Status != "completed" {
+		t.Fatalf("unexpected job status: %s", job.Status)
+	}
+
+	linked, err := repo.GetMemoryEntities(ctx, "mem_dup_link")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, entity := range linked {
+		if entity.CanonicalName == "ACME Platform" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected duplicate-updated memory to be entity-linked, got %#v", linked)
 	}
 }
 
