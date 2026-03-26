@@ -368,7 +368,8 @@ After events accumulate, background workers extract structure and consolidate kn
 | `detect_contradictions` | Finds conflicting memories |
 | `decay_stale_memory` | Reduces importance of untouched memories over time |
 | `merge_duplicates` | Consolidates duplicate memories |
-| `rebuild_indexes` | Rebuilds FTS5 full-text search indexes |
+| `rebuild_indexes` | Rebuild FTS5 and generate embeddings for items missing them (incremental) |
+| `rebuild_indexes_full` | Rebuild FTS5 and regenerate all embeddings from scratch |
 | `cleanup_recall_history` | Purges recall tracking entries older than 7 days |
 
 ### Running Workers
@@ -379,21 +380,15 @@ Workers can be triggered manually, on a schedule, or after a threshold of new ev
 
 We distinguish between **baseline** jobs (essential for daily memory building) and **optional** jobs (aggressive optimization or repair).
 
-- **Baseline Jobs**: Essential sequence included in the shared runner (`reflect`, `compress_history`, `consolidate_sessions`, `extract_claims`, `form_episodes`, `detect_contradictions`, `cleanup_recall_history`).
-- **Optional Jobs**: Aggressive maintenance (`decay_stale_memory`, `merge_duplicates`) or low-cadence repairs (`rebuild_indexes`). These should run separately from the baseline runner on a slower schedule.
-- **System Repairs**: Structural repairs like `repair_links` are not job kinds; run them via `amm repair --fix links`.
+- **Baseline Jobs**: The full sequence included in the shared runner: `reflect`, `compress_history`, `consolidate_sessions`, `merge_duplicates`, `extract_claims`, `form_episodes`, `detect_contradictions`, `decay_stale_memory`, `promote_high_value`, `archive_session_traces`, `rebuild_indexes`, `cleanup_recall_history`.
+- **System Repairs**: Structural repairs like `repair_links` are not part of the baseline; run them via `amm repair --fix links` as needed.
 
 ```bash
 # Recommended: Serialized Baseline Runner
-# This script runs the essential jobs one by one.
+# This script runs all maintenance jobs sequentially.
 /path/to/agent-memory-manager/examples/scripts/run-workers.sh
 
-# Optional: Separate Aggressive Maintenance (Daily)
-amm jobs run decay_stale_memory
-amm jobs run merge_duplicates
-
-# Optional: Low-cadence Repair/Index Maintenance
-amm jobs run rebuild_indexes
+# Optional: Low-cadence Structural Repair
 amm repair --fix links
 
 # Alternative: Staggered Cron (avoid overlapping minutes)

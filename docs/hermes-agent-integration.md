@@ -77,7 +77,7 @@ amm does not ship an internal scheduler loop. Because SQLite only allows one wri
 /path/to/agent-memory-manager/examples/scripts/run-workers.sh
 ```
 
-For the baseline maintenance sequence, the runner in [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) is the preferred starting point. Aggressive jobs (`decay_stale_memory`, `merge_duplicates`) or low-cadence repairs (`rebuild_indexes`) should be run separately on a slower schedule.
+For the baseline maintenance sequence, the runner in [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) is the preferred starting point. It covers the full maintenance sequence. Structural repairs (`repair_links`) should be run separately as needed.
 
 That means you can choose the trigger that fits Hermes best:
 

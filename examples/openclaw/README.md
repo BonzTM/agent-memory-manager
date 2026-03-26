@@ -58,7 +58,7 @@ Example host cron entry:
 */30 * * * * AMM_DB_PATH=/home/you/.amm/amm.db /home/you/src/agent-memory-manager/examples/scripts/run-workers.sh
 ```
 
-Aggressive maintenance (`decay_stale_memory`, `merge_duplicates`) or low-cadence repairs (`rebuild_indexes`) should be run separately on a slower schedule. Structural repairs like `repair_links` should only be run via `amm repair --fix links`.
+The baseline runner now covers the full maintenance sequence. Structural repairs like `repair_links` should be run separately via `amm repair --fix links` as needed.
 
 The smallest optional variant is [`cron.add.reflect.json`](./cron.add.reflect.json). It creates a recurring isolated turn that asks the agent to call `amm_jobs_run` with `{"kind":"reflect"}` and sets `delivery.mode` to `none`, so the run stays internal unless the turn itself fails.
 

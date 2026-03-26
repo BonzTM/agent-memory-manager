@@ -170,7 +170,7 @@ Because SQLite supports only one concurrent writer, we recommend running mainten
 /home/you/src/agent-memory-manager/examples/scripts/run-workers.sh
 ```
 
-The baseline runner covers the essential sequence (`reflect`, `compress_history`, etc.). Aggressive maintenance (`decay_stale_memory`, `merge_duplicates`) or low-cadence repairs (`rebuild_indexes`) should be run separately on a slower schedule.
+The baseline runner covers the full maintenance sequence (`reflect`, `compress_history`, `consolidate_sessions`, `merge_duplicates`, `extract_claims`, `form_episodes`, `detect_contradictions`, `decay_stale_memory`, `promote_high_value`, `archive_session_traces`, `rebuild_indexes`, `cleanup_recall_history`). Structural repairs (`repair_links`) should be run separately as needed.
 
 The existing shared runner in [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) is the preferred model for the cold-path baseline.
 

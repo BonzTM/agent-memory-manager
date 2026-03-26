@@ -40,7 +40,12 @@ trap cleanup_lock EXIT INT TERM
 $AMM jobs run reflect >/dev/null 2>&1 || true
 $AMM jobs run compress_history >/dev/null 2>&1 || true
 $AMM jobs run consolidate_sessions >/dev/null 2>&1 || true
+$AMM jobs run merge_duplicates >/dev/null 2>&1 || true
 $AMM jobs run extract_claims >/dev/null 2>&1 || true
 $AMM jobs run form_episodes >/dev/null 2>&1 || true
 $AMM jobs run detect_contradictions >/dev/null 2>&1 || true
+$AMM jobs run decay_stale_memory >/dev/null 2>&1 || true
+$AMM jobs run promote_high_value >/dev/null 2>&1 || true
+$AMM jobs run archive_session_traces >/dev/null 2>&1 || true
+$AMM jobs run rebuild_indexes >/dev/null 2>&1 || true
 $AMM jobs run cleanup_recall_history >/dev/null 2>&1 || true

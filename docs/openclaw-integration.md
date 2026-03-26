@@ -126,7 +126,7 @@ The sequence runs the baseline jobs in a deterministic order:
 /path/to/agent-memory-manager/examples/scripts/run-workers.sh
 ```
 
-Aggressive maintenance (`decay_stale_memory`, `merge_duplicates`) or low-cadence repairs (`rebuild_indexes`) should be run separately on a slower schedule. Structural repairs like `repair_links` should only be run via `amm repair --fix links`.
+The baseline runner now includes all maintenance jobs. Structural repairs like `repair_links` should be run separately via `amm repair --fix links` as needed.
 
 For a shared baseline, reuse [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh).
 

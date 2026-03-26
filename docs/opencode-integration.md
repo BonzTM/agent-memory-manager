@@ -67,7 +67,7 @@ OpenCode plugins can trigger light amm jobs, but the heavy maintenance loop stil
 /path/to/agent-memory-manager/examples/scripts/run-workers.sh
 ```
 
-The baseline runner covers essential maintenance. Aggressive jobs (`decay_stale_memory`, `merge_duplicates`) or low-cadence repairs (`rebuild_indexes`) should be run separately. Structural repairs like `repair_links` should only be run via `amm repair --fix links`.
+The baseline runner covers the full maintenance sequence. Structural repairs like `repair_links` should be run separately via `amm repair --fix links` as needed.
 
 Use host cron/systemd or the shared [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) for the cold-path baseline.
 
