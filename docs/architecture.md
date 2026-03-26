@@ -119,16 +119,33 @@ These axes are independent. A memory can be `global` scope + `private` privacy (
 
 ## Processing Pipeline
 
-amm processes information through four stages:
+amm runs a staged intelligence pipeline to move information from raw history to structured memory:
 
 ```
-Retain --> Reflect --> Compress --> Index
+Ingest → Reflect → Index → Compress → Consolidate → Dedup/Enrich → Lifecycle → Index
 ```
 
-1. **Retain**: Raw events and transcripts are appended to the history layer. Writes are synchronous and cheap.
-2. **Reflect**: Background workers read new events and extract candidate durable memories (preferences, decisions, facts, open loops, contradiction candidates, episode candidates). Heuristic-first with optional LLM assist.
-3. **Compress**: Background workers build leaf summaries over event spans, then session/topic summaries and episodes over leaf summaries. Every summary links back to its source span.
-4. **Index**: FTS5 tables are updated via triggers on insert/update/delete. Embeddings and cache are updated by maintenance jobs.
+1. **Ingest**: Raw events and transcripts are appended to the history layer (`events`). Writes are synchronous and lightweight.
+2. **Reflect**: Reflection processes triaged events in batches and extracts candidate memories. Extraction no longer embeds items individually to save overhead. Processing metadata is recorded in a ledger.
+3. **Index (Phase 1)**: `rebuild_indexes` runs after reflect to batch-embed new memories and update FTS5. It uses incremental queries (`ListUnembeddedMemories`) to avoid full table scans.
+4. **Compress**: Background workers build leaf/session summaries over event spans using batched compression (`CompressEventBatches`).
+5. **Consolidate**: Higher-level narrative units (episodes, topic summaries) are built from leaf summaries and events using `SummarizeTopicBatches`.
+6. **Dedup/Enrich**: `merge_duplicates` uses semantic similarity to consolidate overlapping memories. `enrich_memories` links entities and `rebuild_entity_graph` projects the relationship graph.
+7. **Lifecycle**: Review cycles promote, decay, or archive memories. `cross_project_transfer` moves high-confidence project memories to global scope.
+8. **Index (Phase 2)**: A final indexing pass catches summaries and episodes created in previous phases.
+
+---
+
+## Embedding Strategy
+
+amm uses a "batch-first" embedding strategy to maximize throughput and minimize API overhead:
+
+- **No per-item embedding**: Individual worker jobs (reflect, compress, consolidate) do not generate embeddings for the items they create.
+- **Incremental rebuilds**: The `rebuild_indexes` job performs batched embedding generation. It uses `ListUnembeddedMemories` and `ListUnembeddedSummaries` to find only items missing vectors for the current model.
+- **Optimized queries**: Queries for unembedded items are optimized to handle large datasets (up to 50k items) without scanning the entire database.
+- **Full rebuilds**: The `rebuild_indexes_full` variant allows force-rebuilding all vectors if the model or provider changes.
+
+---
 
 ## Retrieval Architecture
 
@@ -136,73 +153,72 @@ Retain --> Reflect --> Compress --> Index
 
 amm retrieval follows a three-step flow:
 
-1. **Find** (`recall`): Returns a thin list of scored `RecallItem` records -- just ID, kind, type, scope, score, and tight description. Low token cost.
+1. **Find** (`recall`): Returns a thin list of scored `RecallItem` records — just ID, kind, type, scope, score, and tight description.
 2. **Describe** (`describe`): Returns slightly richer metadata for one or more items without the full body.
-3. **Expand** (`expand`): Returns the full record plus provenance: a memory expands to its claims and source links; a summary expands to its source span, children, and optionally raw events; an episode expands to linked summaries, outcomes, and unresolved items.
-
-This layered approach keeps ambient recall cheap (thin items only) while allowing drill-down when the agent needs full detail.
+3. **Expand** (`expand`): Returns the full record plus provenance.
 
 ### Scoring Formula
 
-Recall uses a 10-signal scoring formula:
+Recall uses a weighted multi-signal formula with dynamic renormalization:
 
 ```
 score =
-    0.25 * lexical            -- FTS/BM25 match strength
-  + 0.18 * semantic           -- embedding cosine similarity (if enabled)
-  + 0.18 * entity_overlap     -- overlap between query entities and memory entities
-  + 0.10 * scope_fit          -- how well the memory's scope matches the query context
-  + 0.08 * recency            -- how recently the memory was created or confirmed
-  + 0.07 * importance         -- stored importance score
-  + 0.05 * temporal_validity  -- whether the memory is within its valid_from/valid_to range
-  + 0.05 * structural_proximity -- source/provenance overlap with query context
-  + 0.04 * freshness          -- computed at query time from temporal fields (not stored)
-  - 0.10 * repetition_penalty -- penalty for items recently shown in this session
+    w_lexical * lexical
+  + w_extraction_quality * extraction_quality
+  + w_semantic * semantic
+  + w_entity_overlap * entity_overlap
+  + w_scope_fit * scope_fit
+  + w_recency * recency
+  + w_importance * importance
+  + w_temporal_validity * temporal_validity
+  + w_structural_proximity * structural_proximity
+  + w_freshness * freshness
+  - w_repetition_penalty * repetition_penalty
 ```
 
-When semantic similarity is disabled (the default in v0), weights are renormalized across the remaining signals.
+Key scoring signals:
 
-### Ambient Recall
+- **Anti-hub dampening**: High-degree entities (hubs) receive IDF-like dampening to prevent common terms from skewing results.
+- **Extraction quality**: provisional memories are downweighted vs verified or upgraded records.
+- **Graph-aware overlap**: entity overlap uses query entities expanded by aliases and related entities from the projected graph.
+- **Learned weights**: Bayesian updates from relevance feedback (`expanded` actions) tune weights over time.
 
-Ambient recall is the primary retrieval mode. On every turn, the agent runtime:
+---
 
-1. Sends the latest inbound message to amm
-2. amm extracts entities/topics (exact match, capitalized token heuristics, recent topic cache)
-3. Queries across memories, summaries, episodes, and history
-4. Merges candidates, scores with the 10-signal formula, ranks
-5. Returns a thin packet of 3-7 `RecallItem` records
+## Entity Graph
 
-The result is a compact halo of relevant memory injected into the agent's context at low token cost.
+Entity modeling uses four components:
 
-### Repetition Suppression
+1. **Entities**: Canonical named nodes with types and aliases.
+2. **Memory Links**: joins between memories and entities.
+3. **Relationships**: Explicit edges like `uses` or `depends-on`.
+4. **Projection**: Derived 1-2 hop related-entity table with hop-weighted scores.
 
-The `recall_history` table tracks which items have been shown in which sessions. Items recently surfaced receive a repetition penalty during scoring, preventing the same memories from dominating every turn. Recall history rows older than 7 days (configurable) are cleaned up by the `cleanup_recall_history` job.
+Query entities expand via aliases and graph neighbors. This allows memories linked to related entities to surface even if exact terms are missing. Batch query methods (`GetMemoryEntitiesBatch`, `LinkMemoryEntitiesBatch`) ensure low-latency graph operations.
 
-## Data Flow
+---
 
-```
-1. Event ingested
-   --> stored in events table (canonical)
-   --> FTS trigger populates events_fts (derived)
+## Maintenance and Upgrades
 
-2. Reflect worker runs
-   --> reads unprocessed events
-   --> creates candidate memories in memories table
-   --> FTS trigger populates memories_fts
+- **`reset_derived`**: Use this command to purge all disposable data (FTS5, embeddings, caches, projections). This is the standard path for model upgrades or index corruption.
+- **Reprocess**: The reprocessing job is retrofitted with the endgame pipeline, using the processing ledger and entity linking for consistent backfills.
 
-3. Compress worker runs
-   --> groups events into spans
-   --> creates summaries in summaries table
-   --> links via summary_edges
-   --> FTS trigger populates summaries_fts
 
-4. Recall query arrives
-   --> FTS search across memories_fts, summaries_fts, episodes_fts, events_fts
-   --> score candidates with 10-signal formula
-   --> apply repetition suppression from recall_history
-   --> rank and return thin RecallItem list
-   --> log shown items to recall_history
-```
+## Intelligence Provider
+
+`core.IntelligenceProvider` is the intelligence abstraction used by reflection and lifecycle logic:
+
+- `AnalyzeEvents`
+- `TriageEvents`
+- `ReviewMemories`
+- `ConsolidateNarrative`
+
+amm runs in dual mode:
+
+- **LLM intelligence** (`LLMIntelligenceProvider`): uses chat-completion prompts for triage, extraction, review, and narrative consolidation.
+- **Heuristic intelligence** (`HeuristicIntelligenceProvider`): local fallback for no-LLM or LLM failure cases.
+
+LLM provider methods are fail-soft: if a call or parse fails, they fall back to heuristic behavior (or empty review results where appropriate). This preserves forward progress while improving quality when external models are available.
 
 ## Schema Overview
 
@@ -217,6 +233,8 @@ The `recall_history` table tracks which items have been shown in which sessions.
 | `claims` | Structured atomic assertions linked to memories |
 | `entities` | Canonical entity records (people, systems, concepts) |
 | `memory_entities` | Join table linking memories to entities |
+| `relationships` | Explicit entity-to-entity relationship edges |
+| `projects` | Project registry for project-scoped metadata |
 | `episodes` | Narrative memory units spanning events and summaries |
 | `artifacts` | Ingested non-message source material |
 | `jobs` | Queue and history for maintenance workers |
@@ -233,6 +251,8 @@ The `recall_history` table tracks which items have been shown in which sessions.
 | `embeddings` | Optional vector embeddings for semantic similarity |
 | `retrieval_cache` | Cached query results with TTL |
 | `recall_history` | Per-session record of shown items for repetition suppression |
+| `relevance_feedback` | Implicit relevance actions (e.g., `expanded`) used for learned ranking |
+| `entity_graph_projection` | Derived 1-2 hop entity-neighbor projection used in graph-aware recall |
 
 ### Freshness
 

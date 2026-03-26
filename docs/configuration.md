@@ -29,13 +29,25 @@ If a config file does not exist, amm silently uses defaults. JSON is auto-detect
 | `AMM_AUTO_DETECT_CONTRADICTIONS` | Automatically run contradiction detection | `true` |
 | `AMM_SUMMARIZER_ENDPOINT` | Base URL for OpenAI-compatible chat completions API used by the summarizer | _(unset)_ |
 | `AMM_SUMMARIZER_API_KEY` | API key for the summarizer endpoint | _(unset)_ |
-| `AMM_SUMMARIZER_MODEL` | Model name to use for extraction and summarization | `gpt-4o-mini` |
-| `AMM_SUMMARIZER_BATCH_SIZE` | Number of events per summarizer call during `reprocess`/`reprocess_all` jobs | `20` |
+| `AMM_SUMMARIZER_MODEL` | Model name for extraction/summarization requests | `gpt-4o-mini` |
+| `AMM_REVIEW_ENDPOINT` | Optional separate endpoint for review/lifecycle intelligence calls | _(unset; defaults to `AMM_SUMMARIZER_ENDPOINT`)_ |
+| `AMM_REVIEW_API_KEY` | API key for review/lifecycle endpoint | _(unset; defaults to `AMM_SUMMARIZER_API_KEY`)_ |
+| `AMM_REVIEW_MODEL` | Model for review/lifecycle intelligence tasks | _(unset; defaults to `AMM_SUMMARIZER_MODEL`)_ |
+| `AMM_SUMMARIZER_BATCH_SIZE` | Events per summarizer call during `reprocess` | `20` |
+| `AMM_REFLECT_BATCH_SIZE` | Unreflected events claimed per reflect loop iteration | `100` |
+| `AMM_REFLECT_LLM_BATCH_SIZE` | Triaged reflect events per extraction call | `20` |
+| `AMM_LIFECYCLE_REVIEW_BATCH_SIZE` | Memories per lifecycle review intelligence call | `50` |
+| `AMM_COMPRESS_CHUNK_SIZE` | Number of events per compression chunk | `10` |
+| `AMM_COMPRESS_MAX_EVENTS` | Maximum events allowed in a single compression span | `200` |
+| `AMM_COMPRESS_BATCH_SIZE` | Batches of events processed in compression jobs | `15` |
+| `AMM_TOPIC_BATCH_SIZE` | Batches of leaf summaries for topic summarization | `15` |
+| `AMM_EMBEDDING_BATCH_SIZE` | Items per batch embedding request | `64` |
+| `AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD` | Threshold for project-to-global promotion | `0.7` |
 | `AMM_EMBEDDINGS_ENABLED` | Enable embeddings provider integration | `false` |
 | `AMM_EMBEDDINGS_PROVIDER` | Embeddings provider name | _(unset)_ |
 | `AMM_EMBEDDINGS_ENDPOINT` | Base URL for embeddings provider API | _(unset)_ |
 | `AMM_EMBEDDINGS_API_KEY` | API key for embeddings provider | _(unset)_ |
-| `AMM_EMBEDDINGS_MODEL` | Embeddings model name | _(unset)_ |
+| `AMM_EMBEDDINGS_MODEL` | Embeddings model name | _(unset; runtime falls back to `text-embedding-3-small` when endpoint mode is used)_ |
 
 Environment variables accept the same value types as their config file equivalents. Boolean variables accept `true`, `false`, `1`, `0`, `t`, `f` (parsed by Go's `strconv.ParseBool`).
 
@@ -67,7 +79,19 @@ Environment variables accept the same value types as their config file equivalen
     "endpoint": "https://api.openai.com/v1",
     "api_key": "",
     "model": "gpt-4o-mini",
-    "batch_size": 20
+    "review_endpoint": "",
+    "review_api_key": "",
+    "review_model": "",
+    "batch_size": 20,
+    "reflect_batch_size": 100,
+    "reflect_llm_batch_size": 20,
+    "lifecycle_review_batch_size": 50,
+    "compress_chunk_size": 10,
+    "compress_max_events": 200,
+    "compress_batch_size": 15,
+    "topic_batch_size": 15,
+    "embedding_batch_size": 64,
+    "cross_project_similarity_threshold": 0.7
   },
   "embeddings": {
     "enabled": false,
@@ -106,7 +130,19 @@ auto_detect_contradictions = true
 endpoint = "https://api.openai.com/v1"
 api_key = ""
 model = "gpt-4o-mini"
+review_endpoint = ""
+review_api_key = ""
+review_model = ""
 batch_size = 20
+reflect_batch_size = 100
+reflect_llm_batch_size = 20
+lifecycle_review_batch_size = 50
+compress_chunk_size = 10
+compress_max_events = 200
+compress_batch_size = 15
+topic_batch_size = 15
+embedding_batch_size = 64
+cross_project_similarity_threshold = 0.7
 
 [embeddings]
 enabled = false
@@ -141,7 +177,7 @@ amm supports a flat subset of TOML: `[section]` headers and `key = value` pairs.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `default_privacy` | string | `private` | Default privacy level assigned to new memories when none is specified. Valid values: `private`, `shared`, `public`. |
+| `default_privacy` | string | `private` | Default privacy level assigned to new memories when none is specified. Valid values: `private`, `shared`, `public_safe`. |
 
 ### maintenance
 
@@ -158,8 +194,20 @@ amm supports a flat subset of TOML: `[section]` headers and `key = value` pairs.
 |-----|------|---------|-------------|
 | `endpoint` | string | _(unset)_ | Base URL for an OpenAI-compatible chat completions API. When set together with `api_key`, amm uses LLM-backed extraction for the `reflect` and `compress_history` workers instead of the built-in heuristic. Compatible with OpenAI, Anthropic (via OpenAI-compat endpoint), Ollama (`http://localhost:11434/v1`), vLLM, LM Studio, or any provider exposing `/v1/chat/completions`. |
 | `api_key` | string | _(unset)_ | Bearer token sent in the `Authorization` header. Required for most hosted providers. For local models (Ollama, LM Studio) set to any non-empty string. |
-| `model` | string | `gpt-4o-mini` | Model identifier passed in the request body. Use a cheap, fast model — extraction is structured JSON output, not creative writing. Good defaults: `gpt-4o-mini` (OpenAI), `claude-3-5-haiku-latest` (Anthropic), `llama3.2` (Ollama). |
+| `model` | string | _(unset)_ | Model identifier passed in extraction/summarization requests. If unset, runtime falls back to `gpt-4o-mini` when constructing an LLM summarizer. |
+| `review_endpoint` | string | _(unset)_ | Optional separate endpoint for lifecycle/review intelligence calls (`ReviewMemories`, `ConsolidateNarrative`). If unset, review calls use the primary summarizer endpoint. |
+| `review_api_key` | string | _(unset)_ | API key for `review_endpoint`. If unset, runtime falls back to `api_key`. |
+| `review_model` | string | _(unset)_ | Model for lifecycle/review tasks. If unset, runtime falls back to `model`, then `gpt-4o-mini`. |
 | `batch_size` | int | `20` | Number of events per summarizer call during `reprocess` and `reprocess_all` jobs. Higher values use fewer API calls but reduce extraction quality. Recommended range: 10-50. |
+| `reflect_batch_size` | int | `100` | Number of unreflected events claimed per reflect loop iteration. |
+| `reflect_llm_batch_size` | int | `20` | Number of triaged reflect events per extraction call. |
+| `lifecycle_review_batch_size` | int | `50` | Number of memories per lifecycle review intelligence call. |
+| `compress_chunk_size` | int | `10` | Number of events per compression chunk. |
+| `compress_max_events` | int | `200` | Maximum events in a single compression span. |
+| `compress_batch_size` | int | `15` | Batches of event chunks processed per compression call. |
+| `topic_batch_size` | int | `15` | Batches of leaf summaries processed for topic summarization. |
+| `embedding_batch_size` | int | `64` | Number of items per batch embedding request. Recommend `256` for large datasets. |
+| `cross_project_similarity_threshold` | float | `0.7` | Semantic similarity threshold for promoting project memories to global scope. |
 
 ### embeddings
 
@@ -169,7 +217,7 @@ amm supports a flat subset of TOML: `[section]` headers and `key = value` pairs.
 | `endpoint` | string | _(unset)_ | Base URL for an OpenAI-compatible embeddings API. Compatible with OpenAI, OpenRouter, Ollama (`http://localhost:11434/v1`), LiteLLM, or any provider exposing `/v1/embeddings`. |
 | `api_key` | string | _(unset)_ | Bearer token sent in the `Authorization` header. For local models (Ollama) set to any non-empty string or leave empty. |
 | `provider` | string | _(unset)_ | Provider name tag stored with embedding records. Informational only. |
-| `model` | string | `text-embedding-3-small` | Model identifier passed in the request body. Good defaults: `text-embedding-3-small` (OpenAI/OpenRouter), `all-minilm` (Ollama), `nomic-embed-text` (Ollama). |
+| `model` | string | _(unset)_ | Model identifier passed in the request body. If `endpoint` mode is used and this is empty, runtime falls back to `text-embedding-3-small`. |
 
 When `endpoint` is set and `enabled` is `true`, amm uses the API provider to generate embeddings on every memory and summary write, and during `rebuild_indexes`. Embeddings are stored in the `embeddings` table and used for semantic similarity scoring during recall (when `enable_semantic` is also `true`).
 
@@ -185,57 +233,62 @@ When LLM extraction is enabled, the `reflect` worker sends recent events to the 
 
 If any LLM call fails (network error, timeout, rate limit, malformed response), that batch automatically falls back to the heuristic — no data is lost.
 
+When `review_endpoint` is configured, lifecycle review and narrative-consolidation intelligence calls are routed to that endpoint/model; otherwise they use the primary summarizer endpoint/model.
+
 Memories created by LLM extraction are tagged with `metadata.extraction_method = "llm"`. The `reprocess` job uses this tag to skip events that have already been processed by the LLM, while `reprocess_all` ignores it and reprocesses everything. Old memories are marked `superseded` and linked to their replacement via the `superseded_by` field.
 
 ---
 
 ## Scoring Weights
 
-amm uses a multi-signal scoring formula to rank recall results. Each candidate item is evaluated against 9 signals, weighted and summed to produce a final score between 0.0 and 1.0.
+Recall uses a weighted multi-signal formula with dynamic renormalization and feedback-based learning.
 
-### Signal Weights (v0, semantic disabled)
+### Active Signals
 
-With semantic search disabled (the current default), the 8 positive signals are renormalized so their weights sum to 0.75. The repetition penalty is a flat deduction, not part of the normalized sum.
+Positive signals:
 
-| Signal | Weight | Description |
-|--------|--------|-------------|
-| **Lexical** | ~0.329 | FTS5 result position. Position 0 scores 1.0, decaying as `1 / (1 + position * 0.2)`. |
-| **Entity Overlap** | ~0.237 | Fraction of query entities found in the item's subject, body, tight_description, and tags. Entity extraction uses capitalized-token heuristics. |
-| **Scope Fit** | ~0.132 | How well the item's scope matches the query context. Project-matched items score 1.0; global items score 0.5 when a project context is set. |
-| **Recency** | ~0.105 | Exponential decay from the item's most recent timestamp. Half-life: 14 days. |
-| **Importance** | ~0.092 | The item's stored importance value (0.0-1.0), passed through directly. |
-| **Temporal Validity** | ~0.066 | 1.0 if the item is still valid (not expired, not superseded). 0.5 if superseded. 0.0 if `valid_to` is in the past. |
-| **Structural Proximity** | ~0.066 | 1.0 if the item has source event links. 0.5 otherwise. Rewards well-provenance items. |
-| **Freshness** | ~0.053 | Exponential decay from the item's last update or confirmation time. Same 14-day half-life as recency. |
-| **Repetition Penalty** | -0.10 | Deducted if the item was shown in the current session. Binary: 1.0 (shown) or 0.0 (not shown). |
+- lexical
+- extraction_quality
+- semantic (optional; only when embeddings are available for both query and candidate)
+- entity_overlap
+- scope_fit
+- recency
+- importance
+- temporal_validity
+- structural_proximity
+- freshness
+
+Penalty:
+
+- repetition_penalty
+
+### Endgame scoring behavior
+
+- **Extraction quality signal**: provisional extractions are downweighted relative to verified/upgraded memories.
+- **Graph-aware entity overlap**: entity overlap uses weighted query entities expanded by aliases and related entities (via entity graph traversal/projection), not only direct text tokens.
+- **Learned weight adjustments**: `update_ranking_weights` applies Bayesian updates to selected weights using access stats + `relevance_feedback` (`expanded` actions).
+- **Weights loaded from DB**: service initialization loads scoring weights from recent completed `update_ranking_weights` jobs when available; otherwise defaults are used.
 
 ### Formula
 
 ```
-final_score = wLexical * lexical
-            + wEntityOverlap * entity_overlap
-            + wScopeFit * scope_fit
-            + wRecency * recency
-            + wImportance * importance
-            + wTemporalValidity * temporal_validity
-            + wStructuralProximity * structural_proximity
-            + wFreshness * freshness
-            - wRepetitionPenalty * repetition_penalty
+final_score =
+    wLexical * lexical
+  + wExtractionQuality * extraction_quality
+  + wSemantic * semantic
+  + wEntityOverlap * entity_overlap
+  + wScopeFit * scope_fit
+  + wRecency * recency
+  + wImportance * importance
+  + wTemporalValidity * temporal_validity
+  + wStructuralProximity * structural_proximity
+  + wFreshness * freshness
+  - wRepetitionPenalty * repetition_penalty
 ```
 
-The result is clamped to `[0.0, 1.0]`.
-
-### When Semantic Search Is Enabled
-
-Once semantic search is enabled (`enable_semantic: true`), the original weight distribution applies and a 10th signal (semantic similarity, weight 0.18) is added. The other positive weights return to their pre-renormalization values with a total positive sum of 0.75.
+Result is clamped to `[0.0, 1.0]`. Positive signals are renormalized when optional signals are unavailable for a candidate.
 
 ### Tuning
 
-The weights are currently hardcoded in `internal/service/scoring.go`. To adjust retrieval behavior:
-
-- Increase `wRecency` to favor recent items over historically relevant ones.
-- Increase `wEntityOverlap` to favor items that mention the same entities as the query.
-- Increase `wRepetitionPenalty` to more aggressively suppress repeated items.
-- Decrease `wLexical` if FTS ranking does not align well with your content patterns.
-
-Future versions may expose these weights as configuration.
+- For immediate deterministic changes, adjust defaults in `internal/service/scoring.go`.
+- For behavior learned from usage, run `update_ranking_weights` periodically to persist updated weights into job results for next startup load.
