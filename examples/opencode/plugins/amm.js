@@ -19,6 +19,117 @@ function stringifyRecord(record) {
   );
 }
 
+function normalizeText(value) {
+  if (typeof value !== "string") return "";
+  return value.trim();
+}
+
+function extractTextParts(parts) {
+  if (!Array.isArray(parts)) return "";
+  const text = parts
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (!part || typeof part !== "object") return "";
+      if (typeof part.text === "string") return part.text;
+      if (typeof part.content === "string") return part.content;
+      if (Array.isArray(part.content)) return extractTextParts(part.content);
+      if (Array.isArray(part.parts)) return extractTextParts(part.parts);
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+  return normalizeText(text);
+}
+
+function extractMessageText(message) {
+  if (!message || typeof message !== "object") return "";
+
+  if (typeof message.content === "string") {
+    return normalizeText(message.content);
+  }
+
+  if (Array.isArray(message.content)) {
+    return extractTextParts(message.content);
+  }
+
+  if (typeof message.text === "string") {
+    return normalizeText(message.text);
+  }
+
+  if (Array.isArray(message.parts)) {
+    return extractTextParts(message.parts);
+  }
+
+  return "";
+}
+
+function extractMessageRole(message) {
+  if (!message || typeof message !== "object") return undefined;
+  if (typeof message.role === "string") return message.role;
+  if (typeof message.type === "string") return message.type;
+  if (message.author && typeof message.author.role === "string") {
+    return message.author.role;
+  }
+  return undefined;
+}
+
+function extractMessageID(message) {
+  if (!message || typeof message !== "object") return undefined;
+  if (typeof message.id === "string") return message.id;
+  if (typeof message.messageID === "string") return message.messageID;
+  if (typeof message.messageId === "string") return message.messageId;
+  return undefined;
+}
+
+function extractMessageTimestamp(message) {
+  if (!message || typeof message !== "object") return undefined;
+  if (message.time && typeof message.time.created !== "undefined") {
+    return message.time.created;
+  }
+  if (typeof message.createdAt !== "undefined") return message.createdAt;
+  if (typeof message.created_at !== "undefined") return message.created_at;
+  if (typeof message.timestamp !== "undefined") return message.timestamp;
+  return undefined;
+}
+
+function isMessageFinal(message, eventType) {
+  if (eventType === "message.created") {
+    const status = typeof message?.status === "string" ? message.status.toLowerCase() : "";
+    if (status && ["streaming", "in_progress", "pending", "partial"].includes(status)) {
+      return false;
+    }
+    return true;
+  }
+
+  if (eventType !== "message.updated") {
+    return false;
+  }
+
+  if (message?.final === true || message?.done === true || message?.complete === true) {
+    return true;
+  }
+
+  const status = typeof message?.status === "string" ? message.status.toLowerCase() : "";
+  return ["completed", "complete", "done", "final"].includes(status);
+}
+
+function extractMessagePayload(event) {
+  const properties = event?.properties;
+  if (!properties || typeof properties !== "object") return undefined;
+  if (properties.message && typeof properties.message === "object") return properties.message;
+  if (properties.data && typeof properties.data.message === "object") return properties.data.message;
+  if (properties.payload && typeof properties.payload.message === "object") return properties.payload.message;
+
+  if (
+    (event?.type === "message.created" || event?.type === "message.updated") &&
+    (typeof properties.role === "string" || typeof properties.content !== "undefined")
+  ) {
+    return properties;
+  }
+
+  return undefined;
+}
+
 const AMM_INGEST_TIMEOUT_MS = 5_000;
 const AMM_JOB_TIMEOUT_MS = 120_000;
 
@@ -58,6 +169,7 @@ function ingestEvent(event) {
 
 let maintenanceRunning = false;
 const maintenanceBySession = new Map();
+const emittedMessageVersions = new Map();
 
 function runMaintenanceAsync() {
   if (maintenanceRunning) return;
@@ -140,6 +252,24 @@ export const AMMMemoryPlugin = async ({ project }) => {
       }
     },
 
+    "tool.execute.before": async (input) => {
+      ingestEvent({
+        kind: "tool_call",
+        source_system: "opencode",
+        session_id: input.sessionID,
+        project_id: projectID,
+        actor_type: "tool",
+        content: stringifyValue(input.args) ?? "",
+        metadata: stringifyRecord({
+          hook_event: "tool.execute.before",
+          tool_name: input.tool,
+          call_id: input.callID,
+          tool_input: input.args,
+        }),
+        occurred_at: nowRfc3339(),
+      });
+    },
+
     "tool.execute.after": async (input, output) => {
       ingestEvent({
         kind: "tool_result",
@@ -161,6 +291,37 @@ export const AMMMemoryPlugin = async ({ project }) => {
     },
 
     event: async ({ event }) => {
+      if (event.type === "message.created" || event.type === "message.updated") {
+        const message = extractMessagePayload(event);
+        const role = extractMessageRole(message);
+        if (role === "user" || role === "assistant") {
+          const content = extractMessageText(message);
+          if (content && isMessageFinal(message, event.type)) {
+            const messageID = extractMessageID(message) ?? "unknown";
+            const versionKey = `${event.properties?.sessionID ?? "unknown"}:${messageID}:${role}`;
+            const fingerprint = `${content.length}:${content}`;
+
+            if (emittedMessageVersions.get(versionKey) !== fingerprint) {
+              emittedMessageVersions.set(versionKey, fingerprint);
+              ingestEvent({
+                kind: role === "user" ? "message_user" : "message_assistant",
+                source_system: "opencode",
+                session_id: event.properties?.sessionID,
+                project_id: projectID,
+                actor_type: role,
+                content,
+                metadata: stringifyRecord({
+                  hook_event: event.type,
+                  message_id: extractMessageID(message),
+                  status: message?.status,
+                }),
+                occurred_at: nowRfc3339(extractMessageTimestamp(message) ?? Date.now()),
+              });
+            }
+          }
+        }
+      }
+
       if (event.type === "session.created") {
         ingestEvent({
           kind: "session_start",

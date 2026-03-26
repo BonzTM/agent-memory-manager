@@ -2,13 +2,11 @@
 
 OpenCode fits amm well as an MCP-first runtime with a small plugin layer.
 
-The safest truthful support boundary today is:
+The supported integration boundary is:
 
 - **`amm-mcp` in `opencode.json`** for explicit amm tools
-- **a local OpenCode plugin** for stable runtime glue (`shell.env`, `tool.execute.after`, session lifecycle markers)
+- **a local OpenCode plugin** for runtime glue (`shell.env`, message/tool capture, session lifecycle markers)
 - **external amm workers** for heavier maintenance jobs
-
-This repo does **not** currently claim full OpenCode transcript capture or a stable message-hook-based memory loop.
 
 ## Repo-shipped example
 
@@ -49,14 +47,14 @@ OpenCode automatically loads local plugins from:
 - `~/.config/opencode/plugins/` for global plugins
 - `.opencode/plugins/` for project plugins
 
-The shipped `amm.js` plugin stays on the stable documented boundary:
+The shipped `amm.js` plugin captures the full conversation transcript boundary exposed by OpenCode events:
 
 - `shell.env` injects amm-related env vars into shell/tool execution
+- `tool.execute.before` records durable `tool_call` events in amm
 - `tool.execute.after` records durable `tool_result` events in amm
-- `event` handles only coarse session lifecycle markers such as `session.created` and `session.idle`
+- `event` records `message_user` and `message_assistant` from `message.created` / final `message.updated` events with dedupe protections
+- `event` also handles session lifecycle markers such as `session.created` and `session.idle`
 - maintenance jobs are executed asynchronously with process timeouts and a filesystem lock (`$AMM_DB_PATH.opencode-maintenance.lock`) so OpenCode's event loop is not blocked and overlapping workers are skipped
-
-That gives you useful operational memory without promising transcript fidelity from undocumented hook behavior.
 
 ## 3. Keep workers external
 
@@ -86,7 +84,7 @@ If the repo also uses ACM, ACM owns task workflow and AMM owns durable memory.
 ## Suggested usage pattern
 
 - **Explicit memory**: OpenCode uses amm through MCP (`amm_recall`, `amm_expand`, `amm_remember`, `amm_jobs_run`)
-- **Plugin glue**: OpenCode injects amm env vars and records tool/lifecycle markers
+- **Plugin glue**: OpenCode injects amm env vars and records message, tool-call, tool-result, and lifecycle markers
 - **Background processing**: external worker invocations turn that event stream into summaries and memories
 
 ## Suggested repo instructions snippet
@@ -105,12 +103,10 @@ If the repo also uses ACM, ACM owns task workflow and AMM owns durable memory.
 
 - a real OpenCode MCP config example
 - a real OpenCode local plugin example
+- message + tool-call + tool-result capture into AMM event kinds (`message_user`, `message_assistant`, `tool_call`, `tool_result`)
 - global install guidance that mirrors the same pattern we dogfood locally
 
-## What this repo does not promise yet
+## Current limits
 
-- stable full-message capture from OpenCode conversations
-- transcript reconstruction from `message.updated` / `message.part.updated`
-- a native OpenCode amm npm package published independently of this repo
-
-If OpenCode later documents richer message hooks as stable, this integration can expand. For now, MCP plus stable plugin glue is the supportable boundary.
+- capture quality depends on OpenCode event payload shape and availability in your build
+- a native OpenCode amm npm package is not published independently of this repo

@@ -5,10 +5,8 @@ This directory ships the truthful OpenCode amm pattern for this repo.
 The supported shape is:
 
 - **MCP first** for explicit amm access through `/usr/local/bin/amm-mcp`
-- **A small local plugin** for environment injection, session lifecycle markers, and tool-result capture
+- **A small local plugin** for environment injection, full conversation event capture, and session lifecycle markers
 - **External amm workers** for heavier maintenance jobs
-
-It does **not** claim full transcript capture from OpenCode yet.
 
 ## Files
 
@@ -16,7 +14,10 @@ It does **not** claim full transcript capture from OpenCode yet.
 - `package.json` — marks the plugin directory as ESM so local `plugins/*.js` files can use `export`
 - `plugins/amm.js` — local OpenCode plugin that:
   - injects `AMM_BIN`, `AMM_DB_PATH`, `AMM_PROJECT_ID`, and `AMM_SESSION_ID`
+  - records `tool.execute.before` as amm `tool_call`
   - records `tool.execute.after` as amm `tool_result`
+  - records user and assistant messages as amm `message_user` / `message_assistant`
+  - deduplicates message events so the same message content is not ingested twice
   - records `session.created` / `session.idle`
   - runs `reflect` and `compress_history` on `session.idle` in a non-blocking background process with timeout guards and a lock file to prevent overlapping maintenance runs
 
@@ -35,12 +36,9 @@ If you already have an existing `~/.config/opencode/opencode.json`, merge only t
 ## What this plugin captures
 
 - session lifecycle markers (`session_start`, `session_idle`)
-- tool results from `tool.execute.after`
-
-## What it does not capture yet
-
-- full user-message capture
-- full assistant-message capture
-- OpenCode transcript reconstruction
+- user messages (`message_user`)
+- assistant messages (`message_assistant`) from final message states
+- tool calls from `tool.execute.before` (`tool_call`)
+- tool results from `tool.execute.after` (`tool_result`)
 
 Use amm's MCP surface for explicit recall and remember operations while this plugin handles the stable glue.
