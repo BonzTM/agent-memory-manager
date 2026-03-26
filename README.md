@@ -1,194 +1,160 @@
 # amm — Agent Memory Manager
 
-A persistent, typed, temporal memory substrate for agents.
-
-## What is amm?
-
-amm is a database-backed memory system that gives agents durable, structured, scoped memory that persists beyond context windows and across sessions and projects. It ingests raw interaction history, compresses it into expandable summaries, extracts typed durable memories (facts, preferences, decisions, episodes, and more), and serves low-latency ambient recall packets so agents always have a relevant halo of context.
-
-amm is **not** a chat runtime, a task workflow engine, a vector DB wrapper dressed up as cognition, a markdown convention, or a pure transcript archive. It handles memory -- nothing more, nothing less.
-
-### Key Capabilities
-
-- Append-only raw event and transcript ingestion
-- 16 typed durable memory records (preference, fact, decision, episode, identity, procedure, constraint, and more)
-- Scoped memory: global, project, and session with orthogonal privacy levels
-- Ambient recall: low-latency associative retrieval on every turn
-- 9 retrieval modes for different query intents
-- Expandable summaries linked back to source history spans
-- Multi-signal scoring with 10-factor ranking
-- Background reflection, compression, and maintenance workers
-- Provenance tracking and recall explainability
-- Integrity checking and self-repair
-- CLI and MCP (JSON-RPC over stdio) interfaces backed by a single service layer
-- SQLite-backed, single binary, local-first, no external services required
+AMM gives AI agents durable, structured memory that persists across sessions and projects. It ingests conversation history, extracts typed memories, and serves low-latency recall for context injection.
 
 ## Quick Start
 
-```bash
-# Prerequisites
-# Go 1.21+, CGO enabled (for SQLite)
+1. **Build**
+   ```bash
+   CGO_ENABLED=1 go build -tags fts5 -o amm ./cmd/amm
+   ```
+2. **Initialize**
+   ```bash
+   AMM_DB_PATH=~/.amm/amm.db ./amm init
+   ```
+3. **Configure (Optional)**
+   ```bash
+   export AMM_SUMMARIZER_ENDPOINT=https://api.openai.com/v1
+   export AMM_SUMMARIZER_API_KEY=sk-...
+   ```
+4. **Ingest an Event**
+   ```bash
+   echo '{"kind":"message_user","source_system":"cli","content":"User prefers Go"}' | ./amm ingest event --in -
+   ```
+5. **Recall**
+   ```bash
+   ./amm recall "user preferences"
+   ```
 
-# Build
-CGO_ENABLED=1 go build -tags fts5 -o amm ./cmd/amm
+For detailed setup, see [Getting Started](docs/getting-started.md).
 
-# Initialize
-AMM_DB_PATH=~/.amm/amm.db ./amm init
+## What AMM Does
 
-# Store a memory
-./amm remember --type preference --scope global \
-  --subject "Josh" \
-  --body "Josh prefers concise replies by default" \
-  --tight "Prefers concise replies"
+AMM is a database-backed memory substrate, not a chat runtime or task engine. It focuses on the transition from ephemeral interaction to durable knowledge.
 
-# Recall
-./amm recall --mode ambient "communication preferences"
+- **Event Ingestion**: Captures every turn in an append-only, full-transcript archive.
+- **LLM Extraction**: Auto-extracts facts, preferences, and decisions with heuristic fallback when no LLM is configured.
+- **Entity Graph**: Builds a relationship-aware model of the workspace for precision scoring.
+- **Multi-Signal Recall**: Supports associative retrieval with 9 modes to match agent intent.
+- **Background Pipeline**: Runs reflection, compression, and maintenance to keep memory fresh.
 
-# Ingest a raw event
-echo '{"kind":"message_user","source_system":"claude-code","content":"Hello world","occurred_at":"2026-03-23T12:00:00Z"}' | ./amm ingest event --in -
+## How Agents Use AMM
 
-# Run reflection to auto-extract memories from events
-./amm jobs run reflect
+The memory loop fits into every agent turn:
+1. **Recall**: Ask AMM for context at the start of a task or repo switch.
+2. **Expand**: Fetch full details only for the relevant memories or summaries.
+3. **Act**: Use the recalled context to inform the next tool call or response.
+4. **Remember**: Commit high-confidence decisions and facts explicitly.
 
-# Check status
-./amm status
-```
+See the [Agent Onboarding Guide](docs/agent-onboarding.md) for integration patterns.
 
-## How agents should use amm
+## Architecture at a Glance
 
-The durable-memory loop is intentionally small:
+AMM uses a five-layer model to manage information from raw history to durable truth:
 
-1. Connect `amm-mcp` or the `amm` CLI to the runtime.
-2. At task start, repo switch, or resume after interruption, ask AMM for thin recall (`ambient` is the default hot path).
-3. Expand only the memories, summaries, or episodes you actually need before acting.
-4. Commit only stable, high-confidence knowledge explicitly with `amm remember` / `amm_remember`; let hooks, plugins, and background workers capture the rest from history.
-5. Keep the runtime boundary honest. Use only the hook, plugin, or MCP surfaces the runtime actually documents, and keep maintenance jobs external.
+| Layer | Name | Purpose |
+|-------|------|---------|
+| A | Working Memory | Ephemeral, runtime-only state for the current turn. |
+| B | History Layer | Append-only raw events and transcripts. Authoritative truth. |
+| C | Compression Layer | Summaries linked to source history spans. |
+| D | Canonical Memory Layer | Typed durable records like facts, preferences, and decisions. |
+| E | Derived Index Layer | FTS5 and embeddings for low-latency retrieval. |
 
-amm pairs well with [ACM](https://github.com/bonztm/agent-context-manager) for repos that also use governed task workflows — ACM handles task framing, verification, and closeout while amm handles durable memory.
-
-### Start here
-
-- Want the fastest end-to-end setup for a user? Start with [Agent Onboarding](docs/agent-onboarding.md).
-- Want the shared runtime model first? Read [Integration Guide](docs/integration.md).
-- Wiring a specific runtime? Jump straight to [Codex Integration](docs/codex-integration.md), [OpenCode Integration](docs/opencode-integration.md), [OpenClaw Integration](docs/openclaw-integration.md), or [Hermes-Agent Integration](docs/hermes-agent-integration.md).
-
-## Architecture
-
-amm is a Go binary with a clean layered architecture. All business logic flows through a single `Service` interface -- CLI, MCP, and HTTP adapters are thin wrappers that call into it.
-
+### Module Layout
 ```
 cmd/amm/         CLI entrypoint
 cmd/amm-mcp/     MCP adapter (JSON-RPC over stdio)
 internal/
   core/          Service + repository interfaces, domain types
   service/       Business logic, recall, scoring, workers
-  adapters/
-    cli/         JSON envelope CLI runner
-    mcp/         MCP tool server
-    sqlite/      SQLite repository + migrations
-  contracts/v1/  Typed payloads, validation
+  adapters/      CLI, MCP, and SQLite implementations
+  contracts/v1/  Typed payloads and validation
   runtime/       Config, service factory, logger
 ```
 
-See [docs/architecture.md](docs/architecture.md) for the full architecture reference.
+Full details in [Architecture Documentation](docs/architecture.md).
 
-## Memory Model
+## Integrations
 
-amm organizes information into five layers, from ephemeral to durable:
+- **Claude Code**: Native MCP wiring and event hooks — see [examples/claude-code](examples/claude-code/).
+- **Codex**: Integrated via [Codex Integration](docs/codex-integration.md).
+- **OpenCode**: Dogfooding runtime with [OpenCode Integration](docs/opencode-integration.md).
+- **OpenClaw**: Worker-based memory capture in [OpenClaw Integration](docs/openclaw-integration.md).
+- **Hermes**: Sidecar model for [Hermes Integration](docs/hermes-agent-integration.md).
 
-| Layer | Name | Purpose |
-|-------|------|---------|
-| A | Working Memory | Ephemeral, runtime-only current turn state |
-| B | History Layer | Append-only raw events and transcripts -- complete archive |
-| C | Compression Layer | Summaries over raw history, linked back to source spans |
-| D | Canonical Memory Layer | Typed durable records -- the authoritative memory substrate |
-| E | Derived Index Layer | FTS5, optional embeddings, retrieval cache -- disposable and rebuildable |
+AMM pairs with [ACM](https://github.com/bonztm/agent-context-manager) for repositories requiring governed task workflows and durable state.
 
-The core invariant: canonical records (Layer D) and source history (Layer B) are authoritative truth. Derived indexes (Layer E) can always be rebuilt from them.
+## Configuration
 
-See [docs/architecture.md](docs/architecture.md) for detailed layer descriptions.
+Set these environment variables to enable LLM-backed extraction and semantic search:
 
-## Retrieval Modes
+- `AMM_SUMMARIZER_ENDPOINT`: OpenAI-compatible API base URL.
+- `AMM_SUMMARIZER_API_KEY`: API key for the summarizer.
+- `AMM_EMBEDDINGS_ENABLED`: Set to `true` for vector-based recall.
+- `AMM_EMBEDDINGS_API_KEY`: API key for embedding generation.
+
+Full reference in [Configuration Documentation](docs/configuration.md).
+
+## Reference Tables
+
+<details>
+<summary>Retrieval Modes</summary>
 
 | Mode | Description |
 |------|-------------|
-| `ambient` | Low-latency associative recall for injection on every turn |
-| `facts` | Retrieve durable factual memories matching a query |
-| `episodes` | Retrieve narrative episode records |
-| `timeline` | Chronologically ordered retrieval |
-| `project` | Scoped retrieval within a specific project |
-| `entity` | Retrieve memories related to specific entities |
-| `active` | Surface active context, open loops, and in-flight items |
-| `history` | Search raw event history directly |
-| `hybrid` | Multi-strategy combined retrieval |
+| `ambient` | Default associative recall for every turn. |
+| `facts` | Retrieve only durable factual memories. |
+| `episodes` | Retrieve narrative episode records. |
+| `timeline` | Chronological event and memory retrieval. |
+| `project` | Scoped retrieval within a specific project. |
+| `entity` | Focus on memories related to specific entities. |
+| `active` | Surface context for open loops and in-flight items. |
+| `history` | Direct search across raw event history. |
+| `hybrid` | Combined multi-strategy retrieval. |
+</details>
 
-## Maintenance Jobs
+<details>
+<summary>Maintenance Jobs</summary>
 
 | Job | Description |
 |-----|-------------|
-| `reflect` | Extract candidate durable memories from recent events |
-| `compress_history` | Build leaf summaries over raw event spans |
-| `consolidate_sessions` | Build session/topic summaries and episode summaries |
-| `merge_duplicates` | Find and merge duplicate facts, preferences, and decisions |
-| `extract_claims` | Extract structured assertions from memories |
-| `form_episodes` | Group related events into narrative episodes |
-| `detect_contradictions` | Find conflicting claims or stale truths |
-| `decay_stale_memory` | Downrank stale assumptions and open loops |
-| `promote_high_value` | Promote high-value memories based on access patterns and confidence |
-| `archive_session_traces` | Archive low-salience session-scoped memories |
-| `rebuild_indexes` | Rebuild FTS5 and generate embeddings for items missing them (incremental) |
-| `rebuild_indexes_full` | Rebuild FTS5 and regenerate all embeddings from scratch |
-| `repair_links` | Validate and repair summary/source/memory links |
-| `cleanup_recall_history` | Delete recall history rows older than TTL (default: 7 days) |
-| `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM |
-| `reprocess_all` | Batch re-extract all memories unconditionally, superseding both heuristic and LLM results |
-
-## Build Requirements
-
-- **Go 1.21+**
-- **CGO_ENABLED=1** (required for SQLite via go-sqlite3)
-- **`-tags fts5`** required for full-text search (enforced at compile time)
-
-```bash
-# Build
-CGO_ENABLED=1 go build -tags fts5 -o amm ./cmd/amm
-
-# Run tests
-CGO_ENABLED=1 go test -tags fts5 ./...
-```
-
-## Optional: Summarizer and Embeddings
-
-By default, amm uses a heuristic phrase-cue system for memory extraction and FTS5 for retrieval. For higher quality, configure one or both external providers:
-
-```bash
-# Summarizer — LLM-backed extraction and summarization
-export AMM_SUMMARIZER_ENDPOINT=https://api.openai.com/v1   # or http://localhost:11434/v1 for Ollama
-export AMM_SUMMARIZER_API_KEY=sk-...
-export AMM_SUMMARIZER_MODEL=gpt-4o-mini                     # optional, defaults to gpt-4o-mini
-
-# Embeddings — semantic similarity for recall
-export AMM_EMBEDDINGS_ENABLED=true
-export AMM_EMBEDDINGS_ENDPOINT=https://api.openai.com/v1   # or http://localhost:11434/v1 for Ollama
-export AMM_EMBEDDINGS_API_KEY=sk-...
-export AMM_EMBEDDINGS_MODEL=text-embedding-3-small          # optional, defaults to text-embedding-3-small
-export AMM_ENABLE_SEMANTIC=true
-```
-
-Both use OpenAI-compatible endpoints (OpenAI, OpenRouter, Anthropic, Ollama, vLLM, LM Studio). Summarizer and embeddings are configured independently — you can use different providers, models, or API keys for each. When unset, amm operates entirely locally with no external API calls. See [Configuration](docs/configuration.md) for details.
+| `reflect` | Extract candidate memories from recent events. |
+| `rebuild_indexes` | Incremental FTS5 and embedding rebuild (runs after reflect). |
+| `compress_history` | Build leaf summaries over event spans. |
+| `consolidate_sessions` | Build session and episode summaries. |
+| `build_topic_summaries` | Build topic-level hierarchical summaries. |
+| `merge_duplicates` | Consolidate overlapping memories. |
+| `extract_claims` | Extract structured assertions from memories. |
+| `enrich_memories` | Entity-link explicitly remembered memories. |
+| `rebuild_entity_graph` | Rebuild pre-computed entity graph neighborhoods. |
+| `form_episodes` | Group related events into narrative episodes. |
+| `detect_contradictions` | Find conflicting claims or stale truths. |
+| `decay_stale_memory` | Downrank stale assumptions and open loops. |
+| `promote_high_value` | Promote frequently accessed memories. |
+| `lifecycle_review` | LLM-powered review for memory decay and promotion. |
+| `cross_project_transfer` | Promote reusable memories to global scope. |
+| `archive_session_traces` | Archive low-salience session memories. |
+| `update_ranking_weights` | Update scoring weights from relevance feedback. |
+| `rebuild_indexes_full` | Full FTS5 and embedding rebuild from scratch. |
+| `cleanup_recall_history` | Prune old recall history rows. |
+| `reprocess` | Re-extract from events, skipping LLM-processed. |
+| `reprocess_all` | Re-extract from all events unconditionally. |
+</details>
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) -- Memory layers, retrieval engine, schema, and key invariants
-- [CLI Reference](docs/cli-reference.md) -- All CLI commands and flags
-- [MCP Reference](docs/mcp-reference.md) -- MCP tool definitions for JSON-RPC integration
-- [Integration Guide](docs/integration.md) -- Shared integration model, hooks, MCP, workers, and runtime guide index
-- [Codex Integration](docs/codex-integration.md) -- MCP + hooks + AGENTS snippet for Codex workflows
-- [Hermes-Agent Integration](docs/hermes-agent-integration.md) -- Sidecar model, MCP wiring, and amm-side helper scripts for Hermes
-- [OpenClaw Integration](docs/openclaw-integration.md) -- Real OpenClaw example, native hooks, and amm worker strategy
-- [OpenCode Integration](docs/opencode-integration.md) -- MCP + local plugin glue for OpenCode dogfooding and user setup
-- [Configuration](docs/configuration.md) -- Config file format and environment variables
-- [Agent Onboarding](docs/agent-onboarding.md) -- Guide for agents using amm as their memory substrate
+- [Architecture](docs/architecture.md)
+- [CLI Reference](docs/cli-reference.md)
+- [MCP Reference](docs/mcp-reference.md)
+- [Integration Guide](docs/integration.md)
+- [Configuration](docs/configuration.md)
+- [Agent Onboarding](docs/agent-onboarding.md)
+
+## Build & Test
+
+- **Prerequisites**: Go 1.21+, CGO enabled.
+- **Build**: `CGO_ENABLED=1 go build -tags fts5 ./cmd/amm`
+- **Test**: `CGO_ENABLED=1 go test -tags fts5 ./...`
 
 ## License
 
