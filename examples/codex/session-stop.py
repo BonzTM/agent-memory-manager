@@ -91,11 +91,31 @@ def transcript_events(transcript_path: str, session_id: str, project_id: str) ->
         payload_type = payload.get("type")
 
         if payload_type == "function_call":
+            tool_name = str(payload.get("name") or "")
+            tool_input = str(payload.get("arguments") or "")
             call_id = payload.get("call_id")
+            events.append(
+                {
+                    "kind": "tool_call",
+                    "source_system": "codex",
+                    "session_id": session_id,
+                    "project_id": project_id,
+                    "actor_type": "tool",
+                    "content": f"{tool_name}: {tool_input}",
+                    "metadata": {
+                        "hook_event": "StopTranscriptImport",
+                        "tool_name": tool_name,
+                        "tool_input": tool_input,
+                        "call_id": call_id,
+                        "transcript_path": transcript_path,
+                    },
+                    "occurred_at": timestamp,
+                }
+            )
             if isinstance(call_id, str) and call_id:
                 call_metadata[call_id] = {
-                    "tool_name": str(payload.get("name") or ""),
-                    "tool_input": str(payload.get("arguments") or ""),
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
                 }
             continue
 
@@ -214,7 +234,7 @@ def main() -> int:
     }
     run_amm(["ingest", "event", "--in", "-"], json.dumps(event))
 
-    for job in ["reflect", "compress_history", "consolidate_sessions"]:
+    for job in ["reflect", "rebuild_indexes", "compress_history", "consolidate_sessions"]:
         run_amm(["jobs", "run", job])
 
     print(json.dumps({"systemMessage": "amm recorded Codex session stop and ran maintenance jobs."}))
