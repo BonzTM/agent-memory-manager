@@ -54,6 +54,22 @@ func (s *lifecycleReviewIntelligenceStub) ReviewMemories(_ context.Context, memo
 	return result, nil
 }
 
+func (s *lifecycleReviewIntelligenceStub) CompressEventBatches(_ context.Context, chunks []core.EventChunk) ([]core.CompressionResult, error) {
+	results := make([]core.CompressionResult, 0, len(chunks))
+	for _, chunk := range chunks {
+		results = append(results, core.CompressionResult{Index: chunk.Index})
+	}
+	return results, nil
+}
+
+func (s *lifecycleReviewIntelligenceStub) SummarizeTopicBatches(_ context.Context, topics []core.TopicChunk) ([]core.CompressionResult, error) {
+	results := make([]core.CompressionResult, 0, len(topics))
+	for _, topic := range topics {
+		results = append(results, core.CompressionResult{Index: topic.Index})
+	}
+	return results, nil
+}
+
 func (s *lifecycleReviewIntelligenceStub) ConsolidateNarrative(context.Context, []core.EventContent, []core.MemorySummary) (*core.NarrativeResult, error) {
 	return &core.NarrativeResult{}, nil
 }
@@ -265,7 +281,7 @@ func TestLifecycleReview_ConflictPrecedence(t *testing.T) {
 	}
 
 	stub := &lifecycleReviewIntelligenceStub{
-			reviewFn: func([]core.MemoryReview) *core.ReviewResult {
+		reviewFn: func([]core.MemoryReview) *core.ReviewResult {
 			return &core.ReviewResult{
 				Promote: []string{memA.ID},
 				Decay:   []string{memA.ID, memB.ID},

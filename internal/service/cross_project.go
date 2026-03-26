@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	crossProjectSimilarityThreshold = 0.7
-	crossProjectImportanceFloor     = 0.7
-	crossProjectConfidenceFloor     = 0.7
+	defaultCrossProjectSimilarityThreshold = 0.7
+	crossProjectImportanceFloor            = 0.7
+	crossProjectConfidenceFloor            = 0.7
 )
 
 func (s *AMMService) CrossProjectTransfer(ctx context.Context) (int, error) {
@@ -44,6 +44,10 @@ func (s *AMMService) CrossProjectTransfer(ctx context.Context) (int, error) {
 	}
 
 	neighbors := make([][]int, len(candidates))
+	similarityThreshold := s.crossProjectSimilarityThreshold
+	if similarityThreshold <= 0 {
+		similarityThreshold = defaultCrossProjectSimilarityThreshold
+	}
 	for i := 0; i < len(candidates); i++ {
 		for j := i + 1; j < len(candidates); j++ {
 			memA := candidates[i]
@@ -55,7 +59,7 @@ func (s *AMMService) CrossProjectTransfer(ctx context.Context) (int, error) {
 				continue
 			}
 			sim := jaccardSimilarity(normalizeMemoryText(memA.Body), normalizeMemoryText(memB.Body))
-			if sim < crossProjectSimilarityThreshold {
+			if sim < similarityThreshold {
 				continue
 			}
 			neighbors[i] = append(neighbors[i], j)
