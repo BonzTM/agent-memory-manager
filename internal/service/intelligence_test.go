@@ -40,6 +40,39 @@ func TestHeuristicIntelligence_AnalyzeEvents(t *testing.T) {
 	}
 }
 
+func TestHeuristicIntelligence_CompressEventBatches(t *testing.T) {
+	h := NewHeuristicIntelligenceProvider()
+	results, err := h.CompressEventBatches(context.Background(), []core.EventChunk{
+		{Index: 1, Contents: []string{"event one", "event two"}},
+		{Index: 2, Contents: []string{"event three"}},
+	})
+	if err != nil {
+		t.Fatalf("CompressEventBatches error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].Index != 1 || results[1].Index != 2 {
+		t.Fatalf("expected indexed results, got %#v", results)
+	}
+}
+
+func TestHeuristicIntelligence_SummarizeTopicBatches(t *testing.T) {
+	h := NewHeuristicIntelligenceProvider()
+	results, err := h.SummarizeTopicBatches(context.Background(), []core.TopicChunk{
+		{Index: 4, Title: "Topic A", Contents: []string{"leaf one", "leaf two"}},
+	})
+	if err != nil {
+		t.Fatalf("SummarizeTopicBatches error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Index != 4 {
+		t.Fatalf("expected result index 4, got %#v", results[0])
+	}
+}
+
 func TestTriage_SkipsClearNoise(t *testing.T) {
 	h := NewHeuristicIntelligenceProvider()
 
@@ -252,6 +285,70 @@ func TestLLMIntelligence_ConsolidateNarrative(t *testing.T) {
 	}
 	if result.Episode == nil || result.Episode.Title != "Phase 2A" {
 		t.Fatalf("expected parsed episode, got %#v", result.Episode)
+	}
+}
+
+func TestLLMIntelligence_CompressEventBatches_ReturnsMappedResults(t *testing.T) {
+	payload := []map[string]any{
+		{"index": 2, "body": "chunk two body", "tight_description": "chunk two tight"},
+		{"index": 1, "body": "chunk one body", "tight_description": "chunk one tight"},
+	}
+	b, _ := json.Marshal(payload)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(mockChatResponse(string(b))))
+	}))
+	defer srv.Close()
+
+	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model"), nil)
+	results, err := provider.CompressEventBatches(context.Background(), []core.EventChunk{
+		{Index: 1, Contents: []string{"event 1", "event 2"}},
+		{Index: 2, Contents: []string{"event 3"}},
+	})
+	if err != nil {
+		t.Fatalf("CompressEventBatches error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].Index != 1 || results[0].Body != "chunk one body" || results[0].TightDescription != "chunk one tight" {
+		t.Fatalf("unexpected result[0]: %#v", results[0])
+	}
+	if results[1].Index != 2 || results[1].Body != "chunk two body" || results[1].TightDescription != "chunk two tight" {
+		t.Fatalf("unexpected result[1]: %#v", results[1])
+	}
+}
+
+func TestLLMIntelligence_SummarizeTopicBatches_ReturnsMappedResults(t *testing.T) {
+	payload := []map[string]any{
+		{"index": 7, "body": "topic seven body", "tight_description": "topic seven tight"},
+		{"index": 8, "body": "topic eight body", "tight_description": "topic eight tight"},
+	}
+	b, _ := json.Marshal(payload)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(mockChatResponse(string(b))))
+	}))
+	defer srv.Close()
+
+	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model"), nil)
+	results, err := provider.SummarizeTopicBatches(context.Background(), []core.TopicChunk{
+		{Index: 7, Title: "Topic A", Contents: []string{"leaf 1", "leaf 2"}},
+		{Index: 8, Title: "Topic B", Contents: []string{"leaf 3"}},
+	})
+	if err != nil {
+		t.Fatalf("SummarizeTopicBatches error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].Index != 7 || results[0].Body != "topic seven body" || results[0].TightDescription != "topic seven tight" {
+		t.Fatalf("unexpected result[0]: %#v", results[0])
+	}
+	if results[1].Index != 8 || results[1].Body != "topic eight body" || results[1].TightDescription != "topic eight tight" {
+		t.Fatalf("unexpected result[1]: %#v", results[1])
 	}
 }
 

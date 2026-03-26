@@ -108,6 +108,63 @@ func (p *LLMIntelligenceProvider) TriageEvents(ctx context.Context, events []cor
 	return parsed, nil
 }
 
+func (p *LLMIntelligenceProvider) CompressEventBatches(ctx context.Context, chunks []core.EventChunk) ([]core.CompressionResult, error) {
+	if len(chunks) == 0 {
+		return []core.CompressionResult{}, nil
+	}
+	if p.extractChatComplete == nil {
+		return p.fallback.CompressEventBatches(ctx, chunks)
+	}
+
+	prompt := buildCompressEventBatchesPrompt(chunks)
+	raw, err := p.extractChatComplete(ctx, prompt)
+	if err != nil {
+		return p.fallback.CompressEventBatches(ctx, chunks)
+	}
+
+	requiredIndexes := make([]int, 0, len(chunks))
+	for _, chunk := range chunks {
+		requiredIndexes = append(requiredIndexes, chunk.Index)
+	}
+	parsed, err := parseCompressionResults(raw, requiredIndexes)
+	if err != nil {
+		return p.fallback.CompressEventBatches(ctx, chunks)
+	}
+
+	return parsed, nil
+}
+
+func (p *LLMIntelligenceProvider) SummarizeTopicBatches(ctx context.Context, topics []core.TopicChunk) ([]core.CompressionResult, error) {
+	if len(topics) == 0 {
+		return []core.CompressionResult{}, nil
+	}
+
+	chatComplete := p.reviewChatComplete
+	if chatComplete == nil {
+		chatComplete = p.extractChatComplete
+	}
+	if chatComplete == nil {
+		return p.fallback.SummarizeTopicBatches(ctx, topics)
+	}
+
+	prompt := buildSummarizeTopicBatchesPrompt(topics)
+	raw, err := chatComplete(ctx, prompt)
+	if err != nil {
+		return p.fallback.SummarizeTopicBatches(ctx, topics)
+	}
+
+	requiredIndexes := make([]int, 0, len(topics))
+	for _, topic := range topics {
+		requiredIndexes = append(requiredIndexes, topic.Index)
+	}
+	parsed, err := parseCompressionResults(raw, requiredIndexes)
+	if err != nil {
+		return p.fallback.SummarizeTopicBatches(ctx, topics)
+	}
+
+	return parsed, nil
+}
+
 func (p *LLMIntelligenceProvider) ReviewMemories(ctx context.Context, memories []core.MemoryReview) (*core.ReviewResult, error) {
 	if len(memories) == 0 {
 		return &core.ReviewResult{}, nil
@@ -348,6 +405,37 @@ func parseTriageDecisions(raw string, events []core.EventContent) (map[int]core.
 	return decisions, nil
 }
 
+func parseCompressionResults(raw string, requiredIndexes []int) ([]core.CompressionResult, error) {
+	var payload []core.CompressionResult
+	if err := json.Unmarshal([]byte(trimLLMJSON(raw)), &payload); err != nil {
+		return nil, err
+	}
+
+	byIndex := make(map[int]core.CompressionResult, len(payload))
+	for _, item := range payload {
+		if item.Index <= 0 {
+			continue
+		}
+		item.Body = strings.TrimSpace(item.Body)
+		item.TightDescription = strings.TrimSpace(item.TightDescription)
+		if item.Body == "" || item.TightDescription == "" {
+			continue
+		}
+		byIndex[item.Index] = item
+	}
+
+	results := make([]core.CompressionResult, 0, len(requiredIndexes))
+	for _, idx := range requiredIndexes {
+		item, ok := byIndex[idx]
+		if !ok {
+			return nil, fmt.Errorf("missing compression result for index %d", idx)
+		}
+		results = append(results, item)
+	}
+
+	return results, nil
+}
+
 func buildReviewMemoriesPrompt(memories []core.MemoryReview) string {
 	var memoriesBlock strings.Builder
 	for i, memory := range memories {
@@ -410,6 +498,82 @@ Rules:
 
 Memories:
 ` + memoriesBlock.String()
+}
+
+func buildCompressEventBatchesPrompt(chunks []core.EventChunk) string {
+	var block strings.Builder
+	for i, chunk := range chunks {
+		index := chunk.Index
+		if index <= 0 {
+			index = i + 1
+		}
+		fmt.Fprintf(&block, "[Chunk %d]\n", index)
+		for _, content := range chunk.Contents {
+			trimmed := strings.TrimSpace(content)
+			if trimmed == "" {
+				continue
+			}
+			fmt.Fprintf(&block, "- %s\n", trimmed)
+		}
+		block.WriteByte('\n')
+	}
+
+	return `Summarize each event chunk into one concise memory summary.
+
+Return ONLY a JSON array of objects with this exact shape:
+[
+  {"index": 1, "body": "...", "tight_description": "..."}
+]
+
+Rules:
+- Include exactly one object per input chunk index
+- Preserve each chunk index in the output object
+- body must be <= 1000 characters and capture key actions/decisions
+- tight_description must be <= 100 characters and be retrieval-friendly
+- Do not include markdown fences or prose
+
+Chunks:
+` + block.String()
+}
+
+func buildSummarizeTopicBatchesPrompt(topics []core.TopicChunk) string {
+	var block strings.Builder
+	for i, topic := range topics {
+		index := topic.Index
+		if index <= 0 {
+			index = i + 1
+		}
+		title := strings.TrimSpace(topic.Title)
+		if title == "" {
+			title = fmt.Sprintf("Topic %d", index)
+		}
+		fmt.Fprintf(&block, "[Topic %d] %s\n", index, title)
+		for _, content := range topic.Contents {
+			trimmed := strings.TrimSpace(content)
+			if trimmed == "" {
+				continue
+			}
+			fmt.Fprintf(&block, "- %s\n", trimmed)
+		}
+		block.WriteByte('\n')
+	}
+
+	return `Merge each topic group into one coherent topic summary.
+
+Return ONLY a JSON array of objects with this exact shape:
+[
+  {"index": 1, "body": "...", "tight_description": "..."}
+]
+
+Rules:
+- Include exactly one object per input topic index
+- Preserve each topic index in the output object
+- body must be <= 2000 characters and synthesize recurring themes
+- tight_description must be <= 100 characters and optimized for retrieval
+- Do not include markdown fences or prose
+
+Topics:
+` + block.String()
 }
 
 func buildConsolidateNarrativePrompt(events []core.EventContent, existingMemories []core.MemorySummary) string {

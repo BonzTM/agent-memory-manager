@@ -72,6 +72,48 @@ func (s *summarizerIntelligenceAdapter) ReviewMemories(context.Context, []core.M
 	return &core.ReviewResult{}, nil
 }
 
+func (s *summarizerIntelligenceAdapter) CompressEventBatches(ctx context.Context, chunks []core.EventChunk) ([]core.CompressionResult, error) {
+	results := make([]core.CompressionResult, 0, len(chunks))
+	for _, chunk := range chunks {
+		joined := strings.Join(chunk.Contents, "\n")
+		body, err := s.Summarize(ctx, joined, leafBodyMaxChars)
+		if err != nil {
+			return nil, err
+		}
+		tight, err := s.Summarize(ctx, body, 100)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, core.CompressionResult{
+			Index:            chunk.Index,
+			Body:             body,
+			TightDescription: tight,
+		})
+	}
+	return results, nil
+}
+
+func (s *summarizerIntelligenceAdapter) SummarizeTopicBatches(ctx context.Context, topics []core.TopicChunk) ([]core.CompressionResult, error) {
+	results := make([]core.CompressionResult, 0, len(topics))
+	for _, topic := range topics {
+		joined := strings.Join(topic.Contents, "\n\n")
+		body, err := s.Summarize(ctx, joined, topicBodyMaxChars)
+		if err != nil {
+			return nil, err
+		}
+		tight, err := s.Summarize(ctx, joined, 100)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, core.CompressionResult{
+			Index:            topic.Index,
+			Body:             body,
+			TightDescription: tight,
+		})
+	}
+	return results, nil
+}
+
 func (s *summarizerIntelligenceAdapter) ConsolidateNarrative(ctx context.Context, events []core.EventContent, existingMemories []core.MemorySummary) (*core.NarrativeResult, error) {
 	_ = existingMemories
 
@@ -142,6 +184,48 @@ func (h *HeuristicIntelligenceProvider) TriageEvents(_ context.Context, events [
 
 func (h *HeuristicIntelligenceProvider) ReviewMemories(context.Context, []core.MemoryReview) (*core.ReviewResult, error) {
 	return &core.ReviewResult{}, nil
+}
+
+func (h *HeuristicIntelligenceProvider) CompressEventBatches(ctx context.Context, chunks []core.EventChunk) ([]core.CompressionResult, error) {
+	results := make([]core.CompressionResult, 0, len(chunks))
+	for _, chunk := range chunks {
+		joined := strings.Join(chunk.Contents, "\n")
+		body, err := h.Summarize(ctx, joined, leafBodyMaxChars)
+		if err != nil {
+			return nil, err
+		}
+		tight, err := h.Summarize(ctx, body, 100)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, core.CompressionResult{
+			Index:            chunk.Index,
+			Body:             body,
+			TightDescription: tight,
+		})
+	}
+	return results, nil
+}
+
+func (h *HeuristicIntelligenceProvider) SummarizeTopicBatches(ctx context.Context, topics []core.TopicChunk) ([]core.CompressionResult, error) {
+	results := make([]core.CompressionResult, 0, len(topics))
+	for _, topic := range topics {
+		joined := strings.Join(topic.Contents, "\n\n")
+		body, err := h.Summarize(ctx, joined, topicBodyMaxChars)
+		if err != nil {
+			return nil, err
+		}
+		tight, err := h.Summarize(ctx, joined, 100)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, core.CompressionResult{
+			Index:            topic.Index,
+			Body:             body,
+			TightDescription: tight,
+		})
+	}
+	return results, nil
 }
 
 func (h *HeuristicIntelligenceProvider) ConsolidateNarrative(ctx context.Context, events []core.EventContent, existingMemories []core.MemorySummary) (*core.NarrativeResult, error) {
