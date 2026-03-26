@@ -15,6 +15,12 @@ const (
 	defaultReflectBatchSize         = 100
 	defaultReflectLLMBatchSize      = 20
 	defaultLifecycleReviewBatchSize = 50
+	defaultCompressChunkSize        = 10
+	defaultCompressMaxEvents        = 200
+	defaultCompressBatchSize        = 15
+	defaultTopicBatchSize           = 15
+	defaultEmbeddingBatchSize       = 64
+	defaultCrossProjectSimilarity   = 0.7
 )
 
 // Config holds all runtime configuration for amm.
@@ -29,16 +35,22 @@ type Config struct {
 }
 
 type SummarizerConfig struct {
-	Endpoint                 string `json:"endpoint"`
-	APIKey                   string `json:"api_key"`
-	Model                    string `json:"model"`
-	ReviewEndpoint           string `json:"review_endpoint"`
-	ReviewAPIKey             string `json:"review_api_key"`
-	ReviewModel              string `json:"review_model"`
-	BatchSize                int    `json:"batch_size"`
-	ReflectBatchSize         int    `json:"reflect_batch_size"`
-	ReflectLLMBatchSize      int    `json:"reflect_llm_batch_size"`
-	LifecycleReviewBatchSize int    `json:"lifecycle_review_batch_size"`
+	Endpoint                        string  `json:"endpoint"`
+	APIKey                          string  `json:"api_key"`
+	Model                           string  `json:"model"`
+	ReviewEndpoint                  string  `json:"review_endpoint"`
+	ReviewAPIKey                    string  `json:"review_api_key"`
+	ReviewModel                     string  `json:"review_model"`
+	BatchSize                       int     `json:"batch_size"`
+	ReflectBatchSize                int     `json:"reflect_batch_size"`
+	ReflectLLMBatchSize             int     `json:"reflect_llm_batch_size"`
+	LifecycleReviewBatchSize        int     `json:"lifecycle_review_batch_size"`
+	CompressChunkSize               int     `json:"compress_chunk_size"`
+	CompressMaxEvents               int     `json:"compress_max_events"`
+	CompressBatchSize               int     `json:"compress_batch_size"`
+	TopicBatchSize                  int     `json:"topic_batch_size"`
+	EmbeddingBatchSize              int     `json:"embedding_batch_size"`
+	CrossProjectSimilarityThreshold float64 `json:"cross_project_similarity_threshold"`
 }
 
 type EmbeddingsConfig struct {
@@ -101,10 +113,16 @@ func DefaultConfig() Config {
 			AutoDetectContradictions: true,
 		},
 		Summarizer: SummarizerConfig{
-			BatchSize:                defaultSummarizerBatchSize,
-			ReflectBatchSize:         defaultReflectBatchSize,
-			ReflectLLMBatchSize:      defaultReflectLLMBatchSize,
-			LifecycleReviewBatchSize: defaultLifecycleReviewBatchSize,
+			BatchSize:                       defaultSummarizerBatchSize,
+			ReflectBatchSize:                defaultReflectBatchSize,
+			ReflectLLMBatchSize:             defaultReflectLLMBatchSize,
+			LifecycleReviewBatchSize:        defaultLifecycleReviewBatchSize,
+			CompressChunkSize:               defaultCompressChunkSize,
+			CompressMaxEvents:               defaultCompressMaxEvents,
+			CompressBatchSize:               defaultCompressBatchSize,
+			TopicBatchSize:                  defaultTopicBatchSize,
+			EmbeddingBatchSize:              defaultEmbeddingBatchSize,
+			CrossProjectSimilarityThreshold: defaultCrossProjectSimilarity,
 		},
 		Embeddings: EmbeddingsConfig{
 			Enabled: false,
@@ -232,6 +250,30 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			if n, err := strconv.Atoi(val); err == nil && n > 0 {
 				cfg.Summarizer.LifecycleReviewBatchSize = n
 			}
+		case "summarizer.compress_chunk_size":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.Summarizer.CompressChunkSize = n
+			}
+		case "summarizer.compress_max_events":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.Summarizer.CompressMaxEvents = n
+			}
+		case "summarizer.compress_batch_size":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.Summarizer.CompressBatchSize = n
+			}
+		case "summarizer.topic_batch_size":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.Summarizer.TopicBatchSize = n
+			}
+		case "summarizer.embedding_batch_size":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.Summarizer.EmbeddingBatchSize = n
+			}
+		case "summarizer.cross_project_similarity_threshold":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+				cfg.Summarizer.CrossProjectSimilarityThreshold = f
+			}
 		case "embeddings.enabled":
 			if b, err := strconv.ParseBool(val); err == nil {
 				cfg.Embeddings.Enabled = b
@@ -287,6 +329,12 @@ func LoadConfigWithEnv() Config {
 //	AMM_SUMMARIZER_API_KEY -> Summarizer.APIKey
 //	AMM_SUMMARIZER_MODEL -> Summarizer.Model
 //	AMM_SUMMARIZER_BATCH_SIZE -> Summarizer.BatchSize
+//	AMM_COMPRESS_CHUNK_SIZE -> Summarizer.CompressChunkSize
+//	AMM_COMPRESS_MAX_EVENTS -> Summarizer.CompressMaxEvents
+//	AMM_COMPRESS_BATCH_SIZE -> Summarizer.CompressBatchSize
+//	AMM_TOPIC_BATCH_SIZE -> Summarizer.TopicBatchSize
+//	AMM_EMBEDDING_BATCH_SIZE -> Summarizer.EmbeddingBatchSize
+//	AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD -> Summarizer.CrossProjectSimilarityThreshold
 //	AMM_EMBEDDINGS_ENABLED -> Embeddings.Enabled (true/false)
 //	AMM_EMBEDDINGS_PROVIDER -> Embeddings.Provider
 //	AMM_EMBEDDINGS_ENDPOINT -> Embeddings.Endpoint
@@ -375,6 +423,36 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_LIFECYCLE_REVIEW_BATCH_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			base.Summarizer.LifecycleReviewBatchSize = n
+		}
+	}
+	if v := os.Getenv("AMM_COMPRESS_CHUNK_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Summarizer.CompressChunkSize = n
+		}
+	}
+	if v := os.Getenv("AMM_COMPRESS_MAX_EVENTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Summarizer.CompressMaxEvents = n
+		}
+	}
+	if v := os.Getenv("AMM_COMPRESS_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Summarizer.CompressBatchSize = n
+		}
+	}
+	if v := os.Getenv("AMM_TOPIC_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Summarizer.TopicBatchSize = n
+		}
+	}
+	if v := os.Getenv("AMM_EMBEDDING_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Summarizer.EmbeddingBatchSize = n
+		}
+	}
+	if v := os.Getenv("AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			base.Summarizer.CrossProjectSimilarityThreshold = f
 		}
 	}
 	if v := os.Getenv("AMM_EMBEDDINGS_ENABLED"); v != "" {

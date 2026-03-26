@@ -77,6 +77,12 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	svc.SetReflectBatchSize(cfg.Summarizer.ReflectBatchSize)
 	svc.SetReflectLLMBatchSize(cfg.Summarizer.ReflectLLMBatchSize)
 	svc.SetLifecycleReviewBatchSize(cfg.Summarizer.LifecycleReviewBatchSize)
+	svc.SetCompressChunkSize(cfg.Summarizer.CompressChunkSize)
+	svc.SetCompressMaxEvents(cfg.Summarizer.CompressMaxEvents)
+	svc.SetCompressBatchSize(cfg.Summarizer.CompressBatchSize)
+	svc.SetTopicBatchSize(cfg.Summarizer.TopicBatchSize)
+	svc.SetEmbeddingBatchSize(cfg.Summarizer.EmbeddingBatchSize)
+	svc.SetCrossProjectSimilarityThreshold(cfg.Summarizer.CrossProjectSimilarityThreshold)
 
 	cleanup := func() {
 		db.Close()

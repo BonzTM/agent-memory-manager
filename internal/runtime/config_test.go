@@ -84,6 +84,87 @@ func TestConfigFromEnv_IgnoresInvalidLifecycleReviewBatchSize(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_SetsAdditionalSummarizerBatchDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if cfg.Summarizer.CompressChunkSize != defaultCompressChunkSize {
+		t.Fatalf("expected default compress chunk size %d, got %d", defaultCompressChunkSize, cfg.Summarizer.CompressChunkSize)
+	}
+	if cfg.Summarizer.CompressMaxEvents != defaultCompressMaxEvents {
+		t.Fatalf("expected default compress max events %d, got %d", defaultCompressMaxEvents, cfg.Summarizer.CompressMaxEvents)
+	}
+	if cfg.Summarizer.CompressBatchSize != defaultCompressBatchSize {
+		t.Fatalf("expected default compress batch size %d, got %d", defaultCompressBatchSize, cfg.Summarizer.CompressBatchSize)
+	}
+	if cfg.Summarizer.TopicBatchSize != defaultTopicBatchSize {
+		t.Fatalf("expected default topic batch size %d, got %d", defaultTopicBatchSize, cfg.Summarizer.TopicBatchSize)
+	}
+	if cfg.Summarizer.EmbeddingBatchSize != defaultEmbeddingBatchSize {
+		t.Fatalf("expected default embedding batch size %d, got %d", defaultEmbeddingBatchSize, cfg.Summarizer.EmbeddingBatchSize)
+	}
+	if cfg.Summarizer.CrossProjectSimilarityThreshold != defaultCrossProjectSimilarity {
+		t.Fatalf("expected default cross-project similarity threshold %.2f, got %.2f", defaultCrossProjectSimilarity, cfg.Summarizer.CrossProjectSimilarityThreshold)
+	}
+}
+
+func TestConfigFromEnv_OverridesAdditionalSummarizerBatchValues(t *testing.T) {
+	t.Setenv("AMM_COMPRESS_CHUNK_SIZE", "12")
+	t.Setenv("AMM_COMPRESS_MAX_EVENTS", "240")
+	t.Setenv("AMM_COMPRESS_BATCH_SIZE", "18")
+	t.Setenv("AMM_TOPIC_BATCH_SIZE", "9")
+	t.Setenv("AMM_EMBEDDING_BATCH_SIZE", "80")
+	t.Setenv("AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD", "0.82")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.Summarizer.CompressChunkSize != 12 {
+		t.Fatalf("expected compress chunk size 12, got %d", cfg.Summarizer.CompressChunkSize)
+	}
+	if cfg.Summarizer.CompressMaxEvents != 240 {
+		t.Fatalf("expected compress max events 240, got %d", cfg.Summarizer.CompressMaxEvents)
+	}
+	if cfg.Summarizer.CompressBatchSize != 18 {
+		t.Fatalf("expected compress batch size 18, got %d", cfg.Summarizer.CompressBatchSize)
+	}
+	if cfg.Summarizer.TopicBatchSize != 9 {
+		t.Fatalf("expected topic batch size 9, got %d", cfg.Summarizer.TopicBatchSize)
+	}
+	if cfg.Summarizer.EmbeddingBatchSize != 80 {
+		t.Fatalf("expected embedding batch size 80, got %d", cfg.Summarizer.EmbeddingBatchSize)
+	}
+	if cfg.Summarizer.CrossProjectSimilarityThreshold != 0.82 {
+		t.Fatalf("expected cross-project similarity threshold 0.82, got %.2f", cfg.Summarizer.CrossProjectSimilarityThreshold)
+	}
+}
+
+func TestConfigFromEnv_IgnoresInvalidAdditionalSummarizerBatchValues(t *testing.T) {
+	t.Setenv("AMM_COMPRESS_CHUNK_SIZE", "0")
+	t.Setenv("AMM_COMPRESS_MAX_EVENTS", "-1")
+	t.Setenv("AMM_COMPRESS_BATCH_SIZE", "0")
+	t.Setenv("AMM_TOPIC_BATCH_SIZE", "abc")
+	t.Setenv("AMM_EMBEDDING_BATCH_SIZE", "0")
+	t.Setenv("AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD", "invalid")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.Summarizer.CompressChunkSize != defaultCompressChunkSize {
+		t.Fatalf("expected invalid compress chunk size to keep default %d, got %d", defaultCompressChunkSize, cfg.Summarizer.CompressChunkSize)
+	}
+	if cfg.Summarizer.CompressMaxEvents != defaultCompressMaxEvents {
+		t.Fatalf("expected invalid compress max events to keep default %d, got %d", defaultCompressMaxEvents, cfg.Summarizer.CompressMaxEvents)
+	}
+	if cfg.Summarizer.CompressBatchSize != defaultCompressBatchSize {
+		t.Fatalf("expected invalid compress batch size to keep default %d, got %d", defaultCompressBatchSize, cfg.Summarizer.CompressBatchSize)
+	}
+	if cfg.Summarizer.TopicBatchSize != defaultTopicBatchSize {
+		t.Fatalf("expected invalid topic batch size to keep default %d, got %d", defaultTopicBatchSize, cfg.Summarizer.TopicBatchSize)
+	}
+	if cfg.Summarizer.EmbeddingBatchSize != defaultEmbeddingBatchSize {
+		t.Fatalf("expected invalid embedding batch size to keep default %d, got %d", defaultEmbeddingBatchSize, cfg.Summarizer.EmbeddingBatchSize)
+	}
+	if cfg.Summarizer.CrossProjectSimilarityThreshold != defaultCrossProjectSimilarity {
+		t.Fatalf("expected invalid cross-project similarity threshold to keep default %.2f, got %.2f", defaultCrossProjectSimilarity, cfg.Summarizer.CrossProjectSimilarityThreshold)
+	}
+}
+
 func TestDefaultConfig_EmbeddingsDisabled(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Embeddings.Enabled {
