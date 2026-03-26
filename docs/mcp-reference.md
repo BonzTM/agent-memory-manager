@@ -514,7 +514,8 @@ Run a maintenance job.
 | `detect_contradictions` | Find contradictions between memories |
 | `decay_stale_memory` | Reduce confidence on stale memories |
 | `merge_duplicates` | Merge duplicate memories |
-| `rebuild_indexes` | Rebuild FTS and derived indexes |
+| `rebuild_indexes` | Rebuild FTS and embeddings (incremental — skips existing) |
+| `rebuild_indexes_full` | Rebuild FTS and all embeddings from scratch |
 | `cleanup_recall_history` | Clean up recall history tracking data |
 | `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM |
 | `reprocess_all` | Batch re-extract all memories unconditionally, superseding both heuristic and LLM results |

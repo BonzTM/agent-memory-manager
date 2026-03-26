@@ -1,7 +1,15 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"sort"
+	"strings"
+	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
@@ -16,7 +24,24 @@ type NoopEmbeddingProvider struct {
 	model string
 }
 
+type APIEmbeddingProvider struct {
+	endpoint string
+	apiKey   string
+	model    string
+	client   *http.Client
+}
+
 var _ core.EmbeddingProvider = (*NoopEmbeddingProvider)(nil)
+var _ core.EmbeddingProvider = (*APIEmbeddingProvider)(nil)
+
+func NewAPIEmbeddingProvider(endpoint, apiKey, model string) *APIEmbeddingProvider {
+	return &APIEmbeddingProvider{
+		endpoint: strings.TrimRight(endpoint, "/"),
+		apiKey:   apiKey,
+		model:    model,
+		client:   &http.Client{Timeout: 30 * time.Second},
+	}
+}
 
 func NewNoopEmbeddingProvider(name, model string) *NoopEmbeddingProvider {
 	if name == "" {
@@ -41,5 +66,87 @@ func (p *NoopEmbeddingProvider) Embed(_ context.Context, texts []string) ([][]fl
 	for i := range vectors {
 		vectors[i] = []float32{}
 	}
+	return vectors, nil
+}
+
+func (p *APIEmbeddingProvider) Name() string {
+	return "api"
+}
+
+func (p *APIEmbeddingProvider) Model() string {
+	return p.model
+}
+
+type apiEmbeddingRequest struct {
+	Model string   `json:"model"`
+	Input []string `json:"input"`
+}
+
+type apiEmbeddingResponse struct {
+	Data []struct {
+		Embedding []float64 `json:"embedding"`
+		Index     int       `json:"index"`
+	} `json:"data"`
+}
+
+func (p *APIEmbeddingProvider) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return [][]float32{}, nil
+	}
+
+	payload, err := json.Marshal(apiEmbeddingRequest{Model: p.model, Input: texts})
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	endpoint := strings.TrimRight(p.endpoint, "/")
+	endpoint = strings.TrimSuffix(endpoint, "/v1")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/v1/embeddings", bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("embedding API returned status %d", resp.StatusCode)
+	}
+
+	var embedResp apiEmbeddingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&embedResp); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	sort.Slice(embedResp.Data, func(i, j int) bool {
+		return embedResp.Data[i].Index < embedResp.Data[j].Index
+	})
+
+	vectors := make([][]float32, len(texts))
+	seen := make([]bool, len(texts))
+	for _, item := range embedResp.Data {
+		if item.Index < 0 || item.Index >= len(texts) {
+			return nil, fmt.Errorf("invalid embedding index %d", item.Index)
+		}
+		vector := make([]float32, len(item.Embedding))
+		for i, value := range item.Embedding {
+			vector[i] = float32(value)
+		}
+		vectors[item.Index] = vector
+		seen[item.Index] = true
+	}
+
+	for i := range seen {
+		if !seen[i] {
+			return nil, fmt.Errorf("missing embedding for input index %d", i)
+		}
+	}
+
 	return vectors, nil
 }

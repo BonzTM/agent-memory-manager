@@ -4,6 +4,8 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/bonztm/agent-memory-manager/internal/service"
 )
 
 func TestBuildEmbeddingProvider_DefaultOff(t *testing.T) {
@@ -30,6 +32,22 @@ func TestBuildEmbeddingProvider_EnabledUsesNoop(t *testing.T) {
 	}
 	if provider.Model() != "test-model" {
 		t.Fatalf("expected provider model test-model, got %q", provider.Model())
+	}
+}
+
+func TestBuildEmbeddingProvider_EnabledWithEndpointUsesAPI(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Embeddings.Enabled = true
+	cfg.Embeddings.Endpoint = "http://localhost:11434/v1"
+	cfg.Embeddings.APIKey = "test-key"
+	cfg.Embeddings.Model = "test-model"
+
+	provider := buildEmbeddingProvider(cfg)
+	if provider == nil {
+		t.Fatal("expected non-nil embedding provider when endpoint is configured")
+	}
+	if _, ok := provider.(*service.APIEmbeddingProvider); !ok {
+		t.Fatalf("expected *service.APIEmbeddingProvider, got %T", provider)
 	}
 }
 

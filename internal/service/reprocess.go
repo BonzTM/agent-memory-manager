@@ -45,8 +45,13 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 
 	var toProcess []core.Event
 	for _, evt := range events {
-		if mode, ok := evt.Metadata["ingestion_mode"]; ok && (mode == "read_only" || mode == "ignore") {
-			continue
+		if mode, ok := evt.Metadata["ingestion_mode"]; ok {
+			if mode == "ignore" {
+				continue
+			}
+			if mode == "read_only" && !s.hasLLMSummarizer {
+				continue
+			}
 		}
 
 		if !reprocessAll {
@@ -120,7 +125,11 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 				SourceEventIDs:   sourceEventIDs,
 			}
 
-			if duplicates := findDuplicateActiveMemories(activeMemories, candidateMemory); len(duplicates) > 0 {
+			duplicates := findDuplicateActiveMemories(activeMemories, candidateMemory)
+			if len(duplicates) == 0 {
+				duplicates = s.findDuplicatesByEmbedding(ctx, candidateMemory, activeMemories)
+			}
+			if len(duplicates) > 0 {
 				now := time.Now().UTC()
 				duplicate := selectDuplicateKeeper(duplicates)
 				duplicate.SourceEventIDs = mergeUniqueStrings(duplicate.SourceEventIDs, sourceEventIDs)

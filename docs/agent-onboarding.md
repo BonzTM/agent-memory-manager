@@ -86,20 +86,20 @@ By default, amm extracts memories from events using a heuristic phrase-cue syste
 
 ```bash
 # For OpenAI
-export AMM_LLM_ENDPOINT=https://api.openai.com/v1
-export AMM_LLM_API_KEY=sk-your-key-here
-export AMM_LLM_MODEL=gpt-4o-mini
+export AMM_SUMMARIZER_ENDPOINT=https://api.openai.com/v1
+export AMM_SUMMARIZER_API_KEY=sk-your-key-here
+export AMM_SUMMARIZER_MODEL=gpt-4o-mini
 
 # For a local Ollama instance
-export AMM_LLM_ENDPOINT=http://localhost:11434/v1
-export AMM_LLM_API_KEY=ollama
-export AMM_LLM_MODEL=llama3.2
+export AMM_SUMMARIZER_ENDPOINT=http://localhost:11434/v1
+export AMM_SUMMARIZER_API_KEY=ollama
+export AMM_SUMMARIZER_MODEL=llama3.2
 ```
 
 To make these persistent, add them to `~/.amm/config.toml`:
 
 ```toml
-[llm]
+[summarizer]
 endpoint = "https://api.openai.com/v1"
 api_key = "sk-your-key-here"
 model = "gpt-4o-mini"
@@ -110,7 +110,7 @@ When enabled, the `reflect` and `compress_history` workers use the LLM for struc
 Verify with:
 
 ```bash
-AMM_DB_PATH=~/.amm/amm.db AMM_LLM_ENDPOINT=https://api.openai.com/v1 AMM_LLM_API_KEY=sk-... /usr/local/bin/amm jobs run reflect
+AMM_DB_PATH=~/.amm/amm.db AMM_SUMMARIZER_ENDPOINT=https://api.openai.com/v1 AMM_SUMMARIZER_API_KEY=sk-... /usr/local/bin/amm jobs run reflect
 ```
 
 ---
@@ -159,9 +159,9 @@ To enable LLM-backed extraction via MCP, add the LLM variables to the env block:
       "command": "/usr/local/bin/amm-mcp",
       "env": {
         "AMM_DB_PATH": "$HOME/.amm/amm.db",
-        "AMM_LLM_ENDPOINT": "https://api.openai.com/v1",
-        "AMM_LLM_API_KEY": "sk-your-key-here",
-        "AMM_LLM_MODEL": "gpt-4o-mini"
+        "AMM_SUMMARIZER_ENDPOINT": "https://api.openai.com/v1",
+        "AMM_SUMMARIZER_API_KEY": "sk-your-key-here",
+        "AMM_SUMMARIZER_MODEL": "gpt-4o-mini"
       }
     }
   }
@@ -431,23 +431,16 @@ This approach uses a single script to run the **conservative baseline** maintena
 */30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /path/to/agent-memory-manager/examples/scripts/run-workers.sh >/dev/null 2>&1
 ```
 
-The baseline runner covers the essential sequence: `reflect`, `compress_history`, `consolidate_sessions`, `extract_claims`, `form_episodes`, `detect_contradictions`, and `cleanup_recall_history`.
+The baseline runner covers the full maintenance sequence: `reflect`, `compress_history`, `consolidate_sessions`, `merge_duplicates`, `extract_claims`, `form_episodes`, `detect_contradictions`, `decay_stale_memory`, `promote_high_value`, `archive_session_traces`, `rebuild_indexes`, and `cleanup_recall_history`.
 
-### Option B: Optional Maintenance (Advanced/Repair)
+### Option B: Structural Repair (As Needed)
 
-Heavier or more aggressive maintenance jobs should be run separately on a slower cadence (e.g., daily or weekly). These jobs perform deeper mutations or index repairs that fall outside the conservative baseline.
+Structural repairs are not part of the baseline runner and should be run manually or on a slow cadence when integrity issues are suspected.
 
 ```bash
-# Optional: Aggressive maintenance (e.g., daily at 4am, staggered)
-0 4 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run decay_stale_memory >/dev/null 2>&1
-15 4 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run merge_duplicates >/dev/null 2>&1
-
-# Optional: Index/Link Repair (e.g., weekly on Sunday at 5am, staggered)
-0 5 * * 0 AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run rebuild_indexes >/dev/null 2>&1
-15 5 * * 0 AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm repair --fix links >/dev/null 2>&1
+# Optional: Link Repair (e.g., weekly on Sunday at 5am)
+0 5 * * 0 AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm repair --fix links >/dev/null 2>&1
 ```
-
-Note: `rebuild_indexes` and `repair --fix links` are repair-style operations and are not required for normal operation.
 
 ### Option C: Staggered Cron (Alternative)
 
@@ -481,9 +474,9 @@ Description=amm background maintenance
 Type=oneshot
 Environment=AMM_DB_PATH=%h/.amm/amm.db
 # Optional: Enable LLM-backed extraction
-# Environment=AMM_LLM_ENDPOINT=https://api.openai.com/v1
-# Environment=AMM_LLM_API_KEY=sk-your-key-here
-# Environment=AMM_LLM_MODEL=gpt-4o-mini
+# Environment=AMM_SUMMARIZER_ENDPOINT=https://api.openai.com/v1
+# Environment=AMM_SUMMARIZER_API_KEY=sk-your-key-here
+# Environment=AMM_SUMMARIZER_MODEL=gpt-4o-mini
 ExecStart=/usr/local/bin/amm jobs run reflect
 ExecStart=/usr/local/bin/amm jobs run compress_history
 ExecStart=/usr/local/bin/amm jobs run consolidate_sessions

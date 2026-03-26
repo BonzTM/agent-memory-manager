@@ -1,10 +1,14 @@
 package service
 
 import (
+	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
+
+const embeddingDedupThreshold = 0.85
 
 func importanceForCandidate(candidate core.MemoryCandidate) float64 {
 	if candidate.Importance != nil {
@@ -63,6 +67,53 @@ func findDuplicateActiveMemories(activeMemories []*core.Memory, candidate core.M
 			duplicates = append(duplicates, existing)
 		}
 	}
+	return duplicates
+}
+
+// findDuplicatesByEmbedding checks for semantic duplicates using embedding cosine similarity.
+// Returns nil if embedding provider is not configured or embedding fails.
+// Only compares against active memories of the same type, scope, and projectID.
+func (s *AMMService) findDuplicatesByEmbedding(ctx context.Context, candidate core.Memory, activeMemories []*core.Memory) []*core.Memory {
+	if s.embeddingProvider == nil {
+		return nil
+	}
+
+	candidateText := buildMemoryEmbeddingText(&candidate)
+	vectors, err := s.embeddingProvider.Embed(ctx, []string{candidateText})
+	if err != nil {
+		slog.Debug("embedding dedup skipped: candidate embedding failed", "error", err, "memoryType", candidate.Type, "scope", candidate.Scope, "projectID", candidate.ProjectID)
+		return nil
+	}
+	if len(vectors) != 1 {
+		slog.Debug("embedding dedup skipped: unexpected candidate embedding count", "expected", 1, "actual", len(vectors), "memoryType", candidate.Type, "scope", candidate.Scope, "projectID", candidate.ProjectID)
+		return nil
+	}
+
+	candidateVector := vectors[0]
+	duplicates := make([]*core.Memory, 0, 4)
+	model := s.embeddingProvider.Model()
+	for _, existing := range activeMemories {
+		if existing == nil || existing.Status != core.MemoryStatusActive {
+			continue
+		}
+		if existing.Type != candidate.Type || existing.Scope != candidate.Scope || existing.ProjectID != candidate.ProjectID {
+			continue
+		}
+
+		record, err := s.repo.GetEmbedding(ctx, existing.ID, "memory", model)
+		if err != nil || record == nil || len(record.Vector) == 0 {
+			continue
+		}
+
+		cosine, ok := cosineSimilarity(candidateVector, record.Vector)
+		if !ok {
+			continue
+		}
+		if cosine >= embeddingDedupThreshold {
+			duplicates = append(duplicates, existing)
+		}
+	}
+
 	return duplicates
 }
 

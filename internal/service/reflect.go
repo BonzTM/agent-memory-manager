@@ -32,9 +32,13 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 			evt := &events[i]
 			processedCount++
 
-			// Skip events tagged as read_only or ignore by ingestion policy.
-			if mode, ok := evt.Metadata["ingestion_mode"]; ok && (mode == "read_only" || mode == "ignore") {
-				continue
+			if mode, ok := evt.Metadata["ingestion_mode"]; ok {
+				if mode == "ignore" {
+					continue
+				}
+				if mode == "read_only" && !s.hasLLMSummarizer {
+					continue
+				}
 			}
 
 			candidates, err := s.summarizer.ExtractMemoryCandidate(ctx, evt.Content)
@@ -88,7 +92,11 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 					activeMemories = append(activeMemories, &existing[i])
 				}
 
-				if duplicates := findDuplicateActiveMemories(activeMemories, candidateMemory); len(duplicates) > 0 {
+				duplicates := findDuplicateActiveMemories(activeMemories, candidateMemory)
+				if len(duplicates) == 0 {
+					duplicates = s.findDuplicatesByEmbedding(ctx, candidateMemory, activeMemories)
+				}
+				if len(duplicates) > 0 {
 					duplicate := selectDuplicateKeeper(duplicates)
 					duplicate.SourceEventIDs = mergeUniqueStrings(duplicate.SourceEventIDs, candidateMemory.SourceEventIDs)
 					for _, sibling := range duplicates {

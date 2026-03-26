@@ -27,10 +27,15 @@ If a config file does not exist, amm silently uses defaults. JSON is auto-detect
 | `AMM_AUTO_COMPRESS` | Automatically run compress_history worker | `true` |
 | `AMM_AUTO_CONSOLIDATE` | Automatically run consolidate_sessions worker | `true` |
 | `AMM_AUTO_DETECT_CONTRADICTIONS` | Automatically run contradiction detection | `true` |
-| `AMM_LLM_ENDPOINT` | Base URL for OpenAI-compatible chat completions API | _(unset)_ |
-| `AMM_LLM_API_KEY` | API key for the LLM endpoint | _(unset)_ |
-| `AMM_LLM_MODEL` | Model name to use for extraction and summarization | `gpt-4o-mini` |
-| `AMM_LLM_BATCH_SIZE` | Number of events per LLM call during `reprocess`/`reprocess_all` jobs | `20` |
+| `AMM_SUMMARIZER_ENDPOINT` | Base URL for OpenAI-compatible chat completions API used by the summarizer | _(unset)_ |
+| `AMM_SUMMARIZER_API_KEY` | API key for the summarizer endpoint | _(unset)_ |
+| `AMM_SUMMARIZER_MODEL` | Model name to use for extraction and summarization | `gpt-4o-mini` |
+| `AMM_SUMMARIZER_BATCH_SIZE` | Number of events per summarizer call during `reprocess`/`reprocess_all` jobs | `20` |
+| `AMM_EMBEDDINGS_ENABLED` | Enable embeddings provider integration | `false` |
+| `AMM_EMBEDDINGS_PROVIDER` | Embeddings provider name | _(unset)_ |
+| `AMM_EMBEDDINGS_ENDPOINT` | Base URL for embeddings provider API | _(unset)_ |
+| `AMM_EMBEDDINGS_API_KEY` | API key for embeddings provider | _(unset)_ |
+| `AMM_EMBEDDINGS_MODEL` | Embeddings model name | _(unset)_ |
 
 Environment variables accept the same value types as their config file equivalents. Boolean variables accept `true`, `false`, `1`, `0`, `t`, `f` (parsed by Go's `strconv.ParseBool`).
 
@@ -58,11 +63,18 @@ Environment variables accept the same value types as their config file equivalen
     "auto_consolidate": true,
     "auto_detect_contradictions": true
   },
-  "llm": {
+  "summarizer": {
     "endpoint": "https://api.openai.com/v1",
     "api_key": "",
     "model": "gpt-4o-mini",
     "batch_size": 20
+  },
+  "embeddings": {
+    "enabled": false,
+    "provider": "",
+    "endpoint": "",
+    "api_key": "",
+    "model": ""
   }
 }
 ```
@@ -90,11 +102,18 @@ auto_compress = true
 auto_consolidate = true
 auto_detect_contradictions = true
 
-[llm]
+[summarizer]
 endpoint = "https://api.openai.com/v1"
 api_key = ""
 model = "gpt-4o-mini"
 batch_size = 20
+
+[embeddings]
+enabled = false
+provider = ""
+endpoint = ""
+api_key = ""
+model = ""
 ```
 
 amm supports a flat subset of TOML: `[section]` headers and `key = value` pairs. Nested tables and arrays are not supported. Values can be quoted strings, bare integers, or bare booleans.
@@ -133,14 +152,32 @@ amm supports a flat subset of TOML: `[section]` headers and `key = value` pairs.
 | `auto_consolidate` | bool | `true` | Enable automatic session consolidation. |
 | `auto_detect_contradictions` | bool | `true` | Enable automatic contradiction detection between memories. |
 
-### llm
+### summarizer
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `endpoint` | string | _(unset)_ | Base URL for an OpenAI-compatible chat completions API. When set together with `api_key`, amm uses LLM-backed extraction for the `reflect` and `compress_history` workers instead of the built-in heuristic. Compatible with OpenAI, Anthropic (via OpenAI-compat endpoint), Ollama (`http://localhost:11434/v1`), vLLM, LM Studio, or any provider exposing `/v1/chat/completions`. |
 | `api_key` | string | _(unset)_ | Bearer token sent in the `Authorization` header. Required for most hosted providers. For local models (Ollama, LM Studio) set to any non-empty string. |
 | `model` | string | `gpt-4o-mini` | Model identifier passed in the request body. Use a cheap, fast model — extraction is structured JSON output, not creative writing. Good defaults: `gpt-4o-mini` (OpenAI), `claude-3-5-haiku-latest` (Anthropic), `llama3.2` (Ollama). |
-| `batch_size` | int | `20` | Number of events per LLM call during `reprocess` and `reprocess_all` jobs. Higher values use fewer API calls but reduce extraction quality. Recommended range: 10-50. |
+| `batch_size` | int | `20` | Number of events per summarizer call during `reprocess` and `reprocess_all` jobs. Higher values use fewer API calls but reduce extraction quality. Recommended range: 10-50. |
+
+### embeddings
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `false` | Enable the embedding provider. When enabled, amm generates vector embeddings for memories and summaries, enabling semantic search in recall. |
+| `endpoint` | string | _(unset)_ | Base URL for an OpenAI-compatible embeddings API. Compatible with OpenAI, OpenRouter, Ollama (`http://localhost:11434/v1`), LiteLLM, or any provider exposing `/v1/embeddings`. |
+| `api_key` | string | _(unset)_ | Bearer token sent in the `Authorization` header. For local models (Ollama) set to any non-empty string or leave empty. |
+| `provider` | string | _(unset)_ | Provider name tag stored with embedding records. Informational only. |
+| `model` | string | `text-embedding-3-small` | Model identifier passed in the request body. Good defaults: `text-embedding-3-small` (OpenAI/OpenRouter), `all-minilm` (Ollama), `nomic-embed-text` (Ollama). |
+
+When `endpoint` is set and `enabled` is `true`, amm uses the API provider to generate embeddings on every memory and summary write, and during `rebuild_indexes`. Embeddings are stored in the `embeddings` table and used for semantic similarity scoring during recall (when `enable_semantic` is also `true`).
+
+When `endpoint` is unset, amm falls back to a noop provider that generates empty vectors. Recall still works via FTS5 full-text search — semantic scoring is simply skipped.
+
+Embedding generation is best-effort: if an API call fails, the canonical memory/summary write still succeeds. Failed embeddings are logged at WARN level and can be backfilled by running `amm jobs run rebuild_indexes`.
+
+---
 
 When `endpoint` and `api_key` are both unset or empty, amm falls back to a built-in heuristic summarizer that uses phrase-cue matching and truncation. This is the zero-dependency default — no external API calls are made.
 

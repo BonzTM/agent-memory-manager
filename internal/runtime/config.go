@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-const defaultLLMBatchSize = 20
+const defaultSummarizerBatchSize = 20
 
 // Config holds all runtime configuration for amm.
 // Matches blueprint section 15.
@@ -19,11 +19,11 @@ type Config struct {
 	Retrieval   RetrievalConfig   `json:"retrieval"`
 	Privacy     PrivacyConfig     `json:"privacy"`
 	Maintenance MaintenanceConfig `json:"maintenance"`
-	LLM         LLMConfig         `json:"llm"`
+	Summarizer  SummarizerConfig  `json:"summarizer"`
 	Embeddings  EmbeddingsConfig  `json:"embeddings"`
 }
 
-type LLMConfig struct {
+type SummarizerConfig struct {
 	Endpoint  string `json:"endpoint"`
 	APIKey    string `json:"api_key"`
 	Model     string `json:"model"`
@@ -33,6 +33,8 @@ type LLMConfig struct {
 type EmbeddingsConfig struct {
 	Enabled  bool   `json:"enabled"`
 	Provider string `json:"provider"`
+	Endpoint string `json:"endpoint"`
+	APIKey   string `json:"api_key"`
 	Model    string `json:"model"`
 }
 
@@ -87,8 +89,8 @@ func DefaultConfig() Config {
 			AutoConsolidate:          true,
 			AutoDetectContradictions: true,
 		},
-		LLM: LLMConfig{
-			BatchSize: defaultLLMBatchSize,
+		Summarizer: SummarizerConfig{
+			BatchSize: defaultSummarizerBatchSize,
 		},
 		Embeddings: EmbeddingsConfig{
 			Enabled: false,
@@ -188,15 +190,15 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			if b, err := strconv.ParseBool(val); err == nil {
 				cfg.Maintenance.AutoDetectContradictions = b
 			}
-		case "llm.endpoint":
-			cfg.LLM.Endpoint = val
-		case "llm.api_key":
-			cfg.LLM.APIKey = val
-		case "llm.model":
-			cfg.LLM.Model = val
-		case "llm.batch_size":
+		case "summarizer.endpoint":
+			cfg.Summarizer.Endpoint = val
+		case "summarizer.api_key":
+			cfg.Summarizer.APIKey = val
+		case "summarizer.model":
+			cfg.Summarizer.Model = val
+		case "summarizer.batch_size":
 			if n, err := strconv.Atoi(val); err == nil && n > 0 {
-				cfg.LLM.BatchSize = n
+				cfg.Summarizer.BatchSize = n
 			}
 		case "embeddings.enabled":
 			if b, err := strconv.ParseBool(val); err == nil {
@@ -204,6 +206,10 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			}
 		case "embeddings.provider":
 			cfg.Embeddings.Provider = val
+		case "embeddings.endpoint":
+			cfg.Embeddings.Endpoint = val
+		case "embeddings.api_key":
+			cfg.Embeddings.APIKey = val
 		case "embeddings.model":
 			cfg.Embeddings.Model = val
 		}
@@ -245,6 +251,15 @@ func LoadConfigWithEnv() Config {
 //	AMM_AUTO_COMPRESS     -> Maintenance.AutoCompress  (true/false)
 //	AMM_AUTO_CONSOLIDATE  -> Maintenance.AutoConsolidate (true/false)
 //	AMM_AUTO_DETECT_CONTRADICTIONS -> Maintenance.AutoDetectContradictions (true/false)
+//	AMM_SUMMARIZER_ENDPOINT -> Summarizer.Endpoint
+//	AMM_SUMMARIZER_API_KEY -> Summarizer.APIKey
+//	AMM_SUMMARIZER_MODEL -> Summarizer.Model
+//	AMM_SUMMARIZER_BATCH_SIZE -> Summarizer.BatchSize
+//	AMM_EMBEDDINGS_ENABLED -> Embeddings.Enabled (true/false)
+//	AMM_EMBEDDINGS_PROVIDER -> Embeddings.Provider
+//	AMM_EMBEDDINGS_ENDPOINT -> Embeddings.Endpoint
+//	AMM_EMBEDDINGS_API_KEY -> Embeddings.APIKey
+//	AMM_EMBEDDINGS_MODEL -> Embeddings.Model
 func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_DB_PATH"); v != "" {
 		base.Storage.DBPath = v
@@ -292,18 +307,18 @@ func ConfigFromEnv(base Config) Config {
 			base.Maintenance.AutoDetectContradictions = b
 		}
 	}
-	if v := os.Getenv("AMM_LLM_ENDPOINT"); v != "" {
-		base.LLM.Endpoint = v
+	if v := os.Getenv("AMM_SUMMARIZER_ENDPOINT"); v != "" {
+		base.Summarizer.Endpoint = v
 	}
-	if v := os.Getenv("AMM_LLM_API_KEY"); v != "" {
-		base.LLM.APIKey = v
+	if v := os.Getenv("AMM_SUMMARIZER_API_KEY"); v != "" {
+		base.Summarizer.APIKey = v
 	}
-	if v := os.Getenv("AMM_LLM_MODEL"); v != "" {
-		base.LLM.Model = v
+	if v := os.Getenv("AMM_SUMMARIZER_MODEL"); v != "" {
+		base.Summarizer.Model = v
 	}
-	if v := os.Getenv("AMM_LLM_BATCH_SIZE"); v != "" {
+	if v := os.Getenv("AMM_SUMMARIZER_BATCH_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			base.LLM.BatchSize = n
+			base.Summarizer.BatchSize = n
 		}
 	}
 	if v := os.Getenv("AMM_EMBEDDINGS_ENABLED"); v != "" {
@@ -313,6 +328,12 @@ func ConfigFromEnv(base Config) Config {
 	}
 	if v := os.Getenv("AMM_EMBEDDINGS_PROVIDER"); v != "" {
 		base.Embeddings.Provider = v
+	}
+	if v := os.Getenv("AMM_EMBEDDINGS_ENDPOINT"); v != "" {
+		base.Embeddings.Endpoint = v
+	}
+	if v := os.Getenv("AMM_EMBEDDINGS_API_KEY"); v != "" {
+		base.Embeddings.APIKey = v
 	}
 	if v := os.Getenv("AMM_EMBEDDINGS_MODEL"); v != "" {
 		base.Embeddings.Model = v

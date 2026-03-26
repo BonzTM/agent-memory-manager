@@ -90,9 +90,10 @@ Current entity extraction uses capitalized-word heuristics. Improvements:
 - Entity alias resolution against the canonical entity store.
 
 ### Local embedding provider implementation
-The embedding abstraction and semantic scoring are in place, but the active provider is still a noop/local placeholder. The next real upgrade is a production local embedding backend (likely a small MiniLM-class model).
+Completed.
+- Implemented `APIEmbeddingProvider` supporting any OpenAI-compatible `/v1/embeddings` endpoint (OpenRouter, Ollama, OpenAI, etc.).
+- Separate config from summarizer: `AMM_EMBEDDINGS_ENDPOINT`, `AMM_EMBEDDINGS_API_KEY`, `AMM_EMBEDDINGS_MODEL`.
+- Noop provider remains as fallback when embeddings are disabled.
+- Default model: `text-embedding-3-small`.
 
-**What's needed**:
-- Implement a real local provider behind `EmbeddingProvider`.
-- Keep local-first as the default.
-- Re-run retrieval-quality evaluation once real vectors exist.
+**Remaining**: A fully local ONNX-based provider (e.g., all-MiniLM-L6-v2 via onnxruntime_go) for zero-network embedding. The API provider covers Ollama local use in the meantime.

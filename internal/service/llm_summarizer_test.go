@@ -399,7 +399,7 @@ func TestLLMSummarizer_ExtractBatchTruncatesLongEvents(t *testing.T) {
 	}
 	s.ExtractMemoryCandidateBatch(context.Background(), []string{string(longContent)})
 
-	if len(receivedPrompt) > 3200 {
+	if len(receivedPrompt) > 5000 {
 		t.Fatalf("expected event content to be truncated within prompt, got total prompt length %d", len(receivedPrompt))
 	}
 	if len(receivedPrompt) < 1000 {

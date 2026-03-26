@@ -97,20 +97,23 @@ func (s *LLMSummarizer) ExtractMemoryCandidateBatch(ctx context.Context, eventCo
 func buildMemoryExtractionPrompt(eventContents []string, includeSourceEvents bool) string {
 	var fieldLines strings.Builder
 	fieldLines.WriteString("- type: one of \"preference\", \"fact\", \"decision\", \"procedure\", \"constraint\", \"open_loop\", \"identity\", \"relationship\", \"incident\", \"assumption\"\n")
-	fieldLines.WriteString("- subject: what entity or topic this is about (short noun phrase)\n")
-	fieldLines.WriteString("- body: the full content of the memory\n")
-	fieldLines.WriteString("- tight_description: one-line retrieval-friendly summary (max 100 chars)\n")
-	fieldLines.WriteString("- confidence: 0.0-1.0 how certain this is a real durable memory\n")
-	fieldLines.WriteString("- importance: 0.0-1.0 how valuable this memory is for future recall\n")
+	fieldLines.WriteString("- subject: short noun phrase for entity/topic\n")
+	fieldLines.WriteString("- body: full memory text\n")
+	fieldLines.WriteString("- tight_description: a natural-language retrieval phrase (max 100 chars). Must be searchable — write it as if someone would type it to find this memory later. NO file paths, timestamps, or technical IDs. Good: 'CGO and FTS5 flags required for all builds'. Bad: '/home/user/project/build.go line 42'\n")
+	fieldLines.WriteString("- confidence: 0.0-1.0 certainty this is durable memory\n")
+	fieldLines.WriteString("- importance: 0.0-1.0 future recall value\n")
 	if includeSourceEvents {
 		fieldLines.WriteString("- source_events: array of event numbers (1-indexed) this memory was derived from\n")
 	}
 
 	var rules strings.Builder
 	rules.WriteString("- Only extract things worth remembering across sessions\n")
-	rules.WriteString("- Skip transient task state, tool output, status noise, greetings\n")
-	rules.WriteString("- Skip file trees, package inventories, raw config/env var dumps, diffs, logs, JSON blobs, and obvious code structure\n")
-	rules.WriteString("- Prefer rationale, stable constraints, integration contracts, user preferences, and non-obvious project truths\n")
+	rules.WriteString("- Be highly selective: at most 10-15% of events should yield a memory. A batch of 20 events should produce 2-3 memories at most, not 10. Fewer high-quality memories is always better than many thin ones.\n")
+	rules.WriteString("- Skip transient task state, status noise, and greetings\n")
+	rules.WriteString("- Tool output (grep results, build logs, test output) should NOT be stored verbatim. Instead, if tool output reveals a durable lesson, constraint, or gotcha, extract the LESSON — not the output itself. For example: a build failure showing 'CGO_ENABLED=1 required' becomes a constraint memory about CGO requirements, not a copy of the build log.\n")
+	rules.WriteString("- Skip file trees, package inventories, raw config/env var dumps, diffs, logs, and JSON blobs\n")
+	rules.WriteString("- Before producing a memory, consider: is this information already obviously part of the project's README, AGENTS.md, or standard documentation? If so, skip it — agents can read those files directly. Only extract non-obvious truths, personal preferences, lessons learned, and contextual decisions.\n")
+	rules.WriteString("- Memory bodies should be self-contained and useful without context. Include the 'why' and 'so what', not just the 'what'. A body like 'Uses SQLite' is thin; 'Uses SQLite for local-first deployment — avoids network dependency, supports single-binary distribution' is rich.\n")
 	if includeSourceEvents {
 		rules.WriteString("- Deduplicate across events: if multiple events express the same fact/preference/decision, produce ONE memory with higher confidence\n")
 	}

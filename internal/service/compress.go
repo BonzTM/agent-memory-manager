@@ -85,6 +85,10 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 
 		firstTime := chunk[0].OccurredAt.Format(time.RFC3339)
 		lastTime := chunk[len(chunk)-1].OccurredAt.Format(time.RFC3339)
+		tightDesc := fmt.Sprintf("Summary of %d events from %s to %s", len(chunk), firstTime, lastTime)
+		if tightResult, err := s.summarizer.Summarize(ctx, body, 100); err == nil && strings.TrimSpace(tightResult) != "" {
+			tightDesc = tightResult
+		}
 
 		now := time.Now().UTC()
 		summary := &core.Summary{
@@ -94,7 +98,7 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 			ProjectID:        projectID,
 			Title:            fmt.Sprintf("Events %s to %s", firstTime, lastTime),
 			Body:             body,
-			TightDescription: fmt.Sprintf("Summary of %d events from %s to %s", len(chunk), firstTime, lastTime),
+			TightDescription: tightDesc,
 			PrivacyLevel:     core.PrivacyPrivate,
 			SourceSpan: core.SourceSpan{
 				EventIDs: eventIDs,
@@ -198,6 +202,10 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 		// Build topic snippets for tight description.
 		snippets := buildTopicSnippets(evts, 3)
 		scope, projectID := inferScopeFromEvents(evts)
+		tightDesc := fmt.Sprintf("Session summary: %d events, topics: %s", len(evts), snippets)
+		if tightResult, err := s.summarizer.Summarize(ctx, body, 100); err == nil && strings.TrimSpace(tightResult) != "" {
+			tightDesc = tightResult
+		}
 
 		now := time.Now().UTC()
 		summary := &core.Summary{
@@ -208,7 +216,7 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 			SessionID:        sessionID,
 			Title:            fmt.Sprintf("Session %s", sessionID),
 			Body:             body,
-			TightDescription: fmt.Sprintf("Session summary: %d events, topics: %s", len(evts), snippets),
+			TightDescription: tightDesc,
 			PrivacyLevel:     core.PrivacyPrivate,
 			SourceSpan: core.SourceSpan{
 				EventIDs: eventIDs,

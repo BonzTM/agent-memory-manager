@@ -130,9 +130,14 @@ See [docs/architecture.md](docs/architecture.md) for detailed layer descriptions
 | `compress_history` | Build leaf summaries over raw event spans |
 | `consolidate_sessions` | Build session/topic summaries and episode summaries |
 | `merge_duplicates` | Find and merge duplicate facts, preferences, and decisions |
+| `extract_claims` | Extract structured assertions from memories |
+| `form_episodes` | Group related events into narrative episodes |
 | `detect_contradictions` | Find conflicting claims or stale truths |
 | `decay_stale_memory` | Downrank stale assumptions and open loops |
-| `rebuild_indexes` | Rebuild FTS5, embeddings, and retrieval cache |
+| `promote_high_value` | Promote high-value memories based on access patterns and confidence |
+| `archive_session_traces` | Archive low-salience session-scoped memories |
+| `rebuild_indexes` | Rebuild FTS5 and generate embeddings for items missing them (incremental) |
+| `rebuild_indexes_full` | Rebuild FTS5 and regenerate all embeddings from scratch |
 | `repair_links` | Validate and repair summary/source/memory links |
 | `cleanup_recall_history` | Delete recall history rows older than TTL (default: 7 days) |
 | `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM |
@@ -152,17 +157,25 @@ CGO_ENABLED=1 go build -tags fts5 -o amm ./cmd/amm
 CGO_ENABLED=1 go test -tags fts5 ./...
 ```
 
-## Optional: LLM-Backed Extraction
+## Optional: Summarizer and Embeddings
 
-By default, amm uses a heuristic phrase-cue system for memory extraction. For higher-quality extraction, set three environment variables to enable LLM-backed reflection and summarization:
+By default, amm uses a heuristic phrase-cue system for memory extraction and FTS5 for retrieval. For higher quality, configure one or both external providers:
 
 ```bash
-export AMM_LLM_ENDPOINT=https://api.openai.com/v1   # or http://localhost:11434/v1 for Ollama
-export AMM_LLM_API_KEY=sk-...
-export AMM_LLM_MODEL=gpt-4o-mini                     # optional, defaults to gpt-4o-mini
+# Summarizer — LLM-backed extraction and summarization
+export AMM_SUMMARIZER_ENDPOINT=https://api.openai.com/v1   # or http://localhost:11434/v1 for Ollama
+export AMM_SUMMARIZER_API_KEY=sk-...
+export AMM_SUMMARIZER_MODEL=gpt-4o-mini                     # optional, defaults to gpt-4o-mini
+
+# Embeddings — semantic similarity for recall
+export AMM_EMBEDDINGS_ENABLED=true
+export AMM_EMBEDDINGS_ENDPOINT=https://api.openai.com/v1   # or http://localhost:11434/v1 for Ollama
+export AMM_EMBEDDINGS_API_KEY=sk-...
+export AMM_EMBEDDINGS_MODEL=text-embedding-3-small          # optional, defaults to text-embedding-3-small
+export AMM_ENABLE_SEMANTIC=true
 ```
 
-Any OpenAI-compatible endpoint works (OpenAI, Anthropic, Ollama, vLLM, LM Studio). When unset, amm operates entirely locally with no external API calls. See [Configuration](docs/configuration.md) for details.
+Both use OpenAI-compatible endpoints (OpenAI, OpenRouter, Anthropic, Ollama, vLLM, LM Studio). Summarizer and embeddings are configured independently — you can use different providers, models, or API keys for each. When unset, amm operates entirely locally with no external API calls. See [Configuration](docs/configuration.md) for details.
 
 ## Documentation
 

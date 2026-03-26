@@ -6,8 +6,11 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,6 +83,8 @@ type staticEmbeddingProvider struct {
 	vectors map[string][]float32
 }
 
+type failingEmbeddingProvider struct{}
+
 func (p staticEmbeddingProvider) Name() string { return "test-static" }
 
 func (p staticEmbeddingProvider) Model() string {
@@ -99,6 +104,14 @@ func (p staticEmbeddingProvider) Embed(_ context.Context, texts []string) ([][]f
 		out[i] = []float32{}
 	}
 	return out, nil
+}
+
+func (failingEmbeddingProvider) Name() string { return "test-failing" }
+
+func (failingEmbeddingProvider) Model() string { return "test-model" }
+
+func (failingEmbeddingProvider) Embed(context.Context, []string) ([][]float32, error) {
+	return nil, fmt.Errorf("embedding provider failure")
 }
 
 type consolidateTestSummarizer struct {
@@ -738,6 +751,68 @@ func TestCompressHistory(t *testing.T) {
 	}
 }
 
+func TestCompressHistory_GeneratesTightDescription(t *testing.T) {
+	var bodyCallCount int
+	var tightCallCount int
+	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: func(content string, maxLen int) (string, error) {
+		switch maxLen {
+		case leafBodyMaxChars:
+			bodyCallCount++
+			return "compressed body summary", nil
+		case 100:
+			tightCallCount++
+			if content != "compressed body summary" {
+				return "", fmt.Errorf("expected tight description input to be summary body, got %q", content)
+			}
+			return "tight summary from summarizer", nil
+		default:
+			return "", fmt.Errorf("unexpected maxLen: %d", maxLen)
+		}
+	}})
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("compress tight event %d", i),
+			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.CompressHistory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 leaf summary, got %d", created)
+	}
+	if bodyCallCount != 1 {
+		t.Fatalf("expected 1 body summarize call, got %d", bodyCallCount)
+	}
+	if tightCallCount != 1 {
+		t.Fatalf("expected 1 tight summarize call, got %d", tightCallCount)
+	}
+
+	summaries, err := svc.repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "leaf", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 leaf summary, got %d", len(summaries))
+	}
+	if summaries[0].TightDescription != "tight summary from summarizer" {
+		t.Fatalf("expected summarized tight description, got %q", summaries[0].TightDescription)
+	}
+	if strings.HasPrefix(summaries[0].TightDescription, "Summary of") {
+		t.Fatalf("expected non-fallback tight description, got %q", summaries[0].TightDescription)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ConsolidateSessions
 // ---------------------------------------------------------------------------
@@ -782,12 +857,23 @@ func TestConsolidateSessions(t *testing.T) {
 }
 
 func TestConsolidateSessions_UsesSummarizer(t *testing.T) {
-	var gotInput string
-	var gotMaxLen int
+	var gotBodyInput string
+	var gotBodyMaxLen int
+	var gotTightInput string
+	var gotTightMaxLen int
 	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: func(content string, maxLen int) (string, error) {
-		gotInput = content
-		gotMaxLen = maxLen
-		return "llm session summary", nil
+		switch maxLen {
+		case sessionBodyMaxChars:
+			gotBodyInput = content
+			gotBodyMaxLen = maxLen
+			return "llm session summary", nil
+		case 100:
+			gotTightInput = content
+			gotTightMaxLen = maxLen
+			return "llm tight description", nil
+		default:
+			return "", fmt.Errorf("unexpected maxLen: %d", maxLen)
+		}
 	}})
 	ctx := context.Background()
 
@@ -813,11 +899,17 @@ func TestConsolidateSessions_UsesSummarizer(t *testing.T) {
 	if created != 1 {
 		t.Fatalf("expected 1 session summary, got %d", created)
 	}
-	if gotMaxLen != sessionBodyMaxChars {
-		t.Fatalf("expected summarize maxLen %d, got %d", sessionBodyMaxChars, gotMaxLen)
+	if gotBodyMaxLen != sessionBodyMaxChars {
+		t.Fatalf("expected body summarize maxLen %d, got %d", sessionBodyMaxChars, gotBodyMaxLen)
 	}
-	if !strings.Contains(gotInput, "llm consolidate event 0") || !strings.Contains(gotInput, "llm consolidate event 2") {
-		t.Fatalf("expected summarize input to include concatenated event content, got %q", gotInput)
+	if !strings.Contains(gotBodyInput, "llm consolidate event 0") || !strings.Contains(gotBodyInput, "llm consolidate event 2") {
+		t.Fatalf("expected body summarize input to include concatenated event content, got %q", gotBodyInput)
+	}
+	if gotTightMaxLen != 100 {
+		t.Fatalf("expected tight summarize maxLen 100, got %d", gotTightMaxLen)
+	}
+	if gotTightInput != "llm session summary" {
+		t.Fatalf("expected tight summarize input to be summarized body, got %q", gotTightInput)
 	}
 
 	summaries, err := svc.repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "session", SessionID: sessID, Limit: 10})
@@ -829,6 +921,63 @@ func TestConsolidateSessions_UsesSummarizer(t *testing.T) {
 	}
 	if summaries[0].Body != "llm session summary" {
 		t.Fatalf("expected summarized body, got %q", summaries[0].Body)
+	}
+	if summaries[0].TightDescription != "llm tight description" {
+		t.Fatalf("expected summarized tight description, got %q", summaries[0].TightDescription)
+	}
+}
+
+func TestConsolidateSessions_GeneratesTightDescription(t *testing.T) {
+	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: func(content string, maxLen int) (string, error) {
+		switch maxLen {
+		case sessionBodyMaxChars:
+			return "session body summary", nil
+		case 100:
+			if content != "session body summary" {
+				return "", fmt.Errorf("expected tight description input to be summary body, got %q", content)
+			}
+			return "session tight description from summarizer", nil
+		default:
+			return "", fmt.Errorf("unexpected maxLen: %d", maxLen)
+		}
+	}})
+	ctx := context.Background()
+
+	sessID := "sess_consolidate_tight_desc"
+	for i := 0; i < 3; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			SessionID:    sessID,
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("consolidate tight event %d", i),
+			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.ConsolidateSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 session summary, got %d", created)
+	}
+
+	summaries, err := svc.repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "session", SessionID: sessID, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 session summary, got %d", len(summaries))
+	}
+	if summaries[0].TightDescription != "session tight description from summarizer" {
+		t.Fatalf("expected summarized tight description, got %q", summaries[0].TightDescription)
+	}
+	if strings.HasPrefix(summaries[0].TightDescription, "Session summary:") {
+		t.Fatalf("expected non-fallback tight description, got %q", summaries[0].TightDescription)
 	}
 }
 
@@ -1142,6 +1291,88 @@ func TestReflect_SkipsNoiseDowngradedEvents(t *testing.T) {
 	}
 }
 
+func TestReflect_ProcessesNoiseEventsWithLLMSummarizer(t *testing.T) {
+	ctx := context.Background()
+	var extractionCalls atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+			http.Error(w, "unexpected request", http.StatusNotFound)
+			return
+		}
+		extractionCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"[]"}}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	llm := NewLLMSummarizer(server.URL, "test-key", "test-model")
+	svc, _ := testServiceAndRepoWithSummarizer(t, llm)
+	if !svc.hasLLMSummarizer {
+		t.Fatal("expected service to detect LLM summarizer")
+	}
+
+	evt, err := svc.IngestEvent(ctx, &core.Event{
+		Kind:         "tool_result",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "tool output that should be filtered by summarizer",
+		OccurredAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Metadata["ingestion_mode"] != "read_only" {
+		t.Fatalf("expected noisy event to be tagged read_only, got metadata=%#v", evt.Metadata)
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 0 {
+		t.Fatalf("expected no memories from empty LLM extraction result, got %d", created)
+	}
+	if extractionCalls.Load() == 0 {
+		t.Fatal("expected reflect to process read_only event with LLM summarizer")
+	}
+}
+
+func TestReflect_SkipsNoiseEventsWithoutLLMSummarizer(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	evt, err := svc.IngestEvent(ctx, &core.Event{
+		Kind:         "tool_result",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "tool output should stay history-only without llm summarizer",
+		OccurredAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Metadata["ingestion_mode"] != "read_only" {
+		t.Fatalf("expected noisy event to be tagged read_only, got metadata=%#v", evt.Metadata)
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 0 {
+		t.Fatalf("expected reflect to skip read_only event without llm summarizer, created=%d", created)
+	}
+
+	mems, err := svc.repo.ListMemories(ctx, core.ListMemoriesOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mems) != 0 {
+		t.Fatalf("expected no memories from skipped read_only event, got %#v", mems)
+	}
+}
+
 func TestRemember_MergesNearExactDuplicate(t *testing.T) {
 	svc, _ := testServiceAndRepo(t)
 	ctx := context.Background()
@@ -1296,6 +1527,187 @@ func TestRemember_MergesSourceEventIDs(t *testing.T) {
 		if !got[want] {
 			t.Fatalf("expected merged source_event_ids to include %s, got %#v", want, merged.SourceEventIDs)
 		}
+	}
+}
+
+func TestEmbeddingDedup_CatchesParaphrase(t *testing.T) {
+	provider := staticEmbeddingProvider{
+		model:   "test-model",
+		vectors: map[string][]float32{},
+	}
+	svc, repo := testServiceAndRepoWithEmbeddingProvider(t, provider)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	first := &core.Memory{
+		ID:               "mem_embedding_first",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "PostgreSQL is the primary datastore for production transactions",
+		TightDescription: "postgres primary datastore for production",
+		Confidence:       0.7,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	second := &core.Memory{
+		ID:               "mem_embedding_second",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "Production writes persist in Postgres as the system of record",
+		TightDescription: "postgres system of record for production writes",
+		Confidence:       0.8,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now.Add(time.Second),
+		UpdatedAt:        now.Add(time.Second),
+	}
+	if err := repo.InsertMemory(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.InsertMemory(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.UpsertEmbedding(ctx, &core.EmbeddingRecord{ObjectID: first.ID, ObjectKind: "memory", Model: provider.Model(), Vector: []float32{1, 0}, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertEmbedding(ctx, &core.EmbeddingRecord{ObjectID: second.ID, ObjectKind: "memory", Model: provider.Model(), Vector: []float32{0.98, 0.02}, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	candidate := &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "Use Postgres as the canonical database for production writes",
+		TightDescription: "postgres canonical production database",
+		Confidence:       0.95,
+		Importance:       0.6,
+	}
+	provider.vectors[buildMemoryEmbeddingText(candidate)] = []float32{0.97, 0.03}
+	svc.embeddingProvider = provider
+
+	merged, err := svc.Remember(ctx, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.ID != second.ID {
+		t.Fatalf("expected embedding dedup to merge into %s, got %s", second.ID, merged.ID)
+	}
+
+	active, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Type: core.MemoryTypeFact, Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 2 {
+		t.Fatalf("expected no new active memory on embedding dedup merge, got %d", len(active))
+	}
+}
+
+func TestEmbeddingDedup_NoopWithoutProvider(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	for i, body := range []string{
+		"PostgreSQL is the primary datastore for production transactions",
+		"Production writes persist in Postgres as the system of record",
+	} {
+		mem := &core.Memory{
+			ID:               fmt.Sprintf("mem_embedding_noprov_%d", i),
+			Type:             core.MemoryTypeFact,
+			Scope:            core.ScopeGlobal,
+			Body:             body,
+			TightDescription: body,
+			Confidence:       0.8,
+			Importance:       0.5,
+			PrivacyLevel:     core.PrivacyPrivate,
+			Status:           core.MemoryStatusActive,
+			CreatedAt:        now.Add(time.Duration(i) * time.Second),
+			UpdatedAt:        now.Add(time.Duration(i) * time.Second),
+		}
+		if err := repo.InsertMemory(ctx, mem); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "Use Postgres as the canonical database for production writes",
+		TightDescription: "postgres canonical production database",
+		Confidence:       0.95,
+		Importance:       0.6,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.HasPrefix(created.ID, "mem_embedding_noprov_") {
+		t.Fatalf("expected remember to create a new memory without embedding provider, got %s", created.ID)
+	}
+
+	active, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Type: core.MemoryTypeFact, Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 3 {
+		t.Fatalf("expected new memory insertion without embedding dedup, got %d active", len(active))
+	}
+}
+
+func TestEmbeddingDedup_FallsBackOnEmbedFailure(t *testing.T) {
+	svc, repo := testServiceAndRepoWithEmbeddingProvider(t, failingEmbeddingProvider{})
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	for i, body := range []string{
+		"PostgreSQL is the primary datastore for production transactions",
+		"Production writes persist in Postgres as the system of record",
+	} {
+		mem := &core.Memory{
+			ID:               fmt.Sprintf("mem_embedding_fail_%d", i),
+			Type:             core.MemoryTypeFact,
+			Scope:            core.ScopeGlobal,
+			Body:             body,
+			TightDescription: body,
+			Confidence:       0.8,
+			Importance:       0.5,
+			PrivacyLevel:     core.PrivacyPrivate,
+			Status:           core.MemoryStatusActive,
+			CreatedAt:        now.Add(time.Duration(i) * time.Second),
+			UpdatedAt:        now.Add(time.Duration(i) * time.Second),
+		}
+		if err := repo.InsertMemory(ctx, mem); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "Use Postgres as the canonical database for production writes",
+		TightDescription: "postgres canonical production database",
+		Confidence:       0.95,
+		Importance:       0.6,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.HasPrefix(created.ID, "mem_embedding_fail_") {
+		t.Fatalf("expected fallback insertion on embed failure, got %s", created.ID)
+	}
+
+	active, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Type: core.MemoryTypeFact, Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 3 {
+		t.Fatalf("expected embed failure fallback to insert new memory, got %d active", len(active))
 	}
 }
 

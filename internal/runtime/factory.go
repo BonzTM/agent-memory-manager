@@ -12,12 +12,12 @@ import (
 )
 
 func buildSummarizer(cfg Config) core.Summarizer {
-	if cfg.LLM.APIKey != "" && cfg.LLM.Endpoint != "" {
-		model := cfg.LLM.Model
+	if cfg.Summarizer.APIKey != "" && cfg.Summarizer.Endpoint != "" {
+		model := cfg.Summarizer.Model
 		if model == "" {
 			model = "gpt-4o-mini"
 		}
-		return service.NewLLMSummarizer(cfg.LLM.Endpoint, cfg.LLM.APIKey, model)
+		return service.NewLLMSummarizer(cfg.Summarizer.Endpoint, cfg.Summarizer.APIKey, model)
 	}
 	return nil
 }
@@ -25,6 +25,13 @@ func buildSummarizer(cfg Config) core.Summarizer {
 func buildEmbeddingProvider(cfg Config) core.EmbeddingProvider {
 	if !cfg.Embeddings.Enabled {
 		return nil
+	}
+	if cfg.Embeddings.Endpoint != "" {
+		model := cfg.Embeddings.Model
+		if model == "" {
+			model = "text-embedding-3-small"
+		}
+		return service.NewAPIEmbeddingProvider(cfg.Embeddings.Endpoint, cfg.Embeddings.APIKey, model)
 	}
 	return service.NewNoopEmbeddingProvider(cfg.Embeddings.Provider, cfg.Embeddings.Model)
 }
@@ -52,7 +59,7 @@ func NewService(cfg Config) (core.Service, func(), error) {
 
 	repo := &sqlite.SQLiteRepository{DB: db}
 	svc := service.New(repo, cfg.Storage.DBPath, buildSummarizer(cfg), buildEmbeddingProvider(cfg))
-	svc.SetReprocessBatchSize(cfg.LLM.BatchSize)
+	svc.SetReprocessBatchSize(cfg.Summarizer.BatchSize)
 
 	cleanup := func() {
 		db.Close()

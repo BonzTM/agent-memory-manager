@@ -36,6 +36,10 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 		stopIteration := false
 
 		for _, group := range groups {
+			activeByType := make([]*core.Memory, 0, len(group))
+			for i := range group {
+				activeByType = append(activeByType, &group[i])
+			}
 			for i := range group {
 				if merged >= maxMergesPerIteration {
 					stopIteration = true
@@ -60,28 +64,21 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 					candidates = group
 				}
 
-				for j := range candidates {
-					candB := &candidates[j]
-
+				mergePair := func(memA, candB *core.Memory) bool {
 					if candB.ID == memA.ID {
-						continue
+						return false
 					}
 					if mergedIDs[candB.ID] {
-						continue
+						return false
 					}
 					if candB.Type != memA.Type {
-						continue
+						return false
 					}
 					if candB.Scope != memA.Scope {
-						continue
+						return false
 					}
 					if candB.Status != core.MemoryStatusActive {
-						continue
-					}
-
-					sim := jaccardSimilarity(memA.Body, candB.Body)
-					if sim <= 0.7 {
-						continue
+						return false
 					}
 
 					keeper, superseded := memA, candB
@@ -104,14 +101,31 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 					}
 
 					if err := s.repo.UpdateMemory(ctx, superseded); err != nil {
-						continue
+						return false
 					}
 					if err := s.repo.UpdateMemory(ctx, keeper); err != nil {
-						continue
+						return false
 					}
 
 					mergedIDs[superseded.ID] = true
 					merged++
+					return true
+				}
+
+				jaccardMerged := false
+
+				for j := range candidates {
+					candB := &candidates[j]
+
+					sim := jaccardSimilarity(memA.Body, candB.Body)
+					if sim <= 0.7 {
+						continue
+					}
+
+					if !mergePair(memA, candB) {
+						continue
+					}
+					jaccardMerged = true
 
 					if merged >= maxMergesPerIteration {
 						stopIteration = true
@@ -119,6 +133,19 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 					}
 
 					break
+				}
+
+				if !jaccardMerged && s.embeddingProvider != nil {
+					embCandidates := s.findDuplicatesByEmbedding(ctx, *memA, activeByType)
+					for _, candB := range embCandidates {
+						if !mergePair(memA, candB) {
+							continue
+						}
+						if merged >= maxMergesPerIteration {
+							stopIteration = true
+						}
+						break
+					}
 				}
 				if stopIteration {
 					break

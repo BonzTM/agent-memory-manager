@@ -82,7 +82,7 @@ func (s *AMMService) upsertSummaryEmbeddingBestEffort(ctx context.Context, summa
 	s.upsertEmbeddingBestEffort(ctx, summary.ID, "summary", buildSummaryEmbeddingText(summary))
 }
 
-func (s *AMMService) rebuildEmbeddings(ctx context.Context) error {
+func (s *AMMService) rebuildEmbeddings(ctx context.Context, forceAll bool) error {
 	if s.embeddingProvider == nil {
 		return nil
 	}
@@ -93,6 +93,9 @@ func (s *AMMService) rebuildEmbeddings(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list memories for embedding rebuild: %w", err)
 	}
+
+	memorySkipped := 0
+	memoryEmbedded := 0
 	for i := 0; i < len(memories); i += embeddingBatchSize {
 		end := i + embeddingBatchSize
 		if end > len(memories) {
@@ -105,6 +108,12 @@ func (s *AMMService) rebuildEmbeddings(ctx context.Context) error {
 			text := buildMemoryEmbeddingText(&batch[j])
 			if strings.TrimSpace(text) == "" {
 				continue
+			}
+			if !forceAll {
+				if _, err := s.repo.GetEmbedding(ctx, batch[j].ID, "memory", model); err == nil {
+					memorySkipped++
+					continue
+				}
 			}
 			ids = append(ids, batch[j].ID)
 			texts = append(texts, text)
@@ -127,14 +136,20 @@ func (s *AMMService) rebuildEmbeddings(ctx context.Context) error {
 			record := &core.EmbeddingRecord{ObjectID: ids[j], ObjectKind: "memory", Model: model, Vector: vectors[j], CreatedAt: now}
 			if err := s.repo.UpsertEmbedding(ctx, record); err != nil {
 				slog.Warn("memory embedding rebuild persist failed", "memoryID", ids[j], "model", model, "error", err)
+			} else {
+				memoryEmbedded++
 			}
 		}
 	}
+	slog.Debug("memory embeddings rebuild done", "embedded", memoryEmbedded, "skipped", memorySkipped, "total", len(memories))
 
 	summaries, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{Limit: 50000})
 	if err != nil {
 		return fmt.Errorf("list summaries for embedding rebuild: %w", err)
 	}
+
+	summarySkipped := 0
+	summaryEmbedded := 0
 	for i := 0; i < len(summaries); i += embeddingBatchSize {
 		end := i + embeddingBatchSize
 		if end > len(summaries) {
@@ -147,6 +162,12 @@ func (s *AMMService) rebuildEmbeddings(ctx context.Context) error {
 			text := buildSummaryEmbeddingText(&batch[j])
 			if strings.TrimSpace(text) == "" {
 				continue
+			}
+			if !forceAll {
+				if _, err := s.repo.GetEmbedding(ctx, batch[j].ID, "summary", model); err == nil {
+					summarySkipped++
+					continue
+				}
 			}
 			ids = append(ids, batch[j].ID)
 			texts = append(texts, text)
@@ -169,9 +190,12 @@ func (s *AMMService) rebuildEmbeddings(ctx context.Context) error {
 			record := &core.EmbeddingRecord{ObjectID: ids[j], ObjectKind: "summary", Model: model, Vector: vectors[j], CreatedAt: now}
 			if err := s.repo.UpsertEmbedding(ctx, record); err != nil {
 				slog.Warn("summary embedding rebuild persist failed", "summaryID", ids[j], "model", model, "error", err)
+			} else {
+				summaryEmbedded++
 			}
 		}
 	}
+	slog.Debug("summary embeddings rebuild done", "embedded", summaryEmbedded, "skipped", summarySkipped, "total", len(summaries))
 
 	return nil
 }

@@ -30,6 +30,7 @@ type AMMService struct {
 	repo               core.Repository
 	dbPath             string
 	summarizer         core.Summarizer
+	hasLLMSummarizer   bool
 	embeddingProvider  core.EmbeddingProvider
 	reprocessBatchSize int
 }
@@ -39,6 +40,10 @@ var _ core.Service = (*AMMService)(nil)
 
 func New(repo core.Repository, dbPath string, summarizer core.Summarizer, embeddingProvider core.EmbeddingProvider) *AMMService {
 	selected := core.Summarizer(&HeuristicSummarizer{})
+	hasLLM := false
+	if summarizer != nil {
+		_, hasLLM = summarizer.(*LLMSummarizer)
+	}
 	if summarizer != nil {
 		selected = summarizer
 	}
@@ -46,6 +51,7 @@ func New(repo core.Repository, dbPath string, summarizer core.Summarizer, embedd
 		repo:               repo,
 		dbPath:             dbPath,
 		summarizer:         selected,
+		hasLLMSummarizer:   hasLLM,
 		embeddingProvider:  embeddingProvider,
 		reprocessBatchSize: defaultBatchSize,
 	}
@@ -209,11 +215,16 @@ func (s *AMMService) Remember(ctx context.Context, memory *core.Memory) (*core.M
 		}
 
 		duplicates := findDuplicateActiveMemories(activeMemoryPtrs, *memory)
+		embeddingDuplicateMatch := false
+		if len(duplicates) == 0 {
+			duplicates = s.findDuplicatesByEmbedding(ctx, *memory, activeMemoryPtrs)
+			embeddingDuplicateMatch = len(duplicates) > 0
+		}
 		if len(duplicates) > 0 {
 			keeper := selectDuplicateKeeper(duplicates)
 			if keeper != nil {
 				bodySimilarity := jaccardSimilarity(normalizeMemoryText(keeper.Body), normalizeMemoryText(memory.Body))
-				if bodySimilarity >= 0.85 {
+				if embeddingDuplicateMatch || bodySimilarity >= 0.85 {
 					keeper.SourceEventIDs = mergeUniqueStrings(keeper.SourceEventIDs, memory.SourceEventIDs)
 					if memory.Confidence > keeper.Confidence {
 						keeper.Confidence = memory.Confidence
@@ -556,10 +567,18 @@ func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error)
 	case "rebuild_indexes":
 		jobErr = s.repo.RebuildFTSIndexes(ctx)
 		if jobErr == nil {
-			jobErr = s.rebuildEmbeddings(ctx)
+			jobErr = s.rebuildEmbeddings(ctx, false)
 		}
 		if jobErr == nil {
-			job.Result = map[string]string{"action": "indexes rebuilt"}
+			job.Result = map[string]string{"action": "indexes rebuilt", "embeddings": "incremental"}
+		}
+	case "rebuild_indexes_full":
+		jobErr = s.repo.RebuildFTSIndexes(ctx)
+		if jobErr == nil {
+			jobErr = s.rebuildEmbeddings(ctx, true)
+		}
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "indexes rebuilt", "embeddings": "full"}
 		}
 	case "extract_claims":
 		count, err := s.ExtractClaims(ctx)
@@ -669,7 +688,7 @@ func (s *AMMService) Repair(ctx context.Context, check bool, fix string) (*core.
 				slog.Error("Repair failed", "check", check, "fix", fix, "error", err)
 				return report, fmt.Errorf("rebuild FTS indexes: %w", err)
 			}
-			if err := s.rebuildEmbeddings(ctx); err != nil {
+			if err := s.rebuildEmbeddings(ctx, true); err != nil {
 				slog.Error("Repair failed", "check", check, "fix", fix, "error", err)
 				return report, fmt.Errorf("rebuild embeddings: %w", err)
 			}

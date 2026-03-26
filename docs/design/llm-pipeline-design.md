@@ -1,8 +1,9 @@
 # LLM Injection Points in the AMM Pipeline
 
-**Status**: Discussion document — not yet designed or implemented  
+**Status**: Option B (Single-Point Model) implemented as first step  
 **Created**: 2026-03-25  
-**Context**: Currently, the pipeline uses heuristic-only logic for ingestion filtering, memory extraction (fallback), decay, and promotion. Several stages would benefit from LLM judgment but we want to minimize cost by consolidating injection points.
+**Updated**: 2026-03-26  
+**Context**: The pipeline now uses LLM involvement at the extraction point with improved prompt quality, noise filter relaxation, and LLM-generated summary descriptions. Further injection points (triage, quality review) are deferred pending evaluation of Option B's impact.
 
 ## The Core Question
 
@@ -89,9 +90,36 @@ Then downstream jobs (decay, promotion) use these LLM-assigned tags instead of h
 4. Should the LLM triage at ingestion be synchronous (blocking ingest) or async (tag for later processing)?
 5. Can we reuse the existing `Summarizer` interface or do we need a new `Triager` / `Assessor` interface?
 
+## Implemented (Option B — Single-Point Model)
+
+### Extraction Prompt Improvements
+- Added percentage-based quantity bar: "at most 10-15% of events should yield a memory"
+- Tool output distillation: extract the lesson, not the raw output
+- Anti-duplication: skip information already in project docs (README, AGENTS.md)
+- Body quality: require self-contained, "why and so what" content
+- Better tight_description guidance: natural-language retrieval phrases, no paths/timestamps
+
+### Noise Filter Relaxation
+- When LLM summarizer is configured (`hasLLMSummarizer` flag), `read_only` events are passed through to reflect/reprocess instead of being skipped
+- The LLM decides what's worth extracting from tool output, build logs, etc.
+- When no LLM is configured, conservative heuristic filter is preserved (no regression)
+
+### Summary Tight Descriptions
+- CompressHistory and ConsolidateSessions now generate tight_descriptions via the summarizer
+- Falls back to timestamp/snippet format when summarizer returns empty or errors
+- One additional summarizer call per summary (minimal cost overhead)
+
+## Next Steps (If Option B Is Insufficient)
+
+If the extraction improvements don't sufficiently reduce over-production or improve recall quality:
+
+1. **Option A Point 1: Smart Triage at Ingestion** — LLM triage for borderline events before extraction
+2. **Option A Point 2: Periodic Quality Review** — Batch job reviewing oldest/least-accessed memories for archival or promotion
+
 ## Related Work
 
-- Ingestion noise filtering: implemented in current codebase (heuristic-only)
-- Decay/promotion automation: `promote_high_value` and `archive_session_traces` jobs (heuristic-only)
-- LLM extraction: `LLMSummarizer` in `internal/service/llm_summarizer.go`
-- Memory dedup improvements: in progress (Changes 1-3, orthogonal to this discussion)
+- Ingestion noise filtering: implemented (heuristic + LLM bypass when configured)
+- Decay/promotion automation: `promote_high_value` and `archive_session_traces` jobs (heuristic-only, potential future LLM enrichment)
+- LLM extraction: `LLMSummarizer` in `internal/service/llm_summarizer.go` (prompt improved)
+- Memory dedup: pre-insert dedup in Remember, Reflect, and scaled MergeDuplicates
+- Embeddings: API-based provider implemented, separate config from summarizer
