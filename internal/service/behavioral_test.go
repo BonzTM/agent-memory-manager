@@ -123,10 +123,14 @@ type consolidateTestSummarizer struct {
 }
 
 type consolidateTestIntelligence struct {
-	summarize    func(content string, maxLen int) (string, error)
-	consolidate  func(events []core.EventContent, existingMemories []core.MemorySummary) (*core.NarrativeResult, error)
-	triage       func(events []core.EventContent) (map[int]core.TriageDecision, error)
-	callCountPtr *int32
+	summarize                 func(content string, maxLen int) (string, error)
+	consolidate               func(events []core.EventContent, existingMemories []core.MemorySummary) (*core.NarrativeResult, error)
+	compressEventBatches      func(chunks []core.EventChunk) ([]core.CompressionResult, error)
+	summarizeTopicBatches     func(topics []core.TopicChunk) ([]core.CompressionResult, error)
+	triage                    func(events []core.EventContent) (map[int]core.TriageDecision, error)
+	callCountPtr              *int32
+	compressBatchCallCountPtr *int32
+	topicBatchCallCountPtr    *int32
 }
 
 func (s consolidateTestSummarizer) Summarize(_ context.Context, content string, maxLen int) (string, error) {
@@ -180,6 +184,42 @@ func (m consolidateTestIntelligence) TriageEvents(_ context.Context, events []co
 		decisions[index] = core.TriageReflect
 	}
 	return decisions, nil
+}
+
+func (m consolidateTestIntelligence) CompressEventBatches(_ context.Context, chunks []core.EventChunk) ([]core.CompressionResult, error) {
+	if m.compressBatchCallCountPtr != nil {
+		atomic.AddInt32(m.compressBatchCallCountPtr, 1)
+	}
+	if m.compressEventBatches != nil {
+		return m.compressEventBatches(chunks)
+	}
+	results := make([]core.CompressionResult, 0, len(chunks))
+	for _, chunk := range chunks {
+		results = append(results, core.CompressionResult{
+			Index:            chunk.Index,
+			Body:             strings.Join(chunk.Contents, "\n"),
+			TightDescription: fmt.Sprintf("chunk-%d", chunk.Index),
+		})
+	}
+	return results, nil
+}
+
+func (m consolidateTestIntelligence) SummarizeTopicBatches(_ context.Context, topics []core.TopicChunk) ([]core.CompressionResult, error) {
+	if m.topicBatchCallCountPtr != nil {
+		atomic.AddInt32(m.topicBatchCallCountPtr, 1)
+	}
+	if m.summarizeTopicBatches != nil {
+		return m.summarizeTopicBatches(topics)
+	}
+	results := make([]core.CompressionResult, 0, len(topics))
+	for _, topic := range topics {
+		results = append(results, core.CompressionResult{
+			Index:            topic.Index,
+			Body:             strings.Join(topic.Contents, "\n\n"),
+			TightDescription: fmt.Sprintf("topic-%d", topic.Index),
+		})
+	}
+	return results, nil
 }
 
 func (m consolidateTestIntelligence) ConsolidateNarrative(_ context.Context, events []core.EventContent, existingMemories []core.MemorySummary) (*core.NarrativeResult, error) {
@@ -1203,6 +1243,138 @@ func TestCompressHistory_GeneratesTightDescription(t *testing.T) {
 	}
 }
 
+func TestCompressHistory_UsesBatchedIntelligence(t *testing.T) {
+	var summarizeCalls int32
+	var batchCalls int32
+	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: func(content string, maxLen int) (string, error) {
+		atomic.AddInt32(&summarizeCalls, 1)
+		return "unexpected fallback", nil
+	}})
+	ctx := context.Background()
+
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		compressBatchCallCountPtr: &batchCalls,
+		compressEventBatches: func(chunks []core.EventChunk) ([]core.CompressionResult, error) {
+			if len(chunks) != 2 {
+				t.Fatalf("expected 2 chunks, got %d", len(chunks))
+			}
+			return []core.CompressionResult{
+				{Index: chunks[0].Index, Body: "batched body 1", TightDescription: "batched tight 1"},
+				{Index: chunks[1].Index, Body: "batched body 2", TightDescription: "batched tight 2"},
+			}, nil
+		},
+	})
+
+	for i := 0; i < 15; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("batched compress event %d", i),
+			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.CompressHistory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 2 {
+		t.Fatalf("expected 2 leaf summaries, got %d", created)
+	}
+	if atomic.LoadInt32(&batchCalls) != 1 {
+		t.Fatalf("expected one batched compress call, got %d", atomic.LoadInt32(&batchCalls))
+	}
+	if atomic.LoadInt32(&summarizeCalls) != 0 {
+		t.Fatalf("expected no fallback summarize calls, got %d", atomic.LoadInt32(&summarizeCalls))
+	}
+
+	summaries, err := svc.repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "leaf", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("expected 2 leaf summaries, got %d", len(summaries))
+	}
+	gotTight := map[string]struct{}{}
+	for _, summary := range summaries {
+		gotTight[summary.TightDescription] = struct{}{}
+	}
+	if _, ok := gotTight["batched tight 1"]; !ok {
+		t.Fatalf("expected batched tight 1 in summaries, got %#v", gotTight)
+	}
+	if _, ok := gotTight["batched tight 2"]; !ok {
+		t.Fatalf("expected batched tight 2 in summaries, got %#v", gotTight)
+	}
+}
+
+func TestCompressHistory_FallsBackWhenBatchCompressionFails(t *testing.T) {
+	var bodyCalls int32
+	var tightCalls int32
+	var batchCalls int32
+	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: func(content string, maxLen int) (string, error) {
+		switch maxLen {
+		case leafBodyMaxChars:
+			atomic.AddInt32(&bodyCalls, 1)
+			return "fallback leaf body", nil
+		case 100:
+			atomic.AddInt32(&tightCalls, 1)
+			return "fallback leaf tight", nil
+		default:
+			return content, nil
+		}
+	}})
+	ctx := context.Background()
+
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		compressBatchCallCountPtr: &batchCalls,
+		compressEventBatches: func([]core.EventChunk) ([]core.CompressionResult, error) {
+			return nil, fmt.Errorf("batch failed")
+		},
+	})
+
+	for i := 0; i < 3; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("fallback compress event %d", i),
+			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.CompressHistory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 leaf summary, got %d", created)
+	}
+	if atomic.LoadInt32(&batchCalls) != 1 {
+		t.Fatalf("expected one failed batch call, got %d", atomic.LoadInt32(&batchCalls))
+	}
+	if atomic.LoadInt32(&bodyCalls) != 1 || atomic.LoadInt32(&tightCalls) != 1 {
+		t.Fatalf("expected fallback summarize calls body=1 tight=1, got body=%d tight=%d", atomic.LoadInt32(&bodyCalls), atomic.LoadInt32(&tightCalls))
+	}
+
+	summaries, err := svc.repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "leaf", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 leaf summary, got %d", len(summaries))
+	}
+	if summaries[0].Body != "fallback leaf body" || summaries[0].TightDescription != "fallback leaf tight" {
+		t.Fatalf("expected fallback summary values, got body=%q tight=%q", summaries[0].Body, summaries[0].TightDescription)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ConsolidateSessions
 // ---------------------------------------------------------------------------
@@ -1840,6 +2012,146 @@ func TestBuildTopicSummaries_RunJob(t *testing.T) {
 	}
 	if job.Result["summaries_created"] != "1" {
 		t.Fatalf("expected summaries_created=1, got %+v", job.Result)
+	}
+}
+
+func TestBuildTopicSummaries_UsesBatchedIntelligence(t *testing.T) {
+	var summarizeCalls int32
+	var topicBatchCalls int32
+	svc, repo := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: func(content string, maxLen int) (string, error) {
+		atomic.AddInt32(&summarizeCalls, 1)
+		return "unexpected topic fallback", nil
+	}})
+	ctx := context.Background()
+
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		topicBatchCallCountPtr: &topicBatchCalls,
+		summarizeTopicBatches: func(topics []core.TopicChunk) ([]core.CompressionResult, error) {
+			if len(topics) != 1 {
+				t.Fatalf("expected 1 topic chunk, got %d", len(topics))
+			}
+			return []core.CompressionResult{{
+				Index:            topics[0].Index,
+				Body:             "batched topic body",
+				TightDescription: "batched topic tight",
+			}}, nil
+		},
+	})
+
+	for i, body := range []string{
+		"Alice and Bob mapped SQLite migration risks for AMM rollout",
+		"Bob asked Alice to verify SQLite WAL settings for AMM",
+		"AMM reliability review: Alice and Bob aligned on SQLite recovery",
+	} {
+		summary := &core.Summary{
+			ID:               fmt.Sprintf("sum_topic_batch_%d", i),
+			Kind:             "leaf",
+			Scope:            core.ScopeGlobal,
+			Body:             body,
+			TightDescription: fmt.Sprintf("leaf batch %d", i),
+			PrivacyLevel:     core.PrivacyPrivate,
+			CreatedAt:        time.Now().UTC().Add(time.Duration(i) * time.Second),
+			UpdatedAt:        time.Now().UTC().Add(time.Duration(i) * time.Second),
+		}
+		if err := repo.InsertSummary(ctx, summary); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.BuildTopicSummaries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 topic summary created, got %d", created)
+	}
+	if atomic.LoadInt32(&topicBatchCalls) != 1 {
+		t.Fatalf("expected one topic batch call, got %d", atomic.LoadInt32(&topicBatchCalls))
+	}
+	if atomic.LoadInt32(&summarizeCalls) != 0 {
+		t.Fatalf("expected no fallback summarize calls, got %d", atomic.LoadInt32(&summarizeCalls))
+	}
+
+	topics, err := repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "topic", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topics) != 1 {
+		t.Fatalf("expected 1 topic summary, got %d", len(topics))
+	}
+	if topics[0].Body != "batched topic body" || topics[0].TightDescription != "batched topic tight" {
+		t.Fatalf("expected batched topic outputs, got body=%q tight=%q", topics[0].Body, topics[0].TightDescription)
+	}
+}
+
+func TestBuildTopicSummaries_FallsBackWhenBatchTopicFails(t *testing.T) {
+	var bodyCalls int32
+	var tightCalls int32
+	var topicBatchCalls int32
+	svc, repo := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: func(content string, maxLen int) (string, error) {
+		switch maxLen {
+		case topicBodyMaxChars:
+			atomic.AddInt32(&bodyCalls, 1)
+			return "fallback topic body", nil
+		case 100:
+			atomic.AddInt32(&tightCalls, 1)
+			return "fallback topic tight", nil
+		default:
+			return content, nil
+		}
+	}})
+	ctx := context.Background()
+
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		topicBatchCallCountPtr: &topicBatchCalls,
+		summarizeTopicBatches: func([]core.TopicChunk) ([]core.CompressionResult, error) {
+			return nil, fmt.Errorf("topic batch failure")
+		},
+	})
+
+	for i, body := range []string{
+		"Alice and Bob reviewed SQLite constraints for AMM",
+		"Bob and Alice documented SQLite indexing for AMM",
+		"AMM check-in: Alice Bob SQLite backup discussion",
+	} {
+		summary := &core.Summary{
+			ID:               fmt.Sprintf("sum_topic_fallback_%d", i),
+			Kind:             "leaf",
+			Scope:            core.ScopeGlobal,
+			Body:             body,
+			TightDescription: fmt.Sprintf("leaf fallback %d", i),
+			PrivacyLevel:     core.PrivacyPrivate,
+			CreatedAt:        time.Now().UTC().Add(time.Duration(i) * time.Second),
+			UpdatedAt:        time.Now().UTC().Add(time.Duration(i) * time.Second),
+		}
+		if err := repo.InsertSummary(ctx, summary); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.BuildTopicSummaries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("expected 1 topic summary created, got %d", created)
+	}
+	if atomic.LoadInt32(&topicBatchCalls) != 1 {
+		t.Fatalf("expected one failed topic batch call, got %d", atomic.LoadInt32(&topicBatchCalls))
+	}
+	if atomic.LoadInt32(&bodyCalls) != 1 || atomic.LoadInt32(&tightCalls) != 1 {
+		t.Fatalf("expected fallback summarize calls body=1 tight=1, got body=%d tight=%d", atomic.LoadInt32(&bodyCalls), atomic.LoadInt32(&tightCalls))
+	}
+
+	topics, err := repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "topic", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topics) != 1 {
+		t.Fatalf("expected 1 topic summary, got %d", len(topics))
+	}
+	if topics[0].Body != "fallback topic body" || topics[0].TightDescription != "fallback topic tight" {
+		t.Fatalf("expected fallback topic outputs, got body=%q tight=%q", topics[0].Body, topics[0].TightDescription)
 	}
 }
 

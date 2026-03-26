@@ -10,12 +10,33 @@ import (
 )
 
 const (
-	compressChunkSize   = 10
-	compressMaxEvents   = 200
-	leafBodyMaxChars    = 1000
-	sessionBodyMaxChars = 2000
-	topicBodyMaxChars   = 2000
+	defaultCompressChunkSize = 10
+	defaultCompressMaxEvents = 200
+	defaultCompressBatchSize = 15
+	defaultTopicBatchSize    = 15
+	leafBodyMaxChars         = 1000
+	sessionBodyMaxChars      = 2000
+	topicBodyMaxChars        = 2000
 )
+
+type compressEventChunkPlan struct {
+	index      int
+	chunk      []core.Event
+	eventIDs   []string
+	contents   []string
+	joinedBody string
+	firstTime  string
+	lastTime   string
+}
+
+type topicSummaryPlan struct {
+	index      int
+	group      []core.Summary
+	childIDs   []string
+	contents   []string
+	mergedBody string
+	title      string
+}
 
 // CompressHistory summarizes recent event chunks into leaf summaries and
 // returns the number created.
@@ -33,14 +54,18 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 
 	// List events to compress.
 	var events []core.Event
+	maxEvents := s.compressMaxEvents
+	if maxEvents <= 0 {
+		maxEvents = defaultCompressMaxEvents
+	}
 	if afterTime != "" {
 		events, err = s.repo.ListEvents(ctx, core.ListEventsOptions{
 			After: afterTime,
-			Limit: compressMaxEvents,
+			Limit: maxEvents,
 		})
 	} else {
 		events, err = s.repo.ListEvents(ctx, core.ListEventsOptions{
-			Limit: compressMaxEvents,
+			Limit: maxEvents,
 		})
 	}
 	if err != nil {
@@ -53,42 +78,106 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 
 	created := 0
 
-	// Process events in chunks.
-	for i := 0; i < len(events); i += compressChunkSize {
-		end := i + compressChunkSize
+	chunkSize := s.compressChunkSize
+	if chunkSize <= 0 {
+		chunkSize = defaultCompressChunkSize
+	}
+	plans := make([]compressEventChunkPlan, 0, (len(events)+chunkSize-1)/chunkSize)
+
+	compressBatchSize := s.compressBatchSize
+	if compressBatchSize <= 0 {
+		compressBatchSize = defaultCompressBatchSize
+	}
+	for i := 0; i < len(events); i += chunkSize {
+		end := i + chunkSize
 		if end > len(events) {
 			end = len(events)
 		}
 		chunk := events[i:end]
-
 		if len(chunk) == 0 {
 			continue
 		}
 
-		// Collect event IDs and build body.
 		eventIDs := make([]string, 0, len(chunk))
+		contents := make([]string, 0, len(chunk))
 		var bodyBuilder strings.Builder
 		for _, evt := range chunk {
 			eventIDs = append(eventIDs, evt.ID)
+			contents = append(contents, evt.Content)
 			if bodyBuilder.Len() > 0 {
 				bodyBuilder.WriteByte('\n')
 			}
 			bodyBuilder.WriteString(evt.Content)
 		}
 
-		body, err := s.summarizer.Summarize(ctx, bodyBuilder.String(), leafBodyMaxChars)
-		if err != nil {
-			return created, fmt.Errorf("summarize leaf body: %w", err)
+		plans = append(plans, compressEventChunkPlan{
+			index:      len(plans) + 1,
+			chunk:      chunk,
+			eventIDs:   eventIDs,
+			contents:   contents,
+			joinedBody: bodyBuilder.String(),
+			firstTime:  chunk[0].OccurredAt.Format(time.RFC3339),
+			lastTime:   chunk[len(chunk)-1].OccurredAt.Format(time.RFC3339),
+		})
+	}
+
+	batchResults := make(map[int]core.CompressionResult, len(plans))
+	batchSucceeded := false
+	if s.intelligence != nil && len(plans) > 0 {
+		batchSucceeded = true
+		for start := 0; start < len(plans); start += compressBatchSize {
+			end := start + compressBatchSize
+			if end > len(plans) {
+				end = len(plans)
+			}
+
+			chunks := make([]core.EventChunk, 0, end-start)
+			for _, plan := range plans[start:end] {
+				chunks = append(chunks, core.EventChunk{
+					Index:    plan.index,
+					Contents: plan.contents,
+				})
+			}
+
+			results, err := s.intelligence.CompressEventBatches(ctx, chunks)
+			if err != nil {
+				batchSucceeded = false
+				break
+			}
+			for _, result := range results {
+				batchResults[result.Index] = result
+			}
+		}
+	}
+
+	if !batchSucceeded {
+		batchResults = map[int]core.CompressionResult{}
+	}
+
+	for _, plan := range plans {
+		// Determine scope.
+		scope, projectID := inferScopeFromEvents(plan.chunk)
+
+		tightDesc := fmt.Sprintf("Summary of %d events from %s to %s", len(plan.chunk), plan.firstTime, plan.lastTime)
+		body := ""
+		if result, ok := batchResults[plan.index]; ok {
+			if trimmedBody := strings.TrimSpace(result.Body); trimmedBody != "" {
+				body = trimmedBody
+			}
+			if trimmedTight := strings.TrimSpace(result.TightDescription); trimmedTight != "" {
+				tightDesc = trimmedTight
+			}
 		}
 
-		// Determine scope.
-		scope, projectID := inferScopeFromEvents(chunk)
-
-		firstTime := chunk[0].OccurredAt.Format(time.RFC3339)
-		lastTime := chunk[len(chunk)-1].OccurredAt.Format(time.RFC3339)
-		tightDesc := fmt.Sprintf("Summary of %d events from %s to %s", len(chunk), firstTime, lastTime)
-		if tightResult, err := s.summarizer.Summarize(ctx, body, 100); err == nil && strings.TrimSpace(tightResult) != "" {
-			tightDesc = tightResult
+		if body == "" {
+			var err error
+			body, err = s.summarizer.Summarize(ctx, plan.joinedBody, leafBodyMaxChars)
+			if err != nil {
+				return created, fmt.Errorf("summarize leaf body: %w", err)
+			}
+			if tightResult, err := s.summarizer.Summarize(ctx, body, 100); err == nil && strings.TrimSpace(tightResult) != "" {
+				tightDesc = tightResult
+			}
 		}
 
 		now := time.Now().UTC()
@@ -97,12 +186,12 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 			Kind:             "leaf",
 			Scope:            scope,
 			ProjectID:        projectID,
-			Title:            fmt.Sprintf("Events %s to %s", firstTime, lastTime),
+			Title:            fmt.Sprintf("Events %s to %s", plan.firstTime, plan.lastTime),
 			Body:             body,
 			TightDescription: tightDesc,
 			PrivacyLevel:     core.PrivacyPrivate,
 			SourceSpan: core.SourceSpan{
-				EventIDs: eventIDs,
+				EventIDs: plan.eventIDs,
 			},
 			CreatedAt: now,
 			UpdatedAt: now,
@@ -111,10 +200,9 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 		if err := s.repo.InsertSummary(ctx, summary); err != nil {
 			return created, fmt.Errorf("insert leaf summary: %w", err)
 		}
-		s.upsertSummaryEmbeddingBestEffort(ctx, summary)
 
 		// Create edges linking summary to each event.
-		for order, eid := range eventIDs {
+		for order, eid := range plan.eventIDs {
 			edge := &core.SummaryEdge{
 				ParentSummaryID: summary.ID,
 				ChildKind:       "event",
@@ -247,7 +335,6 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 		if err := s.repo.InsertSummary(ctx, summary); err != nil {
 			return created, fmt.Errorf("insert session summary: %w", err)
 		}
-		s.upsertSummaryEmbeddingBestEffort(ctx, summary)
 
 		// Create edges.
 		for order, eid := range eventIDs {
@@ -305,41 +392,108 @@ func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	created := 0
+	plans := make([]topicSummaryPlan, 0, len(groups))
 	for _, group := range groups {
 		if len(group) < 3 {
 			continue
 		}
 
 		childIDs := make([]string, 0, len(group))
+		contents := make([]string, 0, len(group))
 		var mergedBodyBuilder strings.Builder
 		for i, summary := range group {
 			childIDs = append(childIDs, summary.ID)
+			contents = append(contents, summary.Body)
 			if i > 0 {
 				mergedBodyBuilder.WriteString("\n\n")
 			}
 			mergedBodyBuilder.WriteString(summary.Body)
 		}
-		mergedBody := mergedBodyBuilder.String()
 
-		body, tightDesc, err := s.summarizeTopicGroup(ctx, mergedBody)
-		if err != nil {
-			return created, err
+		plans = append(plans, topicSummaryPlan{
+			index:      len(plans) + 1,
+			group:      group,
+			childIDs:   childIDs,
+			contents:   contents,
+			mergedBody: mergedBodyBuilder.String(),
+			title:      fmt.Sprintf("Topic summary over %d leaf summaries", len(group)),
+		})
+	}
+
+	if len(plans) == 0 {
+		return 0, nil
+	}
+
+	batchResults := make(map[int]core.CompressionResult, len(plans))
+	batchSucceeded := false
+	topicBatchSize := s.topicBatchSize
+	if topicBatchSize <= 0 {
+		topicBatchSize = defaultTopicBatchSize
+	}
+	if s.intelligence != nil {
+		batchSucceeded = true
+		for start := 0; start < len(plans); start += topicBatchSize {
+			end := start + topicBatchSize
+			if end > len(plans) {
+				end = len(plans)
+			}
+
+			topics := make([]core.TopicChunk, 0, end-start)
+			for _, plan := range plans[start:end] {
+				topics = append(topics, core.TopicChunk{
+					Index:    plan.index,
+					Contents: plan.contents,
+					Title:    plan.title,
+				})
+			}
+
+			results, err := s.intelligence.SummarizeTopicBatches(ctx, topics)
+			if err != nil {
+				batchSucceeded = false
+				break
+			}
+			for _, result := range results {
+				batchResults[result.Index] = result
+			}
+		}
+	}
+	if !batchSucceeded {
+		batchResults = map[int]core.CompressionResult{}
+	}
+
+	created := 0
+	for _, plan := range plans {
+		body := ""
+		tightDesc := extractTightDescription(plan.mergedBody, 100)
+		if result, ok := batchResults[plan.index]; ok {
+			if trimmedBody := strings.TrimSpace(result.Body); trimmedBody != "" {
+				body = trimmedBody
+			}
+			if trimmedTight := strings.TrimSpace(result.TightDescription); trimmedTight != "" {
+				tightDesc = trimmedTight
+			}
+		}
+		if body == "" {
+			var err error
+			body, tightDesc, err = s.summarizeTopicGroup(ctx, plan.mergedBody)
+			if err != nil {
+				return created, err
+			}
 		}
 
-		scope, projectID := inferScopeFromSummaries(group)
+		scope, projectID := inferScopeFromSummaries(plan.group)
 		now := time.Now().UTC()
 		topicSummary := &core.Summary{
 			ID:               generateID("sum_"),
 			Kind:             "topic",
 			Scope:            scope,
 			ProjectID:        projectID,
-			Title:            fmt.Sprintf("Topic summary over %d leaf summaries", len(group)),
+			Title:            plan.title,
 			Body:             body,
 			TightDescription: tightDesc,
 			PrivacyLevel:     core.PrivacyPrivate,
 			SourceSpan: core.SourceSpan{
-				SummaryIDs: childIDs,
+				SummaryIDs: plan.childIDs,
 			},
 			CreatedAt: now,
 			UpdatedAt: now,
@@ -347,9 +501,8 @@ func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
 		if err := s.repo.InsertSummary(ctx, topicSummary); err != nil {
 			return created, fmt.Errorf("insert topic summary: %w", err)
 		}
-		s.upsertSummaryEmbeddingBestEffort(ctx, topicSummary)
 
-		for order, childID := range childIDs {
+		for order, childID := range plan.childIDs {
 			edge := &core.SummaryEdge{
 				ParentSummaryID: topicSummary.ID,
 				ChildKind:       "summary",
@@ -368,42 +521,21 @@ func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
 }
 
 func (s *AMMService) collectParentedLeafSummaryIDs(ctx context.Context) (map[string]struct{}, error) {
-	allSummaries, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{Limit: 50000})
+	parented, err := s.repo.ListParentedSummaryIDs(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list summaries for parent linkage: %w", err)
+		return nil, fmt.Errorf("list parented summary ids: %w", err)
 	}
 
-	parentedLeafIDs := make(map[string]struct{})
-	for _, summary := range allSummaries {
-		edges, err := s.repo.GetSummaryChildren(ctx, summary.ID)
-		if err != nil {
-			return nil, fmt.Errorf("list summary children for %s: %w", summary.ID, err)
-		}
-		for _, edge := range edges {
-			if edge.ChildKind == "summary" && strings.HasPrefix(edge.ChildID, "sum_") {
-				parentedLeafIDs[edge.ChildID] = struct{}{}
-			}
-		}
+	parentedLeafIDs := make(map[string]struct{}, len(parented))
+	for id := range parented {
+		parentedLeafIDs[id] = struct{}{}
 	}
-
 	return parentedLeafIDs, nil
 }
 
 func (s *AMMService) summarizeTopicGroup(ctx context.Context, mergedBody string) (string, string, error) {
 	body := strings.TrimSpace(mergedBody)
 	tightDesc := extractTightDescription(mergedBody, 100)
-
-	if s.intelligence != nil {
-		summaryBody, err := s.intelligence.Summarize(ctx, mergedBody, topicBodyMaxChars)
-		if err == nil && strings.TrimSpace(summaryBody) != "" {
-			body = summaryBody
-			tight, tightErr := s.intelligence.Summarize(ctx, mergedBody, 100)
-			if tightErr == nil && strings.TrimSpace(tight) != "" {
-				tightDesc = tight
-			}
-			return body, tightDesc, nil
-		}
-	}
 
 	summaryBody, err := s.summarizer.Summarize(ctx, mergedBody, topicBodyMaxChars)
 	if err != nil {
@@ -680,15 +812,16 @@ func (s *AMMService) insertNarrativeMemoryIfNotDuplicate(
 		SourceEventIDs:   eventIDs,
 	}
 
-	existing, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
+	queryText := narrativeMemorySearchQuery(candidate)
+	existing, err := s.repo.SearchMemoriesFuzzy(ctx, queryText, core.ListMemoriesOptions{
 		Type:      memoryType,
 		Scope:     scope,
 		ProjectID: projectID,
 		Status:    core.MemoryStatusActive,
-		Limit:     50000,
+		Limit:     100,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list memories for narrative duplicate detection: %w", err)
+		return nil, fmt.Errorf("search memories for narrative duplicate detection: %w", err)
 	}
 	active := make([]*core.Memory, 0, len(existing))
 	for i := range existing {
@@ -696,9 +829,6 @@ func (s *AMMService) insertNarrativeMemoryIfNotDuplicate(
 	}
 
 	duplicates := findDuplicateActiveMemories(active, candidate)
-	if len(duplicates) == 0 {
-		duplicates = s.findDuplicatesByEmbedding(ctx, candidate, active)
-	}
 	if len(duplicates) > 0 {
 		return nil, nil
 	}
@@ -725,7 +855,6 @@ func (s *AMMService) insertNarrativeMemoryIfNotDuplicate(
 	if err := s.repo.InsertMemory(ctx, mem); err != nil {
 		return nil, fmt.Errorf("insert narrative memory: %w", err)
 	}
-	s.upsertMemoryEmbeddingBestEffort(ctx, mem)
 
 	return mem, nil
 }
@@ -735,7 +864,7 @@ func (s *AMMService) collectSessionMemoryContext(
 	sessionID string,
 	eventIDs []string,
 ) ([]core.MemorySummary, []*core.Memory, error) {
-	allMemories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{Limit: 50000})
+	allMemories, err := s.repo.ListMemoriesBySourceEventIDs(ctx, eventIDs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -761,6 +890,34 @@ func (s *AMMService) collectSessionMemoryContext(
 	}
 
 	return summaries, linked, nil
+}
+
+func narrativeMemorySearchQuery(candidate core.Memory) string {
+	combined := strings.TrimSpace(strings.Join([]string{candidate.Subject, candidate.TightDescription, candidate.Body}, " "))
+	if combined == "" {
+		return ""
+	}
+	tokens := strings.Fields(strings.ToLower(combined))
+	seen := make(map[string]struct{}, len(tokens))
+	terms := make([]string, 0, 12)
+	for _, token := range tokens {
+		clean := strings.Trim(token, "\"'.,!?;:()[]{}<>|/\\+-=*`")
+		if len(clean) < 3 {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		terms = append(terms, clean)
+		if len(terms) >= 12 {
+			break
+		}
+	}
+	if len(terms) == 0 {
+		return combined
+	}
+	return strings.Join(terms, " ")
 }
 
 func isMemoryLinkedToSession(mem *core.Memory, sessionID string, eventSet map[string]struct{}) bool {
