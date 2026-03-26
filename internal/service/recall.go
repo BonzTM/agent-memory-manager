@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +16,8 @@ const (
 	minRecallMemoryConfidence = 0.35
 	minHybridHistoryScore     = 0.55
 	embeddingOnlyFTSPosition  = 999
+	entityHubThreshold        = 10
+	entityHubDampeningFloor   = 0.05
 )
 
 type recallFilterOptions struct {
@@ -82,9 +85,11 @@ func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallO
 
 	// Record recall history for repetition suppression.
 	if opts.SessionID != "" {
+		recallRecords := make([]core.RecallRecord, 0, len(items))
 		for _, item := range items {
-			_ = s.repo.RecordRecall(ctx, opts.SessionID, item.ID, item.Kind)
+			recallRecords = append(recallRecords, core.RecallRecord{ItemID: item.ID, ItemKind: item.Kind})
 		}
+		_ = s.repo.RecordRecallBatch(ctx, opts.SessionID, recallRecords)
 	}
 
 	elapsed := time.Since(start).Milliseconds()
@@ -142,6 +147,17 @@ func (s *AMMService) buildScoringContext(ctx context.Context, query string, opts
 
 func (s *AMMService) expandQueryEntities(ctx context.Context, queryEntities []string) map[string]float64 {
 	weights := make(map[string]float64)
+	termEntityIDs := make(map[string]string)
+	addWeightedEntityTerm := func(term string, weight float64, entityID string) {
+		addEntityTermWithWeight(weights, term, weight)
+		normalized := normalizeEntityTerm(term)
+		if normalized == "" || entityID == "" {
+			return
+		}
+		if _, ok := termEntityIDs[normalized]; !ok {
+			termEntityIDs[normalized] = entityID
+		}
+	}
 	for _, entity := range queryEntities {
 		addEntityTermWithWeight(weights, entity, 1.0)
 	}
@@ -165,9 +181,9 @@ func (s *AMMService) expandQueryEntities(ctx context.Context, queryEntities []st
 			if !entityMatchesTerm(entity, trimmed) {
 				continue
 			}
-			addEntityTermWithWeight(weights, entity.CanonicalName, 1.0)
+			addWeightedEntityTerm(entity.CanonicalName, 1.0, entity.ID)
 			for _, alias := range entity.Aliases {
-				addEntityTermWithWeight(weights, alias, 1.0)
+				addWeightedEntityTerm(alias, 1.0, entity.ID)
 			}
 
 			if visitedEntityIDs[entity.ID] {
@@ -184,20 +200,154 @@ func (s *AMMService) expandQueryEntities(ctx context.Context, queryEntities []st
 				if hopWeight <= 0 {
 					continue
 				}
-				addEntityTermWithWeight(weights, rel.Entity.CanonicalName, hopWeight)
+				addWeightedEntityTerm(rel.Entity.CanonicalName, hopWeight, rel.Entity.ID)
 				for _, alias := range rel.Entity.Aliases {
-					addEntityTermWithWeight(weights, alias, hopWeight)
+					addWeightedEntityTerm(alias, hopWeight, rel.Entity.ID)
 				}
 			}
 		}
 	}
 
+	s.applyEntityHubDampening(ctx, weights, termEntityIDs)
+
 	return weights
+}
+
+func (s *AMMService) applyEntityHubDampening(ctx context.Context, weights map[string]float64, termEntityIDs map[string]string) {
+	if len(weights) == 0 {
+		return
+	}
+
+	entityIDs := make(map[string]struct{})
+	for term, weight := range weights {
+		if weight <= 0 || term == "" {
+			continue
+		}
+
+		entityID := termEntityIDs[term]
+		if entityID == "" {
+			entityID = s.resolveEntityIDForTerm(ctx, term)
+			if entityID == "" {
+				continue
+			}
+			termEntityIDs[term] = entityID
+		}
+
+		entityIDs[entityID] = struct{}{}
+	}
+
+	batchIDs := make([]string, 0, len(entityIDs))
+	for entityID := range entityIDs {
+		batchIDs = append(batchIDs, entityID)
+	}
+
+	linkCounts, err := s.repo.CountMemoryEntityLinksBatch(ctx, batchIDs)
+	if err != nil {
+		return
+	}
+
+	var totalMemories int64
+	haveTotalMemories := false
+
+	for term, weight := range weights {
+		if weight <= 0 || term == "" {
+			continue
+		}
+
+		entityID := termEntityIDs[term]
+		if entityID == "" {
+			entityID = s.resolveEntityIDForTerm(ctx, term)
+			if entityID == "" {
+				continue
+			}
+			termEntityIDs[term] = entityID
+		}
+
+		linkCount := linkCounts[entityID]
+
+		if linkCount < entityHubThreshold {
+			continue
+		}
+
+		if !haveTotalMemories {
+			count, err := s.repo.CountActiveMemories(ctx)
+			if err != nil {
+				continue
+			}
+			totalMemories = count
+			haveTotalMemories = true
+		}
+
+		dampening := entityHubDampening(totalMemories, linkCount)
+		weights[term] = weight * dampening
+	}
+}
+
+func (s *AMMService) resolveEntityIDForTerm(ctx context.Context, term string) string {
+	entities, err := s.repo.SearchEntities(ctx, term, 50)
+	if err != nil {
+		return ""
+	}
+	for _, entity := range entities {
+		if entityMatchesTerm(entity, term) {
+			return entity.ID
+		}
+	}
+	return ""
+}
+
+func entityHubDampening(totalMemories, linkCount int64) float64 {
+	if linkCount < entityHubThreshold || totalMemories <= 1 {
+		return 1.0
+	}
+
+	numerator := math.Log(float64(totalMemories) / float64(1+linkCount))
+	denominator := math.Log(float64(totalMemories))
+	if denominator <= 0 || math.IsNaN(numerator) || math.IsNaN(denominator) || math.IsInf(numerator, 0) || math.IsInf(denominator, 0) {
+		return 1.0
+	}
+
+	dampening := numerator / denominator
+	if dampening < entityHubDampeningFloor {
+		dampening = entityHubDampeningFloor
+	}
+	if dampening > 1.0 {
+		dampening = 1.0
+	}
+	return dampening
 }
 
 func (s *AMMService) listRelatedEntitiesForRecall(ctx context.Context, entityID string) ([]core.RelatedEntity, error) {
 	projected, err := s.repo.ListProjectedRelatedEntities(ctx, entityID)
 	if err == nil && len(projected) > 0 {
+		entityIDs := make([]string, 0, len(projected))
+		for _, projection := range projected {
+			entityIDs = append(entityIDs, projection.RelatedEntityID)
+		}
+		entities, getErr := s.repo.GetEntitiesByIDs(ctx, entityIDs)
+		if getErr == nil {
+			entityByID := make(map[string]core.Entity, len(entities))
+			for _, entity := range entities {
+				entityByID[entity.ID] = entity
+			}
+
+			related := make([]core.RelatedEntity, 0, len(projected))
+			for _, projection := range projected {
+				entity, ok := entityByID[projection.RelatedEntityID]
+				if !ok {
+					continue
+				}
+				related = append(related, core.RelatedEntity{
+					Entity:       entity,
+					HopDistance:  projection.HopDistance,
+					Relationship: projection.RelationshipPath,
+				})
+			}
+			if len(related) > 0 {
+				return related, nil
+			}
+		}
+
 		related := make([]core.RelatedEntity, 0, len(projected))
 		for _, projection := range projected {
 			entity, getErr := s.repo.GetEntity(ctx, projection.RelatedEntityID)
@@ -654,10 +804,34 @@ func (s *AMMService) attachCandidateEmbeddings(ctx context.Context, candidates [
 	if model == "" {
 		return
 	}
+	idsByKind := make(map[string][]string)
+	seenByKind := make(map[string]map[string]struct{})
 	for i := range candidates {
 		objectKind := embeddingObjectKind(candidates[i].Kind)
-		rec, err := s.repo.GetEmbedding(ctx, candidates[i].ID, objectKind, model)
-		if err != nil || rec == nil || len(rec.Vector) == 0 {
+		if _, ok := seenByKind[objectKind]; !ok {
+			seenByKind[objectKind] = make(map[string]struct{})
+		}
+		if _, seen := seenByKind[objectKind][candidates[i].ID]; seen {
+			continue
+		}
+		seenByKind[objectKind][candidates[i].ID] = struct{}{}
+		idsByKind[objectKind] = append(idsByKind[objectKind], candidates[i].ID)
+	}
+
+	embeddingsByKind := make(map[string]map[string]core.EmbeddingRecord, len(idsByKind))
+	for objectKind, ids := range idsByKind {
+		records, err := s.repo.GetEmbeddingsBatch(ctx, ids, objectKind, model)
+		if err != nil {
+			continue
+		}
+		embeddingsByKind[objectKind] = records
+	}
+
+	for i := range candidates {
+		objectKind := embeddingObjectKind(candidates[i].Kind)
+		records := embeddingsByKind[objectKind]
+		rec, ok := records[candidates[i].ID]
+		if !ok || len(rec.Vector) == 0 {
 			continue
 		}
 		candidates[i].Embedding = rec.Vector
@@ -665,14 +839,33 @@ func (s *AMMService) attachCandidateEmbeddings(ctx context.Context, candidates [
 }
 
 func (s *AMMService) attachCandidateEntities(ctx context.Context, candidates []ScoringCandidate) {
+	memoryIDs := make([]string, 0)
+	seen := make(map[string]struct{})
 	for i := range candidates {
 		if candidates[i].Kind != "memory" {
 			continue
 		}
-		entities, err := s.repo.GetMemoryEntities(ctx, candidates[i].ID)
-		if err != nil {
+		if _, ok := seen[candidates[i].ID]; ok {
 			continue
 		}
+		seen[candidates[i].ID] = struct{}{}
+		memoryIDs = append(memoryIDs, candidates[i].ID)
+	}
+
+	if len(memoryIDs) == 0 {
+		return
+	}
+
+	entitiesByMemoryID, err := s.repo.GetMemoryEntitiesBatch(ctx, memoryIDs)
+	if err != nil {
+		return
+	}
+
+	for i := range candidates {
+		if candidates[i].Kind != "memory" {
+			continue
+		}
+		entities := entitiesByMemoryID[candidates[i].ID]
 		if len(entities) == 0 {
 			continue
 		}
