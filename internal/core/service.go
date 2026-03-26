@@ -91,6 +91,8 @@ type Service interface {
 
 	// Status returns system status information.
 	Status(ctx context.Context) (*StatusResult, error)
+
+	ResetDerived(ctx context.Context) (*ResetDerivedResult, error)
 }
 
 // RecallOptions configures a recall operation.

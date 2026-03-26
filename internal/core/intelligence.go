@@ -8,6 +8,8 @@ type IntelligenceProvider interface {
 	AnalyzeEvents(ctx context.Context, events []EventContent) (*AnalysisResult, error)
 	TriageEvents(ctx context.Context, events []EventContent) (map[int]TriageDecision, error)
 	ReviewMemories(ctx context.Context, memories []MemoryReview) (*ReviewResult, error)
+	CompressEventBatches(ctx context.Context, chunks []EventChunk) ([]CompressionResult, error)
+	SummarizeTopicBatches(ctx context.Context, topics []TopicChunk) ([]CompressionResult, error)
 	ConsolidateNarrative(ctx context.Context, events []EventContent, existingMemories []MemorySummary) (*NarrativeResult, error)
 }
 
@@ -24,6 +26,23 @@ type EventContent struct {
 	Content   string
 	ProjectID string
 	SessionID string
+}
+
+type EventChunk struct {
+	Index    int
+	Contents []string
+}
+
+type TopicChunk struct {
+	Index    int
+	Contents []string
+	Title    string
+}
+
+type CompressionResult struct {
+	Index            int    `json:"index"`
+	Body             string `json:"body"`
+	TightDescription string `json:"tight_description"`
 }
 
 type AnalysisResult struct {

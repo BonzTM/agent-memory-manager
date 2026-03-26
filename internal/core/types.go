@@ -211,6 +211,12 @@ type Entity struct {
 	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
+type MemoryEntityLink struct {
+	MemoryID string `json:"memory_id"`
+	EntityID string `json:"entity_id"`
+	Role     string `json:"role,omitempty"`
+}
+
 // Episode is a narrative memory unit.
 type Episode struct {
 	ID               string            `json:"id"`
@@ -298,6 +304,11 @@ type RecallMeta struct {
 	QueryTimeMs int64      `json:"query_time_ms"`
 }
 
+type RecallRecord struct {
+	ItemID   string `json:"item_id"`
+	ItemKind string `json:"item_kind"`
+}
+
 // ExpandResult contains the full expansion of a memory, summary, or episode.
 type ExpandResult struct {
 	Memory   *Memory   `json:"memory,omitempty"`
@@ -340,6 +351,27 @@ type StatusResult struct {
 	SummaryCount int64  `json:"summary_count"`
 	EpisodeCount int64  `json:"episode_count"`
 	EntityCount  int64  `json:"entity_count"`
+}
+
+type ResetDerivedResult struct {
+	MemoryEntitiesDeleted        int64 `json:"memory_entities_deleted"`
+	SummaryEdgesDeleted          int64 `json:"summary_edges_deleted"`
+	MemoriesDeleted              int64 `json:"memories_deleted"`
+	ClaimsDeleted                int64 `json:"claims_deleted"`
+	EntitiesDeleted              int64 `json:"entities_deleted"`
+	RelationshipsDeleted         int64 `json:"relationships_deleted"`
+	SummariesDeleted             int64 `json:"summaries_deleted"`
+	EpisodesDeleted              int64 `json:"episodes_deleted"`
+	JobsDeleted                  int64 `json:"jobs_deleted"`
+	MemoriesFTSDeleted           int64 `json:"memories_fts_deleted"`
+	SummariesFTSDeleted          int64 `json:"summaries_fts_deleted"`
+	EpisodesFTSDeleted           int64 `json:"episodes_fts_deleted"`
+	EmbeddingsDeleted            int64 `json:"embeddings_deleted"`
+	RetrievalCacheDeleted        int64 `json:"retrieval_cache_deleted"`
+	RecallHistoryDeleted         int64 `json:"recall_history_deleted"`
+	RelevanceFeedbackDeleted     int64 `json:"relevance_feedback_deleted"`
+	EntityGraphProjectionDeleted int64 `json:"entity_graph_projection_deleted"`
+	EventsReset                  int64 `json:"events_reset"`
 }
 
 // Project represents a registered project with metadata.

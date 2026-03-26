@@ -43,6 +43,7 @@ type Repository interface {
 	SearchSummaries(ctx context.Context, query string, limit int) ([]Summary, error)
 	// GetSummaryChildren returns the children of a summary node.
 	GetSummaryChildren(ctx context.Context, parentID string) ([]SummaryEdge, error)
+	ListParentedSummaryIDs(ctx context.Context) (map[string]bool, error)
 	// InsertSummaryEdge stores a summary hierarchy edge.
 	InsertSummaryEdge(ctx context.Context, edge *SummaryEdge) error
 
@@ -56,6 +57,8 @@ type Repository interface {
 	ListMemories(ctx context.Context, opts ListMemoriesOptions) ([]Memory, error)
 	// SearchMemories searches memories by text query.
 	SearchMemories(ctx context.Context, query string, opts ListMemoriesOptions) ([]Memory, error)
+	SearchMemoriesFuzzy(ctx context.Context, query string, opts ListMemoriesOptions) ([]Memory, error)
+	ListMemoriesBySourceEventIDs(ctx context.Context, eventIDs []string) ([]Memory, error)
 
 	// InsertClaim stores a claim.
 	InsertClaim(ctx context.Context, claim *Claim) error
@@ -69,14 +72,22 @@ type Repository interface {
 	UpdateEntity(ctx context.Context, entity *Entity) error
 	// GetEntity retrieves an entity by ID.
 	GetEntity(ctx context.Context, id string) (*Entity, error)
+	GetEntitiesByIDs(ctx context.Context, ids []string) ([]Entity, error)
 	// ListEntities returns entities matching the supplied options.
 	ListEntities(ctx context.Context, opts ListEntitiesOptions) ([]Entity, error)
 	// SearchEntities searches entities by text query.
 	SearchEntities(ctx context.Context, query string, limit int) ([]Entity, error)
 	// LinkMemoryEntity links a memory to an entity with a role.
 	LinkMemoryEntity(ctx context.Context, memoryID, entityID, role string) error
+	LinkMemoryEntitiesBatch(ctx context.Context, links []MemoryEntityLink) error
 	// GetMemoryEntities returns entities linked to a memory.
 	GetMemoryEntities(ctx context.Context, memoryID string) ([]Entity, error)
+	GetMemoryEntitiesBatch(ctx context.Context, memoryIDs []string) (map[string][]Entity, error)
+	// CountMemoryEntityLinks returns how many memory links an entity has.
+	CountMemoryEntityLinks(ctx context.Context, entityID string) (int64, error)
+	CountMemoryEntityLinksBatch(ctx context.Context, entityIDs []string) (map[string]int64, error)
+	// CountActiveMemories returns the number of active memories.
+	CountActiveMemories(ctx context.Context) (int64, error)
 
 	// InsertProject stores a project.
 	InsertProject(ctx context.Context, project *Project) error
@@ -93,6 +104,8 @@ type Repository interface {
 	GetRelationship(ctx context.Context, id string) (*Relationship, error)
 	// ListRelationships returns relationships, optionally filtered by entity.
 	ListRelationships(ctx context.Context, opts ListRelationshipsOptions) ([]Relationship, error)
+	ListRelationshipsByEntityIDs(ctx context.Context, entityIDs []string) ([]Relationship, error)
+	InsertRelationshipsBatch(ctx context.Context, rels []*Relationship) error
 	ListRelatedEntities(ctx context.Context, entityID string, depth int) ([]RelatedEntity, error)
 	RebuildEntityGraphProjection(ctx context.Context) error
 	ListProjectedRelatedEntities(ctx context.Context, entityID string) ([]ProjectedRelation, error)
@@ -135,6 +148,7 @@ type Repository interface {
 
 	// RecordRecall records that an item was shown during recall.
 	RecordRecall(ctx context.Context, sessionID, itemID, itemKind string) error
+	RecordRecallBatch(ctx context.Context, sessionID string, items []RecallRecord) error
 	// GetRecentRecalls returns the most recent recall history entries.
 	GetRecentRecalls(ctx context.Context, sessionID string, limit int) ([]RecallHistoryEntry, error)
 	ListMemoryAccessStats(ctx context.Context, since time.Time) ([]MemoryAccessStat, error)
@@ -145,8 +159,11 @@ type Repository interface {
 
 	UpsertEmbedding(ctx context.Context, embedding *EmbeddingRecord) error
 	GetEmbedding(ctx context.Context, objectID, objectKind, model string) (*EmbeddingRecord, error)
+	GetEmbeddingsBatch(ctx context.Context, objectIDs []string, objectKind, model string) (map[string]EmbeddingRecord, error)
 	ListEmbeddingsByKind(ctx context.Context, objectKind, model string, limit int) ([]EmbeddingRecord, error)
 	DeleteEmbeddings(ctx context.Context, objectID, objectKind, model string) error
+	ListUnembeddedMemories(ctx context.Context, model string, limit int) ([]Memory, error)
+	ListUnembeddedSummaries(ctx context.Context, model string, limit int) ([]Summary, error)
 
 	// CountEvents returns the total number of events.
 	CountEvents(ctx context.Context) (int64, error)
@@ -161,6 +178,7 @@ type Repository interface {
 
 	// RebuildFTSIndexes rebuilds any full-text search indexes.
 	RebuildFTSIndexes(ctx context.Context) error
+	ResetDerived(ctx context.Context) (*ResetDerivedResult, error)
 }
 
 // SummaryEdge represents a parent-child relationship in the summary hierarchy.
@@ -178,10 +196,10 @@ type RelatedEntity struct {
 }
 
 type ProjectedRelation struct {
-	RelatedEntityID string  `json:"related_entity_id"`
-	HopDistance     int     `json:"hop_distance"`
-	RelationshipPath string `json:"relationship_path,omitempty"`
-	Score           float64 `json:"score"`
+	RelatedEntityID  string  `json:"related_entity_id"`
+	HopDistance      int     `json:"hop_distance"`
+	RelationshipPath string  `json:"relationship_path,omitempty"`
+	Score            float64 `json:"score"`
 }
 
 // RecallHistoryEntry tracks a displayed recall item for repetition suppression.
