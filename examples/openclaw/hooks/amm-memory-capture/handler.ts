@@ -47,6 +47,31 @@ function withoutUndefined(record: Record<string, unknown>): Record<string, unkno
   return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined));
 }
 
+function toText(value: unknown): string | undefined {
+  const text = asString(value);
+  if (text !== undefined) {
+    return text;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (value === null) {
+    return "null";
+  }
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+}
+
 function runAmmIngest(eventPayload: Record<string, unknown>): void {
   const ammBin = process.env.AMM_BIN ?? "amm";
   const dbPath = process.env.AMM_DB_PATH ?? `${process.env.HOME ?? "~"}/.amm/amm.db`;
@@ -75,19 +100,62 @@ function pickOutboundContent(context: HookContext): string | undefined {
   return asString(context["content"]);
 }
 
+function pickToolName(context: HookContext): string | undefined {
+  return asString(context["name"]) ?? asString(context["toolName"]) ?? asString(context["functionName"]);
+}
+
+function pickToolInput(context: HookContext): unknown {
+  return context["arguments"] ?? context["args"] ?? context["input"];
+}
+
+function pickToolOutput(context: HookContext): unknown {
+  return context["output"] ?? context["result"] ?? context["content"];
+}
+
+function buildToolCallContent(context: HookContext): string | undefined {
+  const toolName = pickToolName(context);
+  const toolInput = toText(pickToolInput(context));
+
+  if (toolName === undefined && toolInput === undefined) {
+    return undefined;
+  }
+
+  return [
+    toolName !== undefined ? `name: ${toolName}` : undefined,
+    toolInput !== undefined ? `arguments: ${toolInput}` : undefined,
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join("\n");
+}
+
+function buildToolResultContent(context: HookContext): string | undefined {
+  return toText(pickToolOutput(context));
+}
+
 const handler = async (event: HookEvent) => {
   const context = event.context ?? {};
   const isInbound = event.type === "message" && event.action === "preprocessed";
   const isOutbound = event.type === "message" && event.action === "sent";
+  const isToolCall = (event.type === "tool" || event.type === "function") && event.action === "called";
+  const isToolResult = (event.type === "tool" || event.type === "function") && event.action === "completed";
 
-  if (!isInbound && !isOutbound) {
+  if (!isInbound && !isOutbound && !isToolCall && !isToolResult) {
     return;
   }
 
-  const content = isInbound ? pickInboundContent(context) : pickOutboundContent(context);
+  const content = isInbound
+    ? pickInboundContent(context)
+    : isOutbound
+      ? pickOutboundContent(context)
+      : isToolCall
+        ? buildToolCallContent(context)
+        : buildToolResultContent(context);
+
   if (content === undefined) {
     return;
   }
+
+  const toolName = pickToolName(context);
 
   const metadata = withoutUndefined({
     hook_event: `${event.type}:${event.action}`,
@@ -103,14 +171,15 @@ const handler = async (event: HookEvent) => {
     surface: asString(context["surface"]),
     group_id: asString(context["groupId"]),
     is_group: context["isGroup"] === true,
+    tool_name: toolName,
   });
 
   runAmmIngest({
-    kind: isInbound ? "message_user" : "message_assistant",
+    kind: isInbound ? "message_user" : isOutbound ? "message_assistant" : isToolCall ? "tool_call" : "tool_result",
     source_system: "openclaw",
     session_id: event.sessionKey ?? asString(context["conversationId"]),
     project_id: process.env.AMM_PROJECT_ID,
-    actor_type: isInbound ? "user" : "assistant",
+    actor_type: isInbound ? "user" : isOutbound ? "assistant" : "tool",
     content,
     metadata,
     occurred_at: toIsoTimestamp(event.timestamp ?? context["timestamp"]),

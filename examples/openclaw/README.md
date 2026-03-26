@@ -13,7 +13,7 @@ It is a repo-local integration bundle, not a native OpenClaw npm plugin package.
 
 - `openclaw.json` — example OpenClaw config fragment that wires `amm-mcp` and loads the hook directories in this folder
 - `cron.add.reflect.json` — optional `cron.add` payload for an OpenClaw-owned isolated maintenance turn that calls `amm_jobs_run`
-- `hooks/amm-memory-capture/` — native OpenClaw hook that captures inbound and outbound message events into amm
+- `hooks/amm-memory-capture/` — native OpenClaw hook that captures message and tool events into amm
 - `hooks/amm-session-maintenance/` — native OpenClaw hook that runs light amm maintenance on `command:stop`
 
 ## What This Example Does
@@ -21,7 +21,9 @@ It is a repo-local integration bundle, not a native OpenClaw npm plugin package.
 1. Exposes amm to OpenClaw through MCP
 2. Captures enriched inbound messages from `message:preprocessed`
 3. Captures outbound messages from `message:sent`
-4. Runs warm-path maintenance (`reflect`, `compress_history`, `consolidate_sessions`) when `/stop` is issued
+4. Captures tool/function invocations from `tool:called` (and compatible `function:called` events)
+5. Captures tool/function outputs from `tool:completed` (and compatible `function:completed` events)
+6. Runs warm-path maintenance (`reflect`, `compress_history`, `consolidate_sessions`) when `/stop` is issued
 
 ## What This Example Does Not Do
 

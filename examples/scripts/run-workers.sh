@@ -37,21 +37,36 @@ cleanup_lock() {
 }
 trap cleanup_lock EXIT INT TERM
 
+# Phase 1: Extract memories from events (LLM calls, no embeddings).
 $AMM jobs run reflect >/dev/null 2>&1 || true
+
+# Phase 2: Build embeddings for all new memories/summaries in batches.
+# Runs early so downstream jobs (merge_duplicates, lifecycle_review, etc.)
+# have embeddings available for semantic dedup and scoring. Individual jobs
+# do not embed per-item — this single batched pass is far more efficient.
+$AMM jobs run rebuild_indexes >/dev/null 2>&1 || true
+
+# Phase 3: Compress, consolidate, and structure.
 $AMM jobs run compress_history >/dev/null 2>&1 || true
 $AMM jobs run consolidate_sessions >/dev/null 2>&1 || true
 $AMM jobs run build_topic_summaries >/dev/null 2>&1 || true
+
+# Phase 4: Dedup, enrich, and link.
 $AMM jobs run merge_duplicates >/dev/null 2>&1 || true
 $AMM jobs run extract_claims >/dev/null 2>&1 || true
 $AMM jobs run enrich_memories >/dev/null 2>&1 || true
 $AMM jobs run rebuild_entity_graph >/dev/null 2>&1 || true
 $AMM jobs run form_episodes >/dev/null 2>&1 || true
+
+# Phase 5: Quality and lifecycle.
 $AMM jobs run detect_contradictions >/dev/null 2>&1 || true
 $AMM jobs run decay_stale_memory >/dev/null 2>&1 || true
 $AMM jobs run promote_high_value >/dev/null 2>&1 || true
 $AMM jobs run lifecycle_review >/dev/null 2>&1 || true
 $AMM jobs run cross_project_transfer >/dev/null 2>&1 || true
 $AMM jobs run archive_session_traces >/dev/null 2>&1 || true
+
+# Phase 6: Final index rebuild (catches anything created in phases 3-5).
 $AMM jobs run rebuild_indexes >/dev/null 2>&1 || true
 $AMM jobs run cleanup_recall_history >/dev/null 2>&1 || true
 $AMM jobs run update_ranking_weights >/dev/null 2>&1 || true
