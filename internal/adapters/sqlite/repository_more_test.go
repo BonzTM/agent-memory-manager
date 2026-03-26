@@ -819,3 +819,64 @@ func TestGraphProjection_Rebuildable(t *testing.T) {
 		}
 	}
 }
+
+func TestResetDerivedPreservesEvents(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	if err := repo.InsertEvent(ctx, &core.Event{
+		ID:           "evt_reset_1",
+		Kind:         "message_user",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "keep this event",
+		OccurredAt:   now,
+		IngestedAt:   now,
+	}); err != nil {
+		t.Fatalf("insert event: %v", err)
+	}
+
+	if _, err := repo.ExecContext(ctx, `UPDATE events SET reflected_at = ? WHERE id = ?`, now.Format(time.RFC3339), "evt_reset_1"); err != nil {
+		t.Fatalf("mark event reflected: %v", err)
+	}
+
+	if err := repo.InsertMemory(ctx, &core.Memory{
+		ID:               "mem_reset_1",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "delete this memory",
+		TightDescription: "delete this memory",
+		Confidence:       0.8,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatalf("insert memory: %v", err)
+	}
+
+	result, err := repo.ResetDerived(ctx)
+	if err != nil {
+		t.Fatalf("reset derived: %v", err)
+	}
+	if result.MemoriesDeleted == 0 {
+		t.Fatalf("expected memories deleted count > 0, got %+v", result)
+	}
+	if result.EventsReset == 0 {
+		t.Fatalf("expected events reset count > 0, got %+v", result)
+	}
+
+	evt, err := repo.GetEvent(ctx, "evt_reset_1")
+	if err != nil {
+		t.Fatalf("event should remain after reset-derived: %v", err)
+	}
+	if evt.ReflectedAt != nil {
+		t.Fatalf("expected reflected_at reset to null, got %v", evt.ReflectedAt)
+	}
+
+	if _, err := repo.GetMemory(ctx, "mem_reset_1"); err == nil {
+		t.Fatal("expected memory deleted by reset-derived")
+	}
+}

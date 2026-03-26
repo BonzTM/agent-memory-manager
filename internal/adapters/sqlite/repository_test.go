@@ -511,6 +511,92 @@ func TestCountMethods(t *testing.T) {
 	}
 }
 
+func TestCountMemoryEntityLinksAndCountActiveMemories(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	if err := repo.InsertMemory(ctx, &core.Memory{
+		ID:               "mem_active_count_1",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "active one",
+		TightDescription: "active one",
+		Confidence:       0.8,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.InsertMemory(ctx, &core.Memory{
+		ID:               "mem_active_count_2",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "active two",
+		TightDescription: "active two",
+		Confidence:       0.8,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.InsertMemory(ctx, &core.Memory{
+		ID:               "mem_archived_count",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "archived",
+		TightDescription: "archived",
+		Confidence:       0.8,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusArchived,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	entity := &core.Entity{
+		ID:            "ent_link_count",
+		Type:          "topic",
+		CanonicalName: "SQLite",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := repo.InsertEntity(ctx, entity); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.LinkMemoryEntity(ctx, "mem_active_count_1", entity.ID, "mentioned"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.LinkMemoryEntity(ctx, "mem_archived_count", entity.ID, "mentioned"); err != nil {
+		t.Fatal(err)
+	}
+
+	linkCount, err := repo.CountMemoryEntityLinks(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("CountMemoryEntityLinks: %v", err)
+	}
+	if linkCount != 2 {
+		t.Fatalf("expected 2 entity links, got %d", linkCount)
+	}
+
+	activeCount, err := repo.CountActiveMemories(ctx)
+	if err != nil {
+		t.Fatalf("CountActiveMemories: %v", err)
+	}
+	if activeCount != 2 {
+		t.Fatalf("expected 2 active memories, got %d", activeCount)
+	}
+}
+
 func TestRebuildFTSIndexes(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()

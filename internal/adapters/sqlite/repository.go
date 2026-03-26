@@ -7,10 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
@@ -20,11 +22,10 @@ import (
 func sanitizeFTS5Query(query string) string {
 	var cleaned strings.Builder
 	for _, r := range query {
-		switch r {
-		case '"', '(', ')', '*', '-', '^', '{', '}', '[', ']', '|', '+', ':':
-			cleaned.WriteRune(' ')
-		default:
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
 			cleaned.WriteRune(r)
+		} else {
+			cleaned.WriteRune(' ')
 		}
 	}
 
@@ -595,6 +596,28 @@ func (r *SQLiteRepository) GetSummaryChildren(ctx context.Context, parentID stri
 	return edges, rows.Err()
 }
 
+func (r *SQLiteRepository) ListParentedSummaryIDs(ctx context.Context) (map[string]bool, error) {
+	rows, err := r.QueryContext(ctx, `
+		SELECT DISTINCT child_id
+		FROM summary_edges
+		WHERE child_kind = 'summary'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids[id] = true
+	}
+
+	return ids, rows.Err()
+}
+
 func (r *SQLiteRepository) InsertSummaryEdge(ctx context.Context, edge *core.SummaryEdge) error {
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO summary_edges (parent_summary_id, child_kind, child_id, edge_order)
@@ -801,6 +824,152 @@ func (r *SQLiteRepository) SearchMemories(ctx context.Context, query string, opt
 	return memories, rows.Err()
 }
 
+func buildMemoryFuzzyFTSQuery(text string) string {
+	tokens := strings.Fields(strings.ToLower(sanitizeFTS5Query(text)))
+	if len(tokens) == 0 {
+		return ""
+	}
+	stopwords := map[string]bool{
+		"the": true, "and": true, "for": true, "with": true, "that": true,
+		"this": true, "from": true, "have": true, "has": true, "are": true,
+		"was": true, "were": true, "you": true, "your": true, "not": true,
+		"but": true, "can": true, "will": true, "into": true, "about": true,
+	}
+	seen := make(map[string]bool, len(tokens))
+	selected := make([]string, 0, 10)
+	for _, token := range tokens {
+		token = strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				return r
+			}
+			return -1
+		}, token)
+		if seen[token] || stopwords[token] {
+			continue
+		}
+		if len(token) < 3 {
+			continue
+		}
+		seen[token] = true
+		selected = append(selected, token)
+		if len(selected) == 10 {
+			break
+		}
+	}
+	if len(selected) == 0 {
+		for _, token := range tokens {
+			token = strings.Map(func(r rune) rune {
+				if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+					return r
+				}
+				return -1
+			}, token)
+			if len(token) < 2 || seen[token] {
+				continue
+			}
+			seen[token] = true
+			selected = append(selected, token)
+			if len(selected) == 5 {
+				break
+			}
+		}
+	}
+	return strings.Join(selected, " ")
+}
+
+func (r *SQLiteRepository) SearchMemoriesFuzzy(ctx context.Context, text string, opts core.ListMemoriesOptions) ([]core.Memory, error) {
+	q := sanitizeFTS5Query(text)
+	if q == "" {
+		return nil, nil
+	}
+
+	sqlQuery := "SELECT " + prefixCols("m", memoryCols) + `
+		FROM memories_fts f JOIN memories m ON f.id = m.id
+		WHERE memories_fts MATCH ?`
+	args := []interface{}{q}
+
+	if opts.Status != "" {
+		sqlQuery += " AND m.status = ?"
+		args = append(args, string(opts.Status))
+	}
+	if opts.Type != "" {
+		sqlQuery += " AND m.type = ?"
+		args = append(args, string(opts.Type))
+	}
+	if opts.Scope != "" {
+		sqlQuery += " AND m.scope = ?"
+		args = append(args, string(opts.Scope))
+	}
+	if opts.ProjectID != "" {
+		sqlQuery += " AND m.project_id = ?"
+		args = append(args, opts.ProjectID)
+	}
+	if opts.AgentID != "" {
+		sqlQuery += " AND (m.agent_id = ? OR m.agent_id = '' OR m.agent_id IS NULL OR m.privacy_level IN ('shared', 'public_safe'))"
+		args = append(args, opts.AgentID)
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	sqlQuery += " ORDER BY rank LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := r.QueryContext(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	memories := make([]core.Memory, 0, limit)
+	for rows.Next() {
+		m, err := r.scanMemory(rows)
+		if err != nil {
+			return nil, err
+		}
+		memories = append(memories, *m)
+	}
+
+	return memories, rows.Err()
+}
+
+func (r *SQLiteRepository) ListMemoriesBySourceEventIDs(ctx context.Context, eventIDs []string) ([]core.Memory, error) {
+	if len(eventIDs) == 0 {
+		return []core.Memory{}, nil
+	}
+
+	query := "SELECT " + prefixCols("m", memoryCols) + `
+		FROM memories m
+		WHERE m.status = 'active'
+		  AND EXISTS (
+			SELECT 1
+			FROM json_each(m.source_event_ids_json) j
+			WHERE j.value IN (` + placeholders(len(eventIDs)) + `)
+		  )
+		ORDER BY m.created_at DESC`
+	args := make([]interface{}, 0, len(eventIDs))
+	for _, eventID := range eventIDs {
+		args = append(args, eventID)
+	}
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	memories := make([]core.Memory, 0)
+	for rows.Next() {
+		m, err := r.scanMemory(rows)
+		if err != nil {
+			return nil, err
+		}
+		memories = append(memories, *m)
+	}
+	return memories, rows.Err()
+}
+
 // prefixCols adds a table alias prefix to each column expression in a comma-separated list.
 // It handles COALESCE(...) expressions correctly.
 func prefixCols(alias, cols string) string {
@@ -978,6 +1147,44 @@ func (r *SQLiteRepository) GetEntity(ctx context.Context, id string) (*core.Enti
 	return &e, nil
 }
 
+func (r *SQLiteRepository) GetEntitiesByIDs(ctx context.Context, ids []string) ([]core.Entity, error) {
+	if len(ids) == 0 {
+		return []core.Entity{}, nil
+	}
+	placeholder := strings.Repeat("?,", len(ids)-1) + "?"
+	query := `
+		SELECT id, type, canonical_name, aliases_json, COALESCE(description,''),
+			metadata_json, created_at, updated_at
+		FROM entities
+		WHERE id IN (` + placeholder + `)`
+	args := make([]interface{}, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	entities := make([]core.Entity, 0)
+	for rows.Next() {
+		var e core.Entity
+		var aliasesJSON, metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&e.ID, &e.Type, &e.CanonicalName, &aliasesJSON,
+			&e.Description, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		e.Aliases = unmarshalSlice(aliasesJSON)
+		e.Metadata = unmarshalMap(metaJSON)
+		e.CreatedAt = strToTime(createdAt)
+		e.UpdatedAt = strToTime(updatedAt)
+		entities = append(entities, e)
+	}
+	return entities, rows.Err()
+}
+
 func (r *SQLiteRepository) ListEntities(ctx context.Context, opts core.ListEntitiesOptions) ([]core.Entity, error) {
 	query := `SELECT id, type, canonical_name, aliases_json, COALESCE(description,''),
 		metadata_json, created_at, updated_at
@@ -1021,8 +1228,8 @@ func (r *SQLiteRepository) SearchEntities(ctx context.Context, query string, lim
 		SELECT id, type, canonical_name, aliases_json, COALESCE(description,''),
 			metadata_json, created_at, updated_at
 		FROM entities
-		WHERE canonical_name LIKE ? OR description LIKE ?
-		LIMIT ?`, likeQ, likeQ, defaultLimit(limit))
+		WHERE canonical_name LIKE ? OR aliases_json LIKE ? OR description LIKE ?
+		LIMIT ?`, likeQ, likeQ, likeQ, defaultLimit(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -1049,6 +1256,29 @@ func (r *SQLiteRepository) LinkMemoryEntity(ctx context.Context, memoryID, entit
 	_, err := r.ExecContext(ctx, `
 		INSERT OR REPLACE INTO memory_entities (memory_id, entity_id, role)
 		VALUES (?,?,?)`, memoryID, entityID, nullStr(role))
+	return err
+}
+
+func (r *SQLiteRepository) LinkMemoryEntitiesBatch(ctx context.Context, links []core.MemoryEntityLink) error {
+	if len(links) == 0 {
+		return nil
+	}
+
+	valueParts := make([]string, 0, len(links))
+	args := make([]interface{}, 0, len(links)*3)
+	for _, link := range links {
+		if strings.TrimSpace(link.MemoryID) == "" || strings.TrimSpace(link.EntityID) == "" {
+			continue
+		}
+		valueParts = append(valueParts, "(?,?,?)")
+		args = append(args, link.MemoryID, link.EntityID, nullStr(link.Role))
+	}
+	if len(valueParts) == 0 {
+		return nil
+	}
+
+	query := "INSERT OR IGNORE INTO memory_entities (memory_id, entity_id, role) VALUES " + strings.Join(valueParts, ",")
+	_, err := r.ExecContext(ctx, query, args...)
 	return err
 }
 
@@ -1079,6 +1309,119 @@ func (r *SQLiteRepository) GetMemoryEntities(ctx context.Context, memoryID strin
 		entities = append(entities, e)
 	}
 	return entities, rows.Err()
+}
+
+func (r *SQLiteRepository) GetMemoryEntitiesBatch(ctx context.Context, memoryIDs []string) (map[string][]core.Entity, error) {
+	result := make(map[string][]core.Entity)
+	if len(memoryIDs) == 0 {
+		return result, nil
+	}
+
+	placeholder := strings.Repeat("?,", len(memoryIDs)-1) + "?"
+	query := `
+		SELECT me.memory_id, e.id, e.type, e.canonical_name, e.aliases_json, COALESCE(e.description,''),
+			e.metadata_json, e.created_at, e.updated_at
+		FROM memory_entities me
+		JOIN entities e ON me.entity_id = e.id
+		WHERE me.memory_id IN (` + placeholder + `)`
+	args := make([]interface{}, 0, len(memoryIDs))
+	for _, id := range memoryIDs {
+		args = append(args, id)
+	}
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var memoryID string
+		var e core.Entity
+		var aliasesJSON, metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&memoryID, &e.ID, &e.Type, &e.CanonicalName, &aliasesJSON,
+			&e.Description, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		e.Aliases = unmarshalSlice(aliasesJSON)
+		e.Metadata = unmarshalMap(metaJSON)
+		e.CreatedAt = strToTime(createdAt)
+		e.UpdatedAt = strToTime(updatedAt)
+		result[memoryID] = append(result[memoryID], e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, id := range memoryIDs {
+		if _, ok := result[id]; !ok {
+			result[id] = nil
+		}
+	}
+
+	return result, nil
+}
+
+func (r *SQLiteRepository) CountMemoryEntityLinks(ctx context.Context, entityID string) (int64, error) {
+	row := r.QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_entities WHERE entity_id = ?`, entityID)
+	var count int64
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *SQLiteRepository) CountMemoryEntityLinksBatch(ctx context.Context, entityIDs []string) (map[string]int64, error) {
+	counts := make(map[string]int64)
+	if len(entityIDs) == 0 {
+		return counts, nil
+	}
+
+	placeholder := strings.Repeat("?,", len(entityIDs)-1) + "?"
+	query := `
+		SELECT entity_id, COUNT(*) as cnt
+		FROM memory_entities
+		WHERE entity_id IN (` + placeholder + `)
+		GROUP BY entity_id`
+	args := make([]interface{}, 0, len(entityIDs))
+	for _, id := range entityIDs {
+		args = append(args, id)
+	}
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var entityID string
+		var count int64
+		if err := rows.Scan(&entityID, &count); err != nil {
+			return nil, err
+		}
+		counts[entityID] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, id := range entityIDs {
+		if _, ok := counts[id]; !ok {
+			counts[id] = 0
+		}
+	}
+
+	return counts, nil
+}
+
+func (r *SQLiteRepository) CountActiveMemories(ctx context.Context) (int64, error) {
+	row := r.QueryRowContext(ctx, `SELECT COUNT(*) FROM memories WHERE status = 'active'`)
+	var count int64
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func (r *SQLiteRepository) InsertProject(ctx context.Context, project *core.Project) error {
@@ -1225,6 +1568,97 @@ func (r *SQLiteRepository) ListRelationships(ctx context.Context, opts core.List
 		relationships = append(relationships, rel)
 	}
 	return relationships, rows.Err()
+}
+
+func (r *SQLiteRepository) ListRelationshipsByEntityIDs(ctx context.Context, entityIDs []string) ([]core.Relationship, error) {
+	if len(entityIDs) == 0 {
+		return nil, nil
+	}
+
+	cleanIDs := make([]string, 0, len(entityIDs))
+	seen := make(map[string]bool, len(entityIDs))
+	for _, id := range entityIDs {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		cleanIDs = append(cleanIDs, id)
+	}
+	if len(cleanIDs) == 0 {
+		return nil, nil
+	}
+
+	inClause := placeholders(len(cleanIDs))
+	query := fmt.Sprintf(`SELECT id, from_entity_id, to_entity_id, relationship_type, metadata_json, created_at, updated_at
+		FROM relationships
+		WHERE from_entity_id IN (%s) OR to_entity_id IN (%s)`, inClause, inClause)
+
+	args := make([]interface{}, 0, len(cleanIDs)*2)
+	for _, id := range cleanIDs {
+		args = append(args, id)
+	}
+	for _, id := range cleanIDs {
+		args = append(args, id)
+	}
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	relationships := make([]core.Relationship, 0)
+	for rows.Next() {
+		var rel core.Relationship
+		var metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&rel.ID, &rel.FromEntityID, &rel.ToEntityID, &rel.RelationshipType, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		rel.Metadata = unmarshalMap(metaJSON)
+		rel.CreatedAt = strToTime(createdAt)
+		rel.UpdatedAt = strToTime(updatedAt)
+		relationships = append(relationships, rel)
+	}
+
+	return relationships, rows.Err()
+}
+
+func (r *SQLiteRepository) InsertRelationshipsBatch(ctx context.Context, rels []*core.Relationship) error {
+	if len(rels) == 0 {
+		return nil
+	}
+
+	valueParts := make([]string, 0, len(rels))
+	args := make([]interface{}, 0, len(rels)*7)
+	for _, rel := range rels {
+		if rel == nil {
+			continue
+		}
+		if rel.ID == "" {
+			rel.ID = generateID("rel_")
+		}
+		if strings.TrimSpace(rel.FromEntityID) == "" || strings.TrimSpace(rel.ToEntityID) == "" || strings.TrimSpace(rel.RelationshipType) == "" {
+			continue
+		}
+		valueParts = append(valueParts, "(?,?,?,?,?,?,?)")
+		args = append(args,
+			rel.ID,
+			rel.FromEntityID,
+			rel.ToEntityID,
+			rel.RelationshipType,
+			marshalMapJSON(rel.Metadata),
+			timeToStr(rel.CreatedAt),
+			timeToStr(rel.UpdatedAt),
+		)
+	}
+	if len(valueParts) == 0 {
+		return nil
+	}
+
+	query := "INSERT INTO relationships (id, from_entity_id, to_entity_id, relationship_type, metadata_json, created_at, updated_at) VALUES " + strings.Join(valueParts, ",")
+	_, err := r.ExecContext(ctx, query, args...)
+	return err
 }
 
 func (r *SQLiteRepository) ListRelatedEntities(ctx context.Context, entityID string, depth int) ([]core.RelatedEntity, error) {
@@ -1900,6 +2334,25 @@ func (r *SQLiteRepository) RecordRecall(ctx context.Context, sessionID, itemID, 
 	return err
 }
 
+func (r *SQLiteRepository) RecordRecallBatch(ctx context.Context, sessionID string, items []core.RecallRecord) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	shownAt := timeToStr(time.Now().UTC())
+	valueRows := strings.Repeat("(?,?,?,?),", len(items)-1) + "(?,?,?,?)"
+	query := `
+		INSERT INTO recall_history (session_id, item_id, item_kind, shown_at)
+		VALUES ` + valueRows
+	args := make([]interface{}, 0, len(items)*4)
+	for _, item := range items {
+		args = append(args, sessionID, item.ItemID, item.ItemKind, shownAt)
+	}
+
+	_, err := r.ExecContext(ctx, query, args...)
+	return err
+}
+
 func (r *SQLiteRepository) GetRecentRecalls(ctx context.Context, sessionID string, limit int) ([]core.RecallHistoryEntry, error) {
 	rows, err := r.QueryContext(ctx, `
 		SELECT session_id, item_id, item_kind, shown_at
@@ -2022,6 +2475,46 @@ func (r *SQLiteRepository) GetEmbedding(ctx context.Context, objectID, objectKin
 	return &rec, nil
 }
 
+func (r *SQLiteRepository) GetEmbeddingsBatch(ctx context.Context, objectIDs []string, objectKind, model string) (map[string]core.EmbeddingRecord, error) {
+	records := make(map[string]core.EmbeddingRecord)
+	if len(objectIDs) == 0 {
+		return records, nil
+	}
+
+	placeholder := strings.Repeat("?,", len(objectIDs)-1) + "?"
+	query := `
+		SELECT object_id, object_kind, embedding_json, model, created_at
+		FROM embeddings
+		WHERE object_id IN (` + placeholder + `) AND object_kind = ? AND model = ?`
+	args := make([]interface{}, 0, len(objectIDs)+2)
+	for _, id := range objectIDs {
+		args = append(args, id)
+	}
+	args = append(args, objectKind, model)
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var rec core.EmbeddingRecord
+		var embeddingJSON, createdAt string
+		if err := rows.Scan(&rec.ObjectID, &rec.ObjectKind, &embeddingJSON, &rec.Model, &createdAt); err != nil {
+			return nil, err
+		}
+		rec.Vector = unmarshalEmbeddingJSON(embeddingJSON)
+		rec.CreatedAt = strToTime(createdAt)
+		records[rec.ObjectID] = rec
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return records, nil
+}
+
 func (r *SQLiteRepository) ListEmbeddingsByKind(ctx context.Context, objectKind, model string, limit int) ([]core.EmbeddingRecord, error) {
 	rows, err := r.QueryContext(ctx, `
 		SELECT object_id, object_kind, embedding_json, model, created_at
@@ -2054,6 +2547,183 @@ func (r *SQLiteRepository) DeleteEmbeddings(ctx context.Context, objectID, objec
 	}
 	_, err := r.ExecContext(ctx, `DELETE FROM embeddings WHERE object_id = ? AND object_kind = ? AND model = ?`, objectID, objectKind, model)
 	return err
+}
+
+func (r *SQLiteRepository) ListUnembeddedMemories(ctx context.Context, model string, limit int) ([]core.Memory, error) {
+	query := "SELECT " + memoryCols + ` FROM memories m
+		WHERE m.status = 'active'
+		AND NOT EXISTS (
+			SELECT 1 FROM embeddings e
+			WHERE e.object_id = m.id AND e.object_kind = 'memory' AND e.model = ?
+		)
+		ORDER BY m.created_at DESC LIMIT ?`
+	rows, err := r.QueryContext(ctx, query, model, defaultLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var memories []core.Memory
+	for rows.Next() {
+		m, err := r.scanMemory(rows)
+		if err != nil {
+			return nil, err
+		}
+		memories = append(memories, *m)
+	}
+	return memories, rows.Err()
+}
+
+func (r *SQLiteRepository) ListUnembeddedSummaries(ctx context.Context, model string, limit int) ([]core.Summary, error) {
+	query := `SELECT id, kind, scope, COALESCE(project_id,''), COALESCE(session_id,''),
+		COALESCE(agent_id,''), COALESCE(title,''), body, tight_description,
+		privacy_level, source_span_json, metadata_json, created_at, updated_at
+		FROM summaries s
+		WHERE NOT EXISTS (
+			SELECT 1 FROM embeddings e
+			WHERE e.object_id = s.id AND e.object_kind = 'summary' AND e.model = ?
+		)
+		ORDER BY s.created_at DESC LIMIT ?`
+	rows, err := r.QueryContext(ctx, query, model, defaultLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var summaries []core.Summary
+	for rows.Next() {
+		var sm core.Summary
+		var spanJSON, metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&sm.ID, &sm.Kind, &sm.Scope, &sm.ProjectID, &sm.SessionID,
+			&sm.AgentID, &sm.Title, &sm.Body, &sm.TightDescription,
+			&sm.PrivacyLevel, &spanJSON, &metaJSON, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(spanJSON), &sm.SourceSpan)
+		sm.Metadata = unmarshalMap(metaJSON)
+		sm.CreatedAt = strToTime(createdAt)
+		sm.UpdatedAt = strToTime(updatedAt)
+		summaries = append(summaries, sm)
+	}
+	return summaries, rows.Err()
+}
+
+func normalizeRowsAffected(n int64) int64 {
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+func execDeleteCount(ctx context.Context, tx *sql.Tx, table string) (int64, error) {
+	result, err := tx.ExecContext(ctx, "DELETE FROM "+table)
+	if err != nil {
+		return 0, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return normalizeRowsAffected(n), nil
+}
+
+func (r *SQLiteRepository) ResetDerived(ctx context.Context) (*core.ResetDerivedResult, error) {
+	if _, err := r.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return nil, fmt.Errorf("disable foreign keys: %w", err)
+	}
+	foreignKeysRestored := false
+	defer func() {
+		if foreignKeysRestored {
+			return
+		}
+		if _, err := r.ExecContext(context.Background(), `PRAGMA foreign_keys = ON`); err != nil {
+			slog.Warn("reset-derived failed to restore foreign_keys pragma", "error", err)
+		}
+	}()
+
+	tx, err := r.Conn().BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin reset-derived transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	result := &core.ResetDerivedResult{}
+	if result.MemoryEntitiesDeleted, err = execDeleteCount(ctx, tx, "memory_entities"); err != nil {
+		return nil, fmt.Errorf("delete memory_entities: %w", err)
+	}
+	if result.SummaryEdgesDeleted, err = execDeleteCount(ctx, tx, "summary_edges"); err != nil {
+		return nil, fmt.Errorf("delete summary_edges: %w", err)
+	}
+	if result.MemoriesDeleted, err = execDeleteCount(ctx, tx, "memories"); err != nil {
+		return nil, fmt.Errorf("delete memories: %w", err)
+	}
+	if result.ClaimsDeleted, err = execDeleteCount(ctx, tx, "claims"); err != nil {
+		return nil, fmt.Errorf("delete claims: %w", err)
+	}
+	if result.EntitiesDeleted, err = execDeleteCount(ctx, tx, "entities"); err != nil {
+		return nil, fmt.Errorf("delete entities: %w", err)
+	}
+	if result.RelationshipsDeleted, err = execDeleteCount(ctx, tx, "relationships"); err != nil {
+		return nil, fmt.Errorf("delete relationships: %w", err)
+	}
+	if result.SummariesDeleted, err = execDeleteCount(ctx, tx, "summaries"); err != nil {
+		return nil, fmt.Errorf("delete summaries: %w", err)
+	}
+	if result.EpisodesDeleted, err = execDeleteCount(ctx, tx, "episodes"); err != nil {
+		return nil, fmt.Errorf("delete episodes: %w", err)
+	}
+	if result.JobsDeleted, err = execDeleteCount(ctx, tx, "jobs"); err != nil {
+		return nil, fmt.Errorf("delete jobs: %w", err)
+	}
+	if result.MemoriesFTSDeleted, err = execDeleteCount(ctx, tx, "memories_fts"); err != nil {
+		return nil, fmt.Errorf("delete memories_fts: %w", err)
+	}
+	if result.SummariesFTSDeleted, err = execDeleteCount(ctx, tx, "summaries_fts"); err != nil {
+		return nil, fmt.Errorf("delete summaries_fts: %w", err)
+	}
+	if result.EpisodesFTSDeleted, err = execDeleteCount(ctx, tx, "episodes_fts"); err != nil {
+		return nil, fmt.Errorf("delete episodes_fts: %w", err)
+	}
+	if result.EmbeddingsDeleted, err = execDeleteCount(ctx, tx, "embeddings"); err != nil {
+		return nil, fmt.Errorf("delete embeddings: %w", err)
+	}
+	if result.RetrievalCacheDeleted, err = execDeleteCount(ctx, tx, "retrieval_cache"); err != nil {
+		return nil, fmt.Errorf("delete retrieval_cache: %w", err)
+	}
+	if result.RecallHistoryDeleted, err = execDeleteCount(ctx, tx, "recall_history"); err != nil {
+		return nil, fmt.Errorf("delete recall_history: %w", err)
+	}
+	if result.RelevanceFeedbackDeleted, err = execDeleteCount(ctx, tx, "relevance_feedback"); err != nil {
+		return nil, fmt.Errorf("delete relevance_feedback: %w", err)
+	}
+	if result.EntityGraphProjectionDeleted, err = execDeleteCount(ctx, tx, "entity_graph_projection"); err != nil {
+		return nil, fmt.Errorf("delete entity_graph_projection: %w", err)
+	}
+	updateResult, err := tx.ExecContext(ctx, `UPDATE events SET reflected_at = NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("reset events reflected_at: %w", err)
+	}
+	if result.EventsReset, err = updateResult.RowsAffected(); err != nil {
+		return nil, fmt.Errorf("read events_reset rows affected: %w", err)
+	}
+	result.EventsReset = normalizeRowsAffected(result.EventsReset)
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit reset-derived transaction: %w", err)
+	}
+
+	if _, err := r.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+		return nil, fmt.Errorf("restore foreign keys: %w", err)
+	}
+	foreignKeysRestored = true
+
+	if _, err := r.ExecContext(ctx, `VACUUM`); err != nil {
+		slog.Warn("reset-derived VACUUM failed after successful cleanup", "error", err)
+	}
+
+	return result, nil
 }
 
 // ---------- Counts ----------
