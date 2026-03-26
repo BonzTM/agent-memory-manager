@@ -65,6 +65,7 @@ func tools() []Tool {
 		{Name: "amm_policy_list", Description: "List all ingestion policies", InputSchema: policyListSchema()},
 		{Name: "amm_policy_add", Description: "Add an ingestion policy", InputSchema: policyAddSchema()},
 		{Name: "amm_policy_remove", Description: "Remove an ingestion policy by ID", InputSchema: policyRemoveSchema()},
+		{Name: "amm_reset_derived", Description: "Purge all derived data while preserving events", InputSchema: resetDerivedSchema()},
 	}
 }
 
@@ -324,6 +325,19 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 	case "amm_status":
 		result, callErr = svc.Status(ctx)
 
+	case "amm_reset_derived":
+		var args struct {
+			Confirm bool `json:"confirm"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return invalidArgs(err)
+		}
+		if !args.Confirm {
+			callErr = fmt.Errorf("confirm must be true to reset derived data")
+			break
+		}
+		result, callErr = svc.ResetDerived(ctx)
+
 	default:
 		slog.Error("mcp tool call failed", "tool", params.Name, "error", fmt.Sprintf("unknown tool: %s", params.Name))
 		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
@@ -566,6 +580,16 @@ func policyRemoveSchema() map[string]interface{} {
 			"id": map[string]string{"type": "string", "description": "Policy ID to remove"},
 		},
 		"required": []string{"id"},
+	}
+}
+
+func resetDerivedSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"confirm": map[string]string{"type": "boolean"},
+		},
+		"required": []string{"confirm"},
 	}
 }
 

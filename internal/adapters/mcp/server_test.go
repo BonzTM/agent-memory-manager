@@ -75,10 +75,36 @@ func TestToolsIncludesPolicyTools(t *testing.T) {
 	for _, tool := range ts {
 		seen[tool.Name] = true
 	}
-	for _, name := range []string{"amm_policy_list", "amm_policy_add", "amm_policy_remove"} {
+	for _, name := range []string{"amm_policy_list", "amm_policy_add", "amm_policy_remove", "amm_reset_derived"} {
 		if !seen[name] {
 			t.Fatalf("expected tools() to include %s", name)
 		}
+	}
+}
+
+func TestHandleToolCallResetDerivedConfirm(t *testing.T) {
+	svc := testMCPService(t)
+
+	noConfirmResp := handleToolCall(svc, toolReq(t, "amm_reset_derived", map[string]interface{}{"confirm": false}))
+	if noConfirmResp.Error != nil {
+		t.Fatalf("expected tool-level error response, got rpc error: %+v", noConfirmResp.Error)
+	}
+	noConfirmMap, ok := noConfirmResp.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected result type: %T", noConfirmResp.Result)
+	}
+	isError, _ := noConfirmMap["isError"].(bool)
+	if !isError {
+		t.Fatalf("expected isError=true for confirm=false, got %#v", noConfirmMap)
+	}
+
+	confirmResp := handleToolCall(svc, toolReq(t, "amm_reset_derived", map[string]interface{}{"confirm": true}))
+	if confirmResp.Error != nil {
+		t.Fatalf("unexpected rpc error for confirm=true: %+v", confirmResp.Error)
+	}
+	var result core.ResetDerivedResult
+	if err := json.Unmarshal([]byte(decodeToolResultText(t, confirmResp)), &result); err != nil {
+		t.Fatalf("decode reset_derived result: %v", err)
 	}
 }
 

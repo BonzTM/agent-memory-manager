@@ -51,6 +51,7 @@ func TestToolsContainsExpectedNames(t *testing.T) {
 		"amm_policy_list",
 		"amm_policy_add",
 		"amm_policy_remove",
+		"amm_reset_derived",
 	}
 
 	seen := map[string]bool{}
@@ -89,6 +90,7 @@ func TestSchemaHelpersNonNil(t *testing.T) {
 		policyListSchema(),
 		policyAddSchema(),
 		policyRemoveSchema(),
+		resetDerivedSchema(),
 	}
 
 	for i, schema := range schemas {
@@ -167,6 +169,7 @@ func TestHandleToolCallInvalidArgumentsPerTool(t *testing.T) {
 		"amm_share",
 		"amm_policy_add",
 		"amm_policy_remove",
+		"amm_reset_derived",
 		"amm_jobs_run",
 		"amm_explain_recall",
 		"amm_repair",
@@ -439,6 +442,10 @@ func TestHandleToolCallCoversAllTools(t *testing.T) {
 	if !reflect.DeepEqual(removeResult, map[string]string{"id": addedPolicy.ID, "status": "removed"}) {
 		t.Fatalf("unexpected policy remove result: %#v", removeResult)
 	}
+
+	resetDerivedResp := handleToolCall(svc, toolReq(t, "amm_reset_derived", map[string]interface{}{"confirm": true}))
+	var resetResult core.ResetDerivedResult
+	decodeToolResultJSON(t, resetDerivedResp, &resetResult)
 }
 
 func TestServeHandlesParseAndRequests(t *testing.T) {
