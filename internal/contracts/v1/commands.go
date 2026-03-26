@@ -34,7 +34,8 @@ const (
 	// CmdExplainRecall explains why an item surfaced for a query.
 	CmdExplainRecall = "explain_recall"
 	// CmdStatus returns runtime and storage status information.
-	CmdStatus = "status"
+	CmdStatus       = "status"
+	CmdResetDerived = "reset_derived"
 	// CmdRun executes a full v1 command envelope.
 	CmdRun = "run"
 	// CmdValidate validates a v1 command envelope without executing it.
@@ -116,6 +117,10 @@ var CommandRegistry = map[string]CommandInfo{
 	CmdStatus: {
 		Name:        CmdStatus,
 		Description: "Return system status information.",
+	},
+	CmdResetDerived: {
+		Name:        CmdResetDerived,
+		Description: "Purge derived data while preserving events.",
 	},
 	CmdRun: {
 		Name:        CmdRun,

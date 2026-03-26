@@ -346,3 +346,13 @@ func ValidatePolicyAdd(req *PolicyAddRequest) error {
 	}
 	return nil
 }
+
+func ValidateResetDerived(req *ResetDerivedRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if !req.Confirm {
+		return fmt.Errorf("confirm must be true")
+	}
+	return nil
+}

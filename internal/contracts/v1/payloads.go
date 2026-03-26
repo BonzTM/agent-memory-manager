@@ -362,3 +362,7 @@ type PolicyResponse struct {
 	CreatedAt   string            `json:"created_at"`
 	UpdatedAt   string            `json:"updated_at"`
 }
+
+type ResetDerivedRequest struct {
+	Confirm bool `json:"confirm"`
+}

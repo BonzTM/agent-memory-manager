@@ -373,3 +373,27 @@ func TestValidatePolicyAdd(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateResetDerived(t *testing.T) {
+	if err := ValidateResetDerived(&ResetDerivedRequest{Confirm: true}); err != nil {
+		t.Fatalf("expected valid request, got %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		req      *ResetDerivedRequest
+		contains string
+	}{
+		{name: "nil request", req: nil, contains: "request is nil"},
+		{name: "confirm false", req: &ResetDerivedRequest{Confirm: false}, contains: "confirm must be true"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateResetDerived(tt.req)
+			if err == nil || !strings.Contains(err.Error(), tt.contains) {
+				t.Fatalf("expected error containing %q, got %v", tt.contains, err)
+			}
+		})
+	}
+}
