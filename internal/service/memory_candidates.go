@@ -117,6 +117,46 @@ func (s *AMMService) findDuplicatesByEmbedding(ctx context.Context, candidate co
 	return duplicates
 }
 
+func (s *AMMService) findDuplicatesByStoredEmbedding(ctx context.Context, candidate core.Memory, activeMemories []*core.Memory) []*core.Memory {
+	if s.embeddingProvider == nil {
+		return nil
+	}
+
+	model := s.embeddingProvider.Model()
+	candidateRecord, err := s.repo.GetEmbedding(ctx, candidate.ID, "memory", model)
+	if err != nil || candidateRecord == nil || len(candidateRecord.Vector) == 0 {
+		return nil
+	}
+
+	duplicates := make([]*core.Memory, 0, 4)
+	for _, existing := range activeMemories {
+		if existing == nil || existing.Status != core.MemoryStatusActive {
+			continue
+		}
+		if existing.ID == candidate.ID {
+			continue
+		}
+		if existing.Type != candidate.Type || existing.Scope != candidate.Scope || existing.ProjectID != candidate.ProjectID {
+			continue
+		}
+
+		record, err := s.repo.GetEmbedding(ctx, existing.ID, "memory", model)
+		if err != nil || record == nil || len(record.Vector) == 0 {
+			continue
+		}
+
+		cosine, ok := cosineSimilarity(candidateRecord.Vector, record.Vector)
+		if !ok {
+			continue
+		}
+		if cosine >= embeddingDedupThreshold {
+			duplicates = append(duplicates, existing)
+		}
+	}
+
+	return duplicates
+}
+
 func clampUnit(v float64) float64 {
 	if v < 0 {
 		return 0

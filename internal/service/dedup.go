@@ -135,8 +135,8 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 					break
 				}
 
-				if !jaccardMerged && s.embeddingProvider != nil {
-					embCandidates := s.findDuplicatesByEmbedding(ctx, *memA, activeByType)
+			if !jaccardMerged && s.embeddingProvider != nil {
+				embCandidates := s.findDuplicatesByStoredEmbedding(ctx, *memA, activeByType)
 					for _, candB := range embCandidates {
 						if !mergePair(memA, candB) {
 							continue

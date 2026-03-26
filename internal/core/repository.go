@@ -138,6 +138,7 @@ type Repository interface {
 
 	UpsertEmbedding(ctx context.Context, embedding *EmbeddingRecord) error
 	GetEmbedding(ctx context.Context, objectID, objectKind, model string) (*EmbeddingRecord, error)
+	ListEmbeddingsByKind(ctx context.Context, objectKind, model string, limit int) ([]EmbeddingRecord, error)
 	DeleteEmbeddings(ctx context.Context, objectID, objectKind, model string) error
 
 	// CountEvents returns the total number of events.

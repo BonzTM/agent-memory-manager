@@ -13,6 +13,7 @@ const (
 	minRecallScore            = 0.2
 	minRecallMemoryConfidence = 0.35
 	minHybridHistoryScore     = 0.55
+	embeddingOnlyFTSPosition  = 999
 )
 
 type recallFilterOptions struct {
@@ -126,6 +127,7 @@ func (s *AMMService) buildScoringContext(ctx context.Context, query string, opts
 func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.RecallOptions, sctx ScoringContext) ([]core.RecallItem, error) {
 	limit := opts.Limit
 	var candidates []ScoringCandidate
+	candidateIDs := make(map[string]bool)
 
 	memories, err := s.repo.SearchMemories(ctx, query, limit*2)
 	if err != nil {
@@ -136,6 +138,23 @@ func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.
 			continue
 		}
 		candidates = append(candidates, MemoryToCandidate(m, i))
+		candidateIDs[m.ID] = true
+	}
+
+	if len(sctx.QueryEmbedding) > 0 {
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "memory", limit*2)
+		for _, id := range embIDs {
+			if candidateIDs[id] {
+				continue
+			}
+			mem, err := s.repo.GetMemory(ctx, id)
+			if err != nil || mem == nil || !isRecallMemoryStatusAllowed(mem.Status) {
+				continue
+			}
+			c := MemoryToCandidate(*mem, embeddingOnlyFTSPosition)
+			candidates = append(candidates, c)
+			candidateIDs[id] = true
+		}
 	}
 
 	summaries, err := s.repo.SearchSummaries(ctx, query, limit)
@@ -144,6 +163,23 @@ func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.
 	}
 	for i, sm := range summaries {
 		candidates = append(candidates, SummaryToCandidate(sm, i))
+		candidateIDs[sm.ID] = true
+	}
+
+	if len(sctx.QueryEmbedding) > 0 {
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "summary", limit)
+		for _, id := range embIDs {
+			if candidateIDs[id] {
+				continue
+			}
+			sm, err := s.repo.GetSummary(ctx, id)
+			if err != nil || sm == nil {
+				continue
+			}
+			c := SummaryToCandidate(*sm, embeddingOnlyFTSPosition)
+			candidates = append(candidates, c)
+			candidateIDs[id] = true
+		}
 	}
 
 	episodes, err := s.repo.SearchEpisodes(ctx, query, limit)
@@ -152,6 +188,23 @@ func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.
 	}
 	for i, ep := range episodes {
 		candidates = append(candidates, EpisodeToCandidate(ep, i))
+		candidateIDs[ep.ID] = true
+	}
+
+	if len(sctx.QueryEmbedding) > 0 {
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "episode", limit)
+		for _, id := range embIDs {
+			if candidateIDs[id] {
+				continue
+			}
+			ep, err := s.repo.GetEpisode(ctx, id)
+			if err != nil || ep == nil {
+				continue
+			}
+			c := EpisodeToCandidate(*ep, embeddingOnlyFTSPosition)
+			candidates = append(candidates, c)
+			candidateIDs[id] = true
+		}
 	}
 
 	s.attachCandidateEmbeddings(ctx, candidates)
@@ -166,11 +219,28 @@ func (s *AMMService) recallFacts(ctx context.Context, query string, opts core.Re
 		return nil, fmt.Errorf("search memories: %w", err)
 	}
 	var candidates []ScoringCandidate
+	candidateIDs := make(map[string]bool)
 	for i, m := range memories {
 		if !isRecallMemoryStatusAllowed(m.Status) {
 			continue
 		}
 		candidates = append(candidates, MemoryToCandidate(m, i))
+		candidateIDs[m.ID] = true
+	}
+	if len(sctx.QueryEmbedding) > 0 {
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "memory", opts.Limit*2)
+		for _, id := range embIDs {
+			if candidateIDs[id] {
+				continue
+			}
+			mem, err := s.repo.GetMemory(ctx, id)
+			if err != nil || mem == nil || !isRecallMemoryStatusAllowed(mem.Status) {
+				continue
+			}
+			c := MemoryToCandidate(*mem, embeddingOnlyFTSPosition)
+			candidates = append(candidates, c)
+			candidateIDs[id] = true
+		}
 	}
 	s.attachCandidateEmbeddings(ctx, candidates)
 	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
@@ -197,6 +267,7 @@ func (s *AMMService) recallProject(ctx context.Context, query string, opts core.
 		return nil, fmt.Errorf("search memories: %w", err)
 	}
 	var candidates []ScoringCandidate
+	candidateIDs := make(map[string]bool)
 	for i, mem := range memories {
 		if opts.ProjectID != "" && mem.ProjectID != opts.ProjectID {
 			continue
@@ -205,6 +276,28 @@ func (s *AMMService) recallProject(ctx context.Context, query string, opts core.
 			continue
 		}
 		candidates = append(candidates, MemoryToCandidate(mem, i))
+		candidateIDs[mem.ID] = true
+	}
+	if len(sctx.QueryEmbedding) > 0 {
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "memory", opts.Limit*3)
+		for _, id := range embIDs {
+			if candidateIDs[id] {
+				continue
+			}
+			mem, err := s.repo.GetMemory(ctx, id)
+			if err != nil || mem == nil {
+				continue
+			}
+			if opts.ProjectID != "" && mem.ProjectID != opts.ProjectID {
+				continue
+			}
+			if !isRecallMemoryStatusAllowed(mem.Status) {
+				continue
+			}
+			c := MemoryToCandidate(*mem, embeddingOnlyFTSPosition)
+			candidates = append(candidates, c)
+			candidateIDs[id] = true
+		}
 	}
 	s.attachCandidateEmbeddings(ctx, candidates)
 	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
@@ -213,6 +306,7 @@ func (s *AMMService) recallProject(ctx context.Context, query string, opts core.
 // recallEntity searches memories and entities with full scoring.
 func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.RecallOptions, sctx ScoringContext) ([]core.RecallItem, error) {
 	var candidates []ScoringCandidate
+	candidateIDs := make(map[string]bool)
 
 	memories, err := s.repo.SearchMemories(ctx, query, opts.Limit*2)
 	if err != nil {
@@ -223,6 +317,22 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 			continue
 		}
 		candidates = append(candidates, MemoryToCandidate(m, i))
+		candidateIDs[m.ID] = true
+	}
+	if len(sctx.QueryEmbedding) > 0 {
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "memory", opts.Limit*2)
+		for _, id := range embIDs {
+			if candidateIDs[id] {
+				continue
+			}
+			mem, err := s.repo.GetMemory(ctx, id)
+			if err != nil || mem == nil || !isRecallMemoryStatusAllowed(mem.Status) {
+				continue
+			}
+			c := MemoryToCandidate(*mem, embeddingOnlyFTSPosition)
+			candidates = append(candidates, c)
+			candidateIDs[id] = true
+		}
 	}
 	s.attachCandidateEmbeddings(ctx, candidates)
 
@@ -261,6 +371,7 @@ func (s *AMMService) recallHistory(ctx context.Context, query string, opts core.
 func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.RecallOptions, sctx ScoringContext) ([]core.RecallItem, error) {
 	perType := opts.Limit
 	var candidates []ScoringCandidate
+	candidateIDs := make(map[string]bool)
 
 	memories, err := s.repo.SearchMemories(ctx, query, perType*2)
 	if err != nil {
@@ -271,6 +382,22 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 			continue
 		}
 		candidates = append(candidates, MemoryToCandidate(m, i))
+		candidateIDs[m.ID] = true
+	}
+	if len(sctx.QueryEmbedding) > 0 {
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "memory", perType*2)
+		for _, id := range embIDs {
+			if candidateIDs[id] {
+				continue
+			}
+			mem, err := s.repo.GetMemory(ctx, id)
+			if err != nil || mem == nil || !isRecallMemoryStatusAllowed(mem.Status) {
+				continue
+			}
+			c := MemoryToCandidate(*mem, embeddingOnlyFTSPosition)
+			candidates = append(candidates, c)
+			candidateIDs[id] = true
+		}
 	}
 
 	summaries, err := s.repo.SearchSummaries(ctx, query, perType)
@@ -279,6 +406,22 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 	}
 	for i, sm := range summaries {
 		candidates = append(candidates, SummaryToCandidate(sm, i))
+		candidateIDs[sm.ID] = true
+	}
+	if len(sctx.QueryEmbedding) > 0 {
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "summary", perType)
+		for _, id := range embIDs {
+			if candidateIDs[id] {
+				continue
+			}
+			sm, err := s.repo.GetSummary(ctx, id)
+			if err != nil || sm == nil {
+				continue
+			}
+			c := SummaryToCandidate(*sm, embeddingOnlyFTSPosition)
+			candidates = append(candidates, c)
+			candidateIDs[id] = true
+		}
 	}
 
 	episodes, err := s.repo.SearchEpisodes(ctx, query, perType)
@@ -287,6 +430,22 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 	}
 	for i, ep := range episodes {
 		candidates = append(candidates, EpisodeToCandidate(ep, i))
+		candidateIDs[ep.ID] = true
+	}
+	if len(sctx.QueryEmbedding) > 0 {
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "episode", perType)
+		for _, id := range embIDs {
+			if candidateIDs[id] {
+				continue
+			}
+			ep, err := s.repo.GetEpisode(ctx, id)
+			if err != nil || ep == nil {
+				continue
+			}
+			c := EpisodeToCandidate(*ep, embeddingOnlyFTSPosition)
+			candidates = append(candidates, c)
+			candidateIDs[id] = true
+		}
 	}
 
 	events, err := s.repo.SearchEvents(ctx, query, perType)
@@ -311,6 +470,48 @@ func (s *AMMService) buildQueryEmbedding(ctx context.Context, query string) []fl
 		return nil
 	}
 	return vectors[0]
+}
+
+func (s *AMMService) searchByEmbedding(ctx context.Context, queryEmbedding []float32, objectKind string, limit int) []string {
+	if s.embeddingProvider == nil || len(queryEmbedding) == 0 || limit <= 0 {
+		return nil
+	}
+	model := s.embeddingProvider.Model()
+	if model == "" {
+		return nil
+	}
+	records, err := s.repo.ListEmbeddingsByKind(ctx, objectKind, model, limit*5)
+	if err != nil || len(records) == 0 {
+		return nil
+	}
+
+	type scoredEmbedding struct {
+		id    string
+		score float64
+	}
+	scored := make([]scoredEmbedding, 0, len(records))
+	for _, rec := range records {
+		score, ok := cosineSimilarity(queryEmbedding, rec.Vector)
+		if !ok {
+			continue
+		}
+		scored = append(scored, scoredEmbedding{id: rec.ObjectID, score: score})
+	}
+	if len(scored) == 0 {
+		return nil
+	}
+
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+	if len(scored) > limit {
+		scored = scored[:limit]
+	}
+	ids := make([]string, 0, len(scored))
+	for _, item := range scored {
+		ids = append(ids, item.id)
+	}
+	return ids
 }
 
 func (s *AMMService) attachCandidateEmbeddings(ctx context.Context, candidates []ScoringCandidate) {

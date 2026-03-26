@@ -1731,6 +1731,31 @@ func (r *SQLiteRepository) GetEmbedding(ctx context.Context, objectID, objectKin
 	return &rec, nil
 }
 
+func (r *SQLiteRepository) ListEmbeddingsByKind(ctx context.Context, objectKind, model string, limit int) ([]core.EmbeddingRecord, error) {
+	rows, err := r.QueryContext(ctx, `
+		SELECT object_id, object_kind, embedding_json, model, created_at
+		FROM embeddings
+		WHERE object_kind = ? AND model = ?
+		LIMIT ?`, objectKind, model, defaultLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	records := make([]core.EmbeddingRecord, 0)
+	for rows.Next() {
+		var rec core.EmbeddingRecord
+		var embeddingJSON, createdAt string
+		if err := rows.Scan(&rec.ObjectID, &rec.ObjectKind, &embeddingJSON, &rec.Model, &createdAt); err != nil {
+			return nil, err
+		}
+		rec.Vector = unmarshalEmbeddingJSON(embeddingJSON)
+		rec.CreatedAt = strToTime(createdAt)
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}
+
 func (r *SQLiteRepository) DeleteEmbeddings(ctx context.Context, objectID, objectKind, model string) error {
 	if model == "" {
 		_, err := r.ExecContext(ctx, `DELETE FROM embeddings WHERE object_id = ? AND object_kind = ?`, objectID, objectKind)

@@ -2059,6 +2059,154 @@ func TestRecallAmbient_SemanticReranksLexicalCandidates(t *testing.T) {
 	}
 }
 
+func TestRecallHybrid_FindsEmbeddingCandidatesNotInFTS(t *testing.T) {
+	query := "what are the gotchas and constraints"
+	provider := staticEmbeddingProvider{
+		model: "test-model",
+		vectors: map[string][]float32{
+			query: {1, 0},
+		},
+	}
+
+	svc, repo := testServiceAndRepoWithEmbeddingProvider(t, provider)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	mem := &core.Memory{
+		ID:               "mem_hybrid_embedding_only",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "CGO_ENABLED=1 required for SQLite builds",
+		TightDescription: "CGO requirement for SQLite build",
+		Confidence:       0.9,
+		Importance:       0.7,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := repo.InsertMemory(ctx, mem); err != nil {
+		t.Fatalf("insert memory: %v", err)
+	}
+	if err := repo.UpsertEmbedding(ctx, &core.EmbeddingRecord{ObjectID: mem.ID, ObjectKind: "memory", Model: provider.Model(), Vector: []float32{1, 0}, CreatedAt: now}); err != nil {
+		t.Fatalf("upsert embedding: %v", err)
+	}
+
+	result, err := svc.Recall(ctx, query, core.RecallOptions{Mode: core.RecallModeHybrid, Limit: 10})
+	if err != nil {
+		t.Fatalf("hybrid recall: %v", err)
+	}
+
+	found := false
+	for _, item := range result.Items {
+		if item.ID == mem.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected embedding-only memory %s in hybrid recall results, got %#v", mem.ID, result.Items)
+	}
+}
+
+func TestRecallHybrid_MergesFTSAndEmbeddingCandidates(t *testing.T) {
+	query := "sqlite build requirement checklist"
+	provider := staticEmbeddingProvider{
+		model: "test-model",
+		vectors: map[string][]float32{
+			query: {1, 0},
+		},
+	}
+
+	svc, repo := testServiceAndRepoWithEmbeddingProvider(t, provider)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	ftsMem := &core.Memory{
+		ID:               "mem_hybrid_fts",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "SQLite build requirement checklist and setup notes",
+		TightDescription: "SQLite build checklist",
+		Confidence:       0.9,
+		Importance:       0.6,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	embOnlyMem := &core.Memory{
+		ID:               "mem_hybrid_embedding",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "CGO_ENABLED=1 required for SQLite builds",
+		TightDescription: "CGO requirement for SQLite build",
+		Confidence:       0.9,
+		Importance:       0.7,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now.Add(time.Second),
+		UpdatedAt:        now.Add(time.Second),
+	}
+	if err := repo.InsertMemory(ctx, ftsMem); err != nil {
+		t.Fatalf("insert fts memory: %v", err)
+	}
+	if err := repo.InsertMemory(ctx, embOnlyMem); err != nil {
+		t.Fatalf("insert embedding-only memory: %v", err)
+	}
+	if err := repo.UpsertEmbedding(ctx, &core.EmbeddingRecord{ObjectID: embOnlyMem.ID, ObjectKind: "memory", Model: provider.Model(), Vector: []float32{1, 0}, CreatedAt: now}); err != nil {
+		t.Fatalf("upsert embedding: %v", err)
+	}
+
+	result, err := svc.Recall(ctx, query, core.RecallOptions{Mode: core.RecallModeHybrid, Limit: 10})
+	if err != nil {
+		t.Fatalf("hybrid recall: %v", err)
+	}
+
+	counts := map[string]int{}
+	for _, item := range result.Items {
+		counts[item.ID]++
+	}
+	if counts[ftsMem.ID] != 1 {
+		t.Fatalf("expected FTS memory %s exactly once, got count=%d results=%#v", ftsMem.ID, counts[ftsMem.ID], result.Items)
+	}
+	if counts[embOnlyMem.ID] != 1 {
+		t.Fatalf("expected embedding memory %s exactly once, got count=%d results=%#v", embOnlyMem.ID, counts[embOnlyMem.ID], result.Items)
+	}
+}
+
+func TestRecallHybrid_NoEmbeddingSearchWithoutProvider(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "SQLite build requirement checklist",
+		TightDescription: "SQLite build checklist",
+		Confidence:       0.9,
+	})
+	if err != nil {
+		t.Fatalf("remember memory: %v", err)
+	}
+
+	result, err := svc.Recall(ctx, "sqlite build requirement checklist", core.RecallOptions{Mode: core.RecallModeHybrid, Limit: 10})
+	if err != nil {
+		t.Fatalf("hybrid recall without embedding provider: %v", err)
+	}
+
+	found := false
+	for _, item := range result.Items {
+		if item.ID == mem.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected lexical memory %s in hybrid recall without embeddings, got %#v", mem.ID, result.Items)
+	}
+}
+
 func TestExplainRecall_IncludesSemanticSignalWhenEmbeddingsAvailable(t *testing.T) {
 	query := "postgres durability"
 	provider := staticEmbeddingProvider{
