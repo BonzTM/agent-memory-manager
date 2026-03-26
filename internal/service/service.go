@@ -29,18 +29,24 @@ func generateID(prefix string) string {
 // AMMService implements core.Service by coordinating repository access,
 // summarization, and maintenance workflows for durable memory operations.
 type AMMService struct {
-	repo                     core.Repository
-	dbPath                   string
-	summarizer               core.Summarizer
-	intelligence             core.IntelligenceProvider
-	hasLLMSummarizer         bool
-	embeddingProvider        core.EmbeddingProvider
-	reprocessBatchSize       int
-	reflectBatchSize         int
-	reflectLLMBatchSize      int
-	lifecycleReviewBatchSize int
-	scoringWeights           ScoringWeights
-	scoringWeightsMu         sync.RWMutex
+	repo                            core.Repository
+	dbPath                          string
+	summarizer                      core.Summarizer
+	intelligence                    core.IntelligenceProvider
+	hasLLMSummarizer                bool
+	embeddingProvider               core.EmbeddingProvider
+	reprocessBatchSize              int
+	reflectBatchSize                int
+	reflectLLMBatchSize             int
+	lifecycleReviewBatchSize        int
+	compressChunkSize               int
+	compressMaxEvents               int
+	compressBatchSize               int
+	topicBatchSize                  int
+	embeddingBatchSize              int
+	crossProjectSimilarityThreshold float64
+	scoringWeights                  ScoringWeights
+	scoringWeightsMu                sync.RWMutex
 }
 
 // Compile-time check that AMMService implements core.Service.
@@ -57,17 +63,23 @@ func New(repo core.Repository, dbPath string, summarizer core.Summarizer, embedd
 	}
 	intelligence := NewSummarizerIntelligenceAdapter(selected)
 	svc := &AMMService{
-		repo:                     repo,
-		dbPath:                   dbPath,
-		summarizer:               selected,
-		intelligence:             intelligence,
-		hasLLMSummarizer:         hasLLM,
-		embeddingProvider:        embeddingProvider,
-		reprocessBatchSize:       defaultBatchSize,
-		reflectBatchSize:         defaultReflectBatchSize,
-		reflectLLMBatchSize:      defaultReflectLLMBatchSize,
-		lifecycleReviewBatchSize: defaultLifecycleReviewBatchSize,
-		scoringWeights:           DefaultScoringWeights(),
+		repo:                            repo,
+		dbPath:                          dbPath,
+		summarizer:                      selected,
+		intelligence:                    intelligence,
+		hasLLMSummarizer:                hasLLM,
+		embeddingProvider:               embeddingProvider,
+		reprocessBatchSize:              defaultBatchSize,
+		reflectBatchSize:                defaultReflectBatchSize,
+		reflectLLMBatchSize:             defaultReflectLLMBatchSize,
+		lifecycleReviewBatchSize:        defaultLifecycleReviewBatchSize,
+		compressChunkSize:               defaultCompressChunkSize,
+		compressMaxEvents:               defaultCompressMaxEvents,
+		compressBatchSize:               defaultCompressBatchSize,
+		topicBatchSize:                  defaultTopicBatchSize,
+		embeddingBatchSize:              defaultEmbeddingBatchSize,
+		crossProjectSimilarityThreshold: defaultCrossProjectSimilarityThreshold,
+		scoringWeights:                  DefaultScoringWeights(),
 	}
 	if repo != nil && dbPath != "" {
 		if _, err := os.Stat(dbPath); err == nil {
@@ -103,6 +115,54 @@ func (s *AMMService) SetReflectLLMBatchSize(batchSize int) {
 		return
 	}
 	s.reflectLLMBatchSize = batchSize
+}
+
+func (s *AMMService) SetCompressChunkSize(batchSize int) {
+	if batchSize <= 0 {
+		s.compressChunkSize = defaultCompressChunkSize
+		return
+	}
+	s.compressChunkSize = batchSize
+}
+
+func (s *AMMService) SetCompressMaxEvents(batchSize int) {
+	if batchSize <= 0 {
+		s.compressMaxEvents = defaultCompressMaxEvents
+		return
+	}
+	s.compressMaxEvents = batchSize
+}
+
+func (s *AMMService) SetCompressBatchSize(batchSize int) {
+	if batchSize <= 0 {
+		s.compressBatchSize = defaultCompressBatchSize
+		return
+	}
+	s.compressBatchSize = batchSize
+}
+
+func (s *AMMService) SetTopicBatchSize(batchSize int) {
+	if batchSize <= 0 {
+		s.topicBatchSize = defaultTopicBatchSize
+		return
+	}
+	s.topicBatchSize = batchSize
+}
+
+func (s *AMMService) SetEmbeddingBatchSize(batchSize int) {
+	if batchSize <= 0 {
+		s.embeddingBatchSize = defaultEmbeddingBatchSize
+		return
+	}
+	s.embeddingBatchSize = batchSize
+}
+
+func (s *AMMService) SetCrossProjectSimilarityThreshold(threshold float64) {
+	if threshold <= 0 {
+		s.crossProjectSimilarityThreshold = defaultCrossProjectSimilarityThreshold
+		return
+	}
+	s.crossProjectSimilarityThreshold = threshold
 }
 
 func (s *AMMService) SetIntelligenceProvider(provider core.IntelligenceProvider) {
@@ -971,4 +1031,8 @@ func (s *AMMService) Status(ctx context.Context) (*core.StatusResult, error) {
 	}
 	slog.Debug("Status completed successfully", "initialized", initialized, "eventCount", evtCount, "memoryCount", memCount, "summaryCount", sumCount, "episodeCount", epCount, "entityCount", entCount)
 	return result, nil
+}
+
+func (s *AMMService) ResetDerived(ctx context.Context) (*core.ResetDerivedResult, error) {
+	return s.repo.ResetDerived(ctx)
 }

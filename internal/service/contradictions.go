@@ -152,7 +152,6 @@ func (s *AMMService) DetectContradictions(ctx context.Context) (int, error) {
 		if err := s.repo.InsertMemory(ctx, mem); err != nil {
 			return found, fmt.Errorf("insert contradiction memory: %w", err)
 		}
-		s.upsertMemoryEmbeddingBestEffort(ctx, mem)
 
 		memA, errA := s.repo.GetMemory(ctx, a.memoryID)
 		memB, errB := s.repo.GetMemory(ctx, b.memoryID)
@@ -171,7 +170,6 @@ func (s *AMMService) DetectContradictions(ctx context.Context) (int, error) {
 			if err := s.repo.UpdateMemory(ctx, older); err != nil {
 				return found, fmt.Errorf("supersede older conflicting memory: %w", err)
 			}
-			s.upsertMemoryEmbeddingBestEffort(ctx, older)
 		}
 
 		existingBodies[body] = true
