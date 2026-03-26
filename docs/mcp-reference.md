@@ -259,12 +259,14 @@ Retrieve memories using various recall modes.
   "type": "object",
   "properties": {
     "query": {"type": "string", "description": "Search query"},
+    "agent_id": {"type": "string", "description": "Agent identifier"},
     "opts": {
       "type": "object",
       "properties": {
         "mode":       {"type": "string"},
         "project_id": {"type": "string"},
         "session_id": {"type": "string"},
+        "agent_id":   {"type": "string"},
         "limit":      {"type": "integer"}
       }
     }
@@ -344,7 +346,8 @@ Expand an item to full detail, including linked claims, events, and children.
   "type": "object",
   "properties": {
     "id":   {"type": "string", "description": "Item ID to expand"},
-    "kind": {"type": "string", "description": "Item kind: memory, summary, episode"}
+    "kind": {"type": "string", "description": "Item kind: memory, summary, episode"},
+    "session_id": {"type": "string", "description": "Session identifier for relevance feedback"}
   },
   "required": ["id"]
 }
@@ -486,6 +489,42 @@ Update an existing memory. Only the provided fields are changed; omitted fields 
 
 ---
 
+### amm_share
+
+Update a memory privacy level.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id":      {"type": "string", "description": "Memory ID to share"},
+    "privacy": {"type": "string", "description": "Privacy level: private, shared, public_safe"}
+  },
+  "required": ["id", "privacy"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 19,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_share",
+    "arguments": {
+      "id": "mem_abc123",
+      "privacy": "shared"
+    }
+  }
+}
+```
+
+---
+
 ### amm_jobs_run
 
 Run a maintenance job.
@@ -502,14 +541,16 @@ Run a maintenance job.
 }
 ```
 
-**Available job kinds (12):**
+**Available job kinds (21):**
 
 | Kind | Description |
 |---|---|
 | `reflect` | Extract candidate durable memories from recent events |
 | `compress_history` | Compress raw history into summaries |
 | `consolidate_sessions` | Merge session-level summaries |
+| `build_topic_summaries` | Build topic-level hierarchical summaries |
 | `extract_claims` | Extract structured claims from memories |
+| `enrich_memories` | Entity-link and enrich explicitly remembered memories |
 | `form_episodes` | Form narrative episodes from related events |
 | `detect_contradictions` | Find contradictions between memories |
 | `decay_stale_memory` | Reduce confidence on stale memories |
@@ -517,8 +558,14 @@ Run a maintenance job.
 | `rebuild_indexes` | Rebuild FTS and embeddings (incremental — skips existing) |
 | `rebuild_indexes_full` | Rebuild FTS and all embeddings from scratch |
 | `cleanup_recall_history` | Clean up recall history tracking data |
-| `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM |
-| `reprocess_all` | Batch re-extract all memories unconditionally, superseding both heuristic and LLM results |
+| `promote_high_value` | Promote high-value memories based on access patterns |
+| `lifecycle_review` | LLM-powered batch review for decay/promote/contradict |
+| `cross_project_transfer` | Detect and promote cross-project memories to global |
+| `rebuild_entity_graph` | Rebuild pre-computed entity neighborhoods |
+| `archive_session_traces` | Archive low-salience session-scoped memories |
+| `update_ranking_weights` | Update scoring weights from relevance feedback |
+| `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM. Uses endgame pipeline logic (triage, entity linking, processing ledger). |
+| `reprocess_all` | Batch re-extract all memories unconditionally, superseding both heuristic and LLM results. Uses endgame pipeline logic. |
 
 **Example:**
 
@@ -666,6 +713,45 @@ Response text contains:
   "entity_count": 45
 }
 ```
+
+---
+
+### amm_reset_derived
+
+Delete all derived/canonical-derived data and reset event reflection markers while preserving events.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "confirm": {"type": "boolean", "description": "Must be true to execute destructive reset"}
+  }
+}
+```
+
+`confirm: true` is required to run the operation. If omitted/false, the tool returns an error message describing the destructive behavior and how to proceed.
+
+**Safety warning:** this operation is irreversible. It deletes derived data (`memories`, `entities`, `relationships`, `claims`, `summaries`, `episodes`, `jobs`, embeddings, caches, and feedback), keeps events, and enables a fresh re-extract via `reflect`.
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 25,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_reset_derived",
+    "arguments": {
+      "confirm": true
+    }
+  }
+}
+```
+
+Response text contains a `ResetDerivedResult` summary including reset/deletion counts.
 
 ---
 

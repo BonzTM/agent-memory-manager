@@ -32,6 +32,12 @@ On failure the envelope goes to stderr with `"ok": false` and an `"error"` objec
 | Variable | Description | Default |
 |---|---|---|
 | `AMM_DB_PATH` | Path to the SQLite database file | `~/.amm/amm.db` |
+| `AMM_COMPRESS_CHUNK_SIZE` | Max events per history chunk | `20` |
+| `AMM_COMPRESS_MAX_EVENTS` | Max events per session summary | `100` |
+| `AMM_COMPRESS_BATCH_SIZE` | Max summaries per LLM call | `5` |
+| `AMM_TOPIC_BATCH_SIZE` | Max topic summaries per LLM call | `5` |
+| `AMM_EMBEDDING_BATCH_SIZE` | Max items per embedding API call | `20` |
+| `AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD` | Threshold for cross-project memory transfer | `0.85` |
 
 ## Building
 
@@ -199,7 +205,7 @@ amm remember \
 Retrieve memories using a recall mode.
 
 ```
-amm recall <query> [--mode <mode>] [--project <id>] [--session <id>]
+amm recall <query> [--mode <mode>] [--project <id>] [--session <id>] [--agent-id <id>]
 ```
 
 The query is positional (all non-flag arguments are joined with spaces).
@@ -209,6 +215,7 @@ The query is positional (all non-flag arguments are joined with spaces).
 | `--mode` | `hybrid` | Recall mode (see Recall Modes below) |
 | `--project` | | Filter to a project |
 | `--session` | | Filter to a session |
+| `--agent-id` | | Filter to an agent ID |
 
 **Example:**
 
@@ -284,12 +291,13 @@ amm describe mem_xyz789 ep_abc123
 Expand a single item to its full detail, including linked claims, events, and children.
 
 ```
-amm expand <id> [--kind <kind>]
+amm expand <id> [--kind <kind>] [--session-id <id>]
 ```
 
 | Flag | Default | Description |
 |---|---|---|
 | `--kind` | Auto-inferred from ID prefix | Item kind: `memory`, `summary`, or `episode` |
+| `--session-id` | | Session identifier used for expand-time relevance feedback attribution |
 
 The kind is inferred automatically from the ID prefix:
 
@@ -413,7 +421,41 @@ amm memory mem_xyz789
 
 ---
 
-### jobs run \<kind\>
+### share
+
+Update a memory's privacy level.
+
+```
+amm share <memory-id> [--privacy <level>]
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--privacy` | | Privacy level: `private`, `shared`, or `public_safe` |
+
+`<memory-id>` is positional and required.
+
+**Example:**
+
+```bash
+amm share mem_xyz789 --privacy shared
+```
+
+```json
+{
+  "ok": true,
+  "command": "share",
+  "timestamp": "2026-03-23T12:07:30Z",
+  "result": {
+    "id": "mem_xyz789",
+    "privacy_level": "shared"
+  }
+}
+```
+
+---
+
+### jobs run <kind>
 
 Execute a maintenance job.
 
@@ -437,14 +479,25 @@ amm jobs run --reprocess-all
 
 Do not combine a positional job kind with `--reprocess` or `--reprocess-all`.
 
-**Available job kinds (12):**
+**Recommended pipeline order:**
+
+1. `reflect` (Phase 1: Extraction)
+2. `rebuild_indexes` (Phase 2: Initial embedding)
+3. `compress_history`, `consolidate_sessions`, `build_topic_summaries` (Phase 3: Compression)
+4. `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `form_episodes` (Phase 4: Linking)
+5. `detect_contradictions`, `decay_stale_memory`, `promote_high_value`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces` (Phase 5: Quality)
+6. `rebuild_indexes`, `cleanup_recall_history`, `update_ranking_weights` (Phase 6: Finalization)
+
+**Available job kinds (21):**
 
 | Kind | Description |
 |---|---|
 | `reflect` | Extract candidate durable memories from recent events |
 | `compress_history` | Compress raw history into summaries |
 | `consolidate_sessions` | Merge session-level summaries |
+| `build_topic_summaries` | Build topic-level hierarchical summaries |
 | `extract_claims` | Extract structured claims from memories |
+| `enrich_memories` | Entity-link and enrich explicitly remembered memories |
 | `form_episodes` | Form narrative episodes from related events |
 | `detect_contradictions` | Find contradictions between memories |
 | `decay_stale_memory` | Reduce confidence on stale memories |
@@ -452,8 +505,14 @@ Do not combine a positional job kind with `--reprocess` or `--reprocess-all`.
 | `rebuild_indexes` | Rebuild FTS and embeddings (incremental — skips existing) |
 | `rebuild_indexes_full` | Rebuild FTS and all embeddings from scratch |
 | `cleanup_recall_history` | Clean up recall history tracking data |
-| `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM |
-| `reprocess_all` | Batch re-extract all memories unconditionally, superseding both heuristic and LLM results |
+| `promote_high_value` | Promote high-value memories based on access patterns |
+| `lifecycle_review` | LLM-powered batch review for decay/promote/contradict |
+| `cross_project_transfer` | Detect and promote cross-project memories to global |
+| `rebuild_entity_graph` | Rebuild pre-computed entity neighborhoods |
+| `archive_session_traces` | Archive low-salience session-scoped memories |
+| `update_ranking_weights` | Update scoring weights from relevance feedback |
+| `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM. Uses endgame pipeline logic (triage, entity linking, processing ledger). |
+| `reprocess_all` | Batch re-extract all memories unconditionally, superseding both heuristic and LLM results. Uses endgame pipeline logic. |
 
 **Example:**
 
@@ -615,6 +674,60 @@ amm status
     "summary_count": 23,
     "episode_count": 7,
     "entity_count": 45
+  }
+}
+```
+
+---
+
+### reset-derived
+
+Delete all derived/canonical-derived data and reset event reflection markers while preserving raw events.
+
+```
+amm reset-derived [--confirm]
+```
+
+By default, this command is interactive and requires typing `yes` to proceed.
+
+| Flag | Description |
+|---|---|
+| `--confirm` | Skip the interactive prompt and execute immediately |
+
+**Safety warning:**
+
+- This deletes derived data (`memories`, `entities`, `relationships`, `claims`, `summaries`, `episodes`, `jobs`, embeddings, caches, and feedback).
+- Events are preserved.
+- A later `amm jobs run reflect` will re-extract from events.
+- This operation is irreversible.
+
+**Example (interactive):**
+
+```bash
+amm reset-derived
+```
+
+**Example (non-interactive):**
+
+```bash
+amm reset-derived --confirm
+```
+
+```json
+{
+  "ok": true,
+  "command": "reset_derived",
+  "timestamp": "2026-03-23T12:12:00Z",
+  "result": {
+    "events_preserved": 1234,
+    "events_reset_for_reflect": 1200,
+    "memories_deleted": 89,
+    "entities_deleted": 45,
+    "summaries_deleted": 23,
+    "episodes_deleted": 7,
+    "relationships_deleted": 34,
+    "jobs_deleted": 12,
+    "unreflected_after_reset": 1234
   }
 }
 ```

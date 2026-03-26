@@ -203,6 +203,16 @@ For fuller transparent memory capture, add hooks to `~/.claude/settings.json`. T
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-tool-use.sh pre"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "hooks": [
@@ -223,6 +233,16 @@ For fuller transparent memory capture, add hooks to `~/.claude/settings.json`. T
         ]
       }
     ],
+    "AssistantResponse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-assistant-message.sh"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -237,112 +257,19 @@ For fuller transparent memory capture, add hooks to `~/.claude/settings.json`. T
 }
 ```
 
-Create the hook scripts directory and scripts:
+The `on-session-end.sh` script typically triggers a lightweight maintenance sequence (e.g., `reflect` → `rebuild_indexes`) to ensure the session's knowledge is distilled immediately.
+
+Install the maintained hook scripts from this repo (instead of inlining them into docs):
 
 ```bash
 mkdir -p ~/.amm/hooks
-```
-
-**on-user-message.sh:**
-
-```bash
-#!/bin/bash
-AMM="${AMM_BIN:-/usr/local/bin/amm}"
-DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
-
-PROMPT=$(cat)
-
-echo "{
-  \"kind\": \"message_user\",
-  \"source_system\": \"claude-code\",
-  \"content\": $(printf '%s' "$PROMPT" | jq -Rs .),
-  \"session_id\": \"${SESSION_ID}\",
-  \"project_id\": \"${PROJECT_ID}\"
-}" | AMM_DB_PATH="$DB" "$AMM" ingest event --in -
-
-RECALL=$(AMM_DB_PATH="$DB" "$AMM" recall --mode ambient --session "$SESSION_ID" --project "$PROJECT_ID" "$PROMPT" 2>/dev/null)
-
-if [ -n "$RECALL" ]; then
-  echo "$RECALL"
-fi
-```
-
-**on-session-end.sh:**
-
-```bash
-#!/bin/bash
-AMM="${AMM_BIN:-/usr/local/bin/amm}"
-DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
-
-PAYLOAD=$(cat)
-
-EVENT=$(printf '%s' "$PAYLOAD" | python3 -c '
-import json, sys
-payload = json.load(sys.stdin)
-last_assistant_message = payload.get("last_assistant_message") or ""
-if last_assistant_message:
-    print(json.dumps({
-        "kind": "message_assistant",
-        "source_system": "claude-code",
-        "content": last_assistant_message,
-        "metadata": {"hook_event": "Stop"},
-    }))
-else:
-    print("")
-')
-
-[ -n "$EVENT" ] && printf '%s' "$EVENT" | AMM_DB_PATH="$DB" "$AMM" ingest event --in - >/dev/null 2>&1 || true
-printf '%s' '{"kind":"session_stop","source_system":"claude-code","content":"Claude stop hook executed.","metadata":{"hook_event":"Stop"}}' | AMM_DB_PATH="$DB" "$AMM" ingest event --in - >/dev/null 2>&1 || true
-
-AMM_DB_PATH="$DB" "$AMM" jobs run reflect >/dev/null 2>&1 || true
-AMM_DB_PATH="$DB" "$AMM" jobs run compress_history >/dev/null 2>&1 || true
-AMM_DB_PATH="$DB" "$AMM" jobs run consolidate_sessions >/dev/null 2>&1 || true
-AMM_DB_PATH="$DB" "$AMM" jobs run extract_claims >/dev/null 2>&1 || true
-AMM_DB_PATH="$DB" "$AMM" jobs run form_episodes >/dev/null 2>&1 || true
-```
-
-**on-tool-use.sh:**
-
-```bash
-#!/bin/bash
-AMM="${AMM_BIN:-/usr/local/bin/amm}"
-DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
-STATUS="${1:-success}"
-PAYLOAD=$(cat)
-
-EVENT=$(printf '%s' "$PAYLOAD" | STATUS="$STATUS" python3 -c '
-import json, os, sys
-payload = json.load(sys.stdin)
-tool_result = payload.get("tool_result") or payload.get("toolResult")
-tool_name = payload.get("tool_name") or payload.get("toolName") or "unknown_tool"
-tool_input = payload.get("tool_input") or payload.get("toolInput")
-content = tool_result if isinstance(tool_result, str) else json.dumps(tool_result)
-print(json.dumps({
-    "kind": "tool_result",
-    "source_system": "claude-code",
-    "content": content,
-    "metadata": {
-        "hook_event": "PostToolUse" if os.environ["STATUS"] == "success" else "PostToolUseFailure",
-        "tool_name": tool_name,
-        "tool_input": tool_input if isinstance(tool_input, str) or tool_input is None else json.dumps(tool_input),
-    },
-}))
-')
-
-printf '%s' "$EVENT" | AMM_DB_PATH="$DB" "$AMM" ingest event --in - >/dev/null 2>&1
-```
-
-Make them executable:
-
-```bash
-chmod +x ~/.amm/hooks/on-user-message.sh
-chmod +x ~/.amm/hooks/on-session-end.sh
-chmod +x ~/.amm/hooks/on-tool-use.sh
+cp /path/to/agent-memory-manager/examples/claude-code/*.sh ~/.amm/hooks/
+chmod +x ~/.amm/hooks/*.sh
 ```
 
 See `docs/integration.md` for more detail on the hook-based capture loop.
 
-This still does not give Claude a public per-turn assistant-response hook. The stronger setup captures tool results immediately, but the assistant text itself is still captured at `Stop` via `last_assistant_message`.
+With `UserPromptSubmit`, `AssistantResponse`, `PreToolUse`, and `PostToolUse*` enabled, AMM captures a full transcript stream: user messages, assistant responses, tool calls, and tool results (plus session-stop metadata).
 
 ---
 
@@ -423,7 +350,7 @@ SQLite allows only one writer at a time. To avoid "database is locked" errors, w
 
 ### Option A: Serialized Runner (Baseline)
 
-This approach uses a single script to run the **conservative baseline** maintenance jobs one after another. This is the recommended default for most users.
+This approach uses a single script to run the full maintenance sequence one after another. This is the recommended default for most users.
 
 ```bash
 # Add to crontab (crontab -e)
@@ -431,7 +358,14 @@ This approach uses a single script to run the **conservative baseline** maintena
 */30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /path/to/agent-memory-manager/examples/scripts/run-workers.sh >/dev/null 2>&1
 ```
 
-The baseline runner covers the full maintenance sequence: `reflect`, `compress_history`, `consolidate_sessions`, `merge_duplicates`, `extract_claims`, `form_episodes`, `detect_contradictions`, `decay_stale_memory`, `promote_high_value`, `archive_session_traces`, `rebuild_indexes`, and `cleanup_recall_history`.
+The baseline runner follows a 6-phase structure to ensure clean dependencies:
+
+1. **Phase 1: Reflection** — `reflect` extracts candidates from events.
+2. **Phase 2: Initial Indexing** — `rebuild_indexes` builds embeddings so downstream jobs can use semantic scoring.
+3. **Phase 3: Compression** — `compress_history`, `consolidate_sessions`, `build_topic_summaries` structure the raw history.
+4. **Phase 4: Linking** — `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `form_episodes` build the knowledge graph.
+5. **Phase 5: Quality** — `detect_contradictions`, `decay_stale_memory`, `promote_high_value`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces` refine the store.
+6. **Phase 6: Finalization** — `rebuild_indexes` (catches items from phases 3-5), `cleanup_recall_history`, `update_ranking_weights` finalize the cycle.
 
 ### Option B: Structural Repair (As Needed)
 
@@ -448,18 +382,31 @@ If you prefer individual cron entries, you must stagger them so they do not fire
 
 ```bash
 # Add to crontab (crontab -e)
-# Stagger light jobs by 5 minutes
+# Stagger frequent extraction/compression jobs
 0,30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run reflect >/dev/null 2>&1
 5,35 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run compress_history >/dev/null 2>&1
-
-# Stagger heavier jobs throughout the hour
 10 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run consolidate_sessions >/dev/null 2>&1
-15 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run extract_claims >/dev/null 2>&1
-20 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run form_episodes >/dev/null 2>&1
+15 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run build_topic_summaries >/dev/null 2>&1
 
-# Run the remaining baseline jobs at different times during the night
-0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run detect_contradictions >/dev/null 2>&1
-15 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run cleanup_recall_history >/dev/null 2>&1
+# Stagger extraction/enrichment and episode formation
+20 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run extract_claims >/dev/null 2>&1
+25 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run enrich_memories >/dev/null 2>&1
+30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run rebuild_entity_graph >/dev/null 2>&1
+35 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run form_episodes >/dev/null 2>&1
+
+# Run dedupe/lifecycle/value-transfer jobs on a slower cadence
+0 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run merge_duplicates >/dev/null 2>&1
+10 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run detect_contradictions >/dev/null 2>&1
+20 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run decay_stale_memory >/dev/null 2>&1
+30 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run promote_high_value >/dev/null 2>&1
+40 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run lifecycle_review >/dev/null 2>&1
+50 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run cross_project_transfer >/dev/null 2>&1
+
+# Run archive/index/ranking hygiene overnight
+0 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run archive_session_traces >/dev/null 2>&1
+10 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run rebuild_indexes >/dev/null 2>&1
+20 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run cleanup_recall_history >/dev/null 2>&1
+30 3 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run update_ranking_weights >/dev/null 2>&1
 ```
 
 ### Option D: systemd Timer (Linux)
@@ -477,13 +424,7 @@ Environment=AMM_DB_PATH=%h/.amm/amm.db
 # Environment=AMM_SUMMARIZER_ENDPOINT=https://api.openai.com/v1
 # Environment=AMM_SUMMARIZER_API_KEY=sk-your-key-here
 # Environment=AMM_SUMMARIZER_MODEL=gpt-4o-mini
-ExecStart=/usr/local/bin/amm jobs run reflect
-ExecStart=/usr/local/bin/amm jobs run compress_history
-ExecStart=/usr/local/bin/amm jobs run consolidate_sessions
-ExecStart=/usr/local/bin/amm jobs run extract_claims
-ExecStart=/usr/local/bin/amm jobs run form_episodes
-ExecStart=/usr/local/bin/amm jobs run detect_contradictions
-ExecStart=/usr/local/bin/amm jobs run cleanup_recall_history
+ExecStart=/path/to/agent-memory-manager/examples/scripts/run-workers.sh
 ```
 
 Create `~/.config/systemd/user/amm-maintenance.timer`:
@@ -522,6 +463,23 @@ The agent can run workers via MCP whenever it judges the time is right:
   }
 }
 ```
+
+---
+
+## Resetting and Re-distilling
+
+If you change your summarizer model, update your extraction prompts, or want to re-baseline memory quality from the same raw history:
+
+1. **Purge derived data** while keeping events:
+   ```bash
+   amm reset-derived --confirm
+   ```
+2. **Re-run the extraction pipeline**:
+   ```bash
+   # Run the full worker sequence
+   ./examples/scripts/run-workers.sh
+   ```
+   Or use `amm jobs run reprocess_all` to unconditionally re-extract using the full endgame logic (triage, entity linking, processing ledger).
 
 ---
 
