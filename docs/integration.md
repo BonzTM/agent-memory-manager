@@ -7,7 +7,7 @@ amm (Agent Memory Manager) integrates with agent runtimes through two mechanisms
 1. **Hooks** -- automatic capture of every interaction (events in, ambient recall out).
 2. **MCP tools** -- explicit agent-initiated recall, remember, and management.
 
-Both mechanisms ultimately call the same service layer (`internal/service/service.go`), so they produce identical behavior. Choose hooks for transparent capture with no agent awareness, MCP tools when the agent should actively manage its own memory, or combine both for full coverage.
+Both mechanisms ultimately call the same service layer (`internal/service/service.go`), so they produce identical behavior. Choose hooks for transparent capture with no agent awareness, MCP tools when the agent should actively manage its own memory, or combine both for full coverage. The shipped runtime guides now support full transcript capture across all five supported runtimes (Claude Code, Codex, OpenCode, OpenClaw, Hermes-agent).
 
 amm's maintenance jobs stay outside the runtime boundary. In practice, that means background work is triggered by external `amm jobs run <kind>` calls against the same SQLite database -- from cron, systemd, a runtime hook, or a runtime-owned background process -- rather than by an internal amm scheduler.
 
@@ -17,11 +17,11 @@ Use this page for the shared model, then jump to the runtime-specific companion 
 
 | Runtime | Best fit | Guide |
 |---|---|---|
-| Codex | MCP + hooks + repo instructions | [Codex Integration](codex-integration.md) |
-| Hermes-agent | MCP + hook handlers + scheduled workers | [Hermes-Agent Integration](hermes-agent-integration.md) |
-| OpenClaw | MCP sidecar + native hooks + explicit recall (`examples/openclaw/`) | [OpenClaw Integration](openclaw-integration.md) |
-| OpenCode | MCP + local plugin glue + explicit recall (`examples/opencode/`) | [OpenCode Integration](opencode-integration.md) |
-| Claude Code | Complete reference implementation shipped in this repo | This page + `examples/claude-code/` |
+| Codex | MCP + hooks + transcript-aware closeout import | [Codex Integration](codex-integration.md) |
+| Hermes-agent | MCP + hook handlers + full transcript flow helpers + scheduled workers | [Hermes-Agent Integration](hermes-agent-integration.md) |
+| OpenClaw | MCP sidecar + native hooks + full message/tool capture (`examples/openclaw/`) | [OpenClaw Integration](openclaw-integration.md) |
+| OpenCode | MCP + local plugin glue with full transcript-boundary capture (`examples/opencode/`) | [OpenCode Integration](opencode-integration.md) |
+| Claude Code | Complete reference implementation with user/assistant/tool lifecycle hooks | This page + `examples/claude-code/` |
 
 ---
 
@@ -52,6 +52,17 @@ Every runtime integration does not need perfect fidelity, but it should stay con
 
 When a field is unavailable, document the fallback behavior in the runtime guide instead of inventing fake completeness.
 
+### Canonical Event Kinds for Runtime Integrations
+
+Use these event kinds consistently across hook/plugin capture surfaces:
+
+- `session_start`
+- `message_user`
+- `tool_call`
+- `tool_result`
+- `message_assistant`
+- `session_stop`
+
 ---
 
 ## The Capture Loop
@@ -70,14 +81,18 @@ This loop runs on every turn of conversation, building a growing knowledge base 
 
 ## Hook-Based Integration (Claude Code Reference Implementation)
 
-Claude Code supports lifecycle hooks that fire at defined points in the interaction cycle. The shipped amm reference example uses four of them:
+Claude Code supports lifecycle hooks that fire at defined points in the interaction cycle. The shipped amm reference example uses six of them:
 
 - **`UserPromptSubmit`** -- fires when the user submits a prompt. Use this to ingest the user message and request ambient recall.
+- **`PreToolUse`** -- fires before a tool run. Use this to ingest `tool_call` events.
 - **`PostToolUse`** -- fires after a successful tool run. Use this to capture tool results into amm.
 - **`PostToolUseFailure`** -- fires after a failed tool run. Use this to capture errorful tool results into amm.
-- **`Stop`** -- fires when the session ends. Use this to capture the final assistant message and trigger warm-path maintenance jobs.
+- **`AssistantResponse`** -- fires when Claude emits an assistant response. Use this to capture per-turn assistant messages.
+- **`Stop`** -- fires when the session ends. Use this to emit `session_stop` and trigger warm-path maintenance jobs.
 
 ### Hook Script Pattern
+
+Use the maintained scripts in `examples/claude-code/` as source of truth (including `tool_call` capture on `PreToolUse`); snippets below illustrate the integration shape.
 
 ```bash
 #!/bin/bash
@@ -185,6 +200,16 @@ Add these to your `~/.claude/settings.json`:
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-tool-use.sh pre"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "hooks": [
@@ -205,6 +230,16 @@ Add these to your `~/.claude/settings.json`:
         ]
       }
     ],
+    "AssistantResponse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.amm/hooks/on-assistant-message.sh"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -219,7 +254,7 @@ Add these to your `~/.claude/settings.json`:
 }
 ```
 
-This is stronger than the earlier two-hook setup, but it still has one real limit: Claude's public hook surface does not provide a separate per-turn assistant-output hook, so the shipped example captures the final assistant message at `Stop` instead of after every reply.
+With `UserPromptSubmit`, `AssistantResponse`, `PreToolUse`, and `PostToolUse*` enabled, Claude captures the full transcript stream (user messages, assistant responses, tool calls, tool results, and lifecycle markers).
 
 ---
 
@@ -360,17 +395,27 @@ After events accumulate, background workers extract structure and consolidate kn
 
 | Job Kind | What It Does |
 |----------|--------------|
-| `reflect` | Scans unprocessed events, extracts candidate durable memories using phrase-cue heuristics (preferences, decisions, facts, open loops, constraints) |
+| `reflect` | Scans unprocessed events, triages signal/noise, and extracts candidate durable memories |
 | `compress_history` | Creates summaries from groups of raw events |
-| `consolidate_sessions` | Produces session-level summaries |
+| `consolidate_sessions` | Produces session/topic summaries and narrative consolidation |
+| `build_topic_summaries` | Builds topic-level hierarchical summaries |
+| `merge_duplicates` | Consolidates duplicate memories |
 | `extract_claims` | Extracts structured assertions from memories |
+| `enrich_memories` | Links entities and enriches explicitly remembered memories |
+| `rebuild_entity_graph` | Rebuilds pre-computed entity graph neighborhoods |
 | `form_episodes` | Groups related events into narrative episodes |
 | `detect_contradictions` | Finds conflicting memories |
 | `decay_stale_memory` | Reduces importance of untouched memories over time |
-| `merge_duplicates` | Consolidates duplicate memories |
+| `promote_high_value` | Promotes high-value memories based on usage/confidence |
+| `lifecycle_review` | Runs LLM-powered batch review for decay/promote/contradict decisions |
+| `cross_project_transfer` | Promotes reusable project memories into global scope |
+| `archive_session_traces` | Archives low-salience session memories |
 | `rebuild_indexes` | Rebuild FTS5 and generate embeddings for items missing them (incremental) |
 | `rebuild_indexes_full` | Rebuild FTS5 and regenerate all embeddings from scratch |
 | `cleanup_recall_history` | Purges recall tracking entries older than 7 days |
+| `reprocess` | Re-extracts memories from events while skipping LLM-processed events |
+| `reprocess_all` | Re-extracts all memories from events unconditionally |
+| `update_ranking_weights` | Updates scoring weights from relevance feedback |
 
 ### Running Workers
 
@@ -380,8 +425,10 @@ Workers can be triggered manually, on a schedule, or after a threshold of new ev
 
 We distinguish between **baseline** jobs (essential for daily memory building) and **optional** jobs (aggressive optimization or repair).
 
-- **Baseline Jobs**: The full sequence included in the shared runner: `reflect`, `compress_history`, `consolidate_sessions`, `merge_duplicates`, `extract_claims`, `form_episodes`, `detect_contradictions`, `decay_stale_memory`, `promote_high_value`, `archive_session_traces`, `rebuild_indexes`, `cleanup_recall_history`.
+- **Baseline Jobs**: The shared runner (`examples/scripts/run-workers.sh`) includes the full current sequence: `reflect`, `compress_history`, `consolidate_sessions`, `build_topic_summaries`, `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `form_episodes`, `detect_contradictions`, `decay_stale_memory`, `promote_high_value`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces`, `rebuild_indexes`, `cleanup_recall_history`, and `update_ranking_weights`.
 - **System Repairs**: Structural repairs like `repair_links` are not part of the baseline; run them via `amm repair --fix links` as needed.
+
+For migration/upgrade cleanup of derived data (keeping events), run `amm reset-derived` before re-running the baseline sequence.
 
 ```bash
 # Recommended: Serialized Baseline Runner

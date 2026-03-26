@@ -48,12 +48,15 @@ Hermes has its own hook registration model. This repo does **not** ship a Hermes
 The helper pattern is intentionally small:
 
 - pass the current user message to `examples/hermes-agent/on-user-message.sh`
-- optionally pass assistant output to your own step/response handler if you want full duplex capture
+- pass assistant responses to `examples/hermes-agent/on-assistant-message.sh`
+- pass tool call/result payloads to `examples/hermes-agent/on-tool-use.sh`
 - call `examples/hermes-agent/on-session-end.sh` when the session closes, or reuse the shared worker runner on a schedule
 
 ### Repo-shipped helper scripts
 
 - [`examples/hermes-agent/on-user-message.sh`](../examples/hermes-agent/on-user-message.sh)
+- [`examples/hermes-agent/on-assistant-message.sh`](../examples/hermes-agent/on-assistant-message.sh)
+- [`examples/hermes-agent/on-tool-use.sh`](../examples/hermes-agent/on-tool-use.sh)
 - [`examples/hermes-agent/on-session-end.sh`](../examples/hermes-agent/on-session-end.sh)
 
 These helpers are **amm-side scripts**, not Hermes runtime code. Your Hermes hook handler is responsible for deciding when to call them and what environment variables or stdin payloads to pass.
@@ -64,7 +67,8 @@ To keep the helper scripts runtime-neutral, pass the following values from your 
 
 - `AMM_SESSION_ID` — the current Hermes session/thread identifier
 - `AMM_PROJECT_ID` — a stable project identifier for scoped recall
-- stdin — the user message text for the message-entry helper
+- stdin — message text for `on-user-message.sh` and `on-assistant-message.sh`
+- stdin JSON for `on-tool-use.sh` with `tool_name`, `tool_input`, `tool_output`, `call_id`, and `status`
 
 That keeps the amm scripts reusable even if your Hermes hook wiring changes over time.
 
@@ -89,9 +93,11 @@ That means you can choose the trigger that fits Hermes best:
 
 Use a hot/warm/cold split:
 
-- **Hot path**: a Hermes hook handler passes the current user message to `on-user-message.sh`, which ingests the event and returns thin ambient recall hints
+- **Hot path**: Hermes hook handlers capture full transcript flow by sending user turns to `on-user-message.sh` (with ambient recall), assistant turns to `on-assistant-message.sh`, and tool activity to `on-tool-use.sh`
 - **Warm path**: a session-end or periodic Hermes task runs the repo-shipped warm-path sequence serially via `examples/hermes-agent/on-session-end.sh`
 - **Cold path**: scheduled jobs run the broader maintenance sequence through the shared runner or explicitly staggered entries
+
+The repo-shipped session-end sequence runs `reflect`, `compress_history`, `consolidate_sessions`, `form_episodes`, `enrich_memories`, `rebuild_entity_graph`, and `lifecycle_review`.
 
 That gives you immediate context injection without forcing the heavy jobs into the interactive loop.
 
@@ -114,7 +120,9 @@ If you want a Hermes-oriented instruction block, use something like this:
 - `amm-mcp` starts successfully with the configured `AMM_DB_PATH`
 - Hermes can see and call the `amm` MCP server
 - your Hermes hook handler can call `examples/hermes-agent/on-user-message.sh` with a sample prompt
-- amm history shows the captured event after the helper runs
+- your Hermes hook handler can call `examples/hermes-agent/on-assistant-message.sh` with a sample response
+- your Hermes hook handler can call `examples/hermes-agent/on-tool-use.sh` with sample JSON payload
+- amm history shows captured `message_user`, `message_assistant`, `tool_call`, and `tool_result` events after helpers run
 - `examples/hermes-agent/on-session-end.sh` can run without shell errors
 - scheduled worker runs create summaries or memories as expected
 
@@ -123,4 +131,4 @@ If you want a Hermes-oriented instruction block, use something like this:
 - a built-in amm scheduler
 - a Hermes-native plugin or SDK package in this repository
 - a one-size-fits-all Hermes hook registration schema
-- automatic execution of `maintenance.auto_*` flags without an external trigger
+- automatic execution of helper scripts or `maintenance.auto_*` flags without an external trigger

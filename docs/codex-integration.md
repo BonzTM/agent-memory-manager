@@ -77,7 +77,7 @@ The example files in [`examples/codex/`](../examples/codex/) show one grounded p
 
 - `session-start.py` logs a lightweight session-start event
 - `user-prompt-submit.py` ingests the user prompt and turns amm recall results into Codex hook `additionalContext`
-- `session-stop.py` imports assistant/tool history from `transcript_path` when possible, falls back to `last_assistant_message` when not, then records concise session metadata and runs maintenance jobs
+- `session-stop.py` imports assistant/tool history from `transcript_path` when possible (assistant messages, tool calls, and tool results), falls back to `last_assistant_message` when not, then records concise session metadata and runs maintenance jobs
 - `config.toml` enables `codex_hooks` and registers `amm-mcp`
 - `hooks.json` is the separate Codex hook manifest that wires those scripts into Codex
 
@@ -190,9 +190,10 @@ Codex hook payloads expose `session_id` and optional `transcript_path`, and `Use
 - prompt capture happens immediately in `UserPromptSubmit`
 - session metadata is captured in `SessionStart`
 - `Stop` tries to import structured assistant/tool history from the transcript file before it emits a concise `session_stop`
+- transcript import captures assistant messages plus `tool_call` and `tool_result` events from response items
 - if transcript import yields no assistant message, `Stop` falls back to `last_assistant_message`
 
-This repo still does **not** claim that Codex exposes a public tool-result hook. The richer tool history comes from local stop-time transcript parsing, not from a documented Codex lifecycle hook.
+Codex does not need a dedicated tool lifecycle hook for this pattern: richer tool history is captured from local stop-time transcript parsing.
 
 ## Verification Checklist
 
@@ -208,6 +209,5 @@ This repo still does **not** claim that Codex exposes a public tool-result hook.
 
 - a built-in amm scheduler or daemon
 - a Codex-native amm plugin package
-- a public Codex tool-result hook surface
 - automatic consumption of `maintenance.auto_*` flags by a running worker loop
 - a one-size-fits-all Codex transcript importer

@@ -73,7 +73,7 @@ examples/openclaw/
 
 The example uses hooks for **capture and maintenance only**:
 
-- `amm-memory-capture` listens to `message:preprocessed` and `message:sent`
+- `amm-memory-capture` listens to `message:preprocessed`, `message:sent`, `tool:called`, and `tool:completed` (plus compatible `function:*` payloads)
 - `amm-session-maintenance` listens to `command:stop`
 
 This guide intentionally does **not** claim that OpenClaw message hooks are a supported mutation surface for automatic ambient recall injection. The docs expose `bodyForAgent` for inspection, but they do not clearly document mutation semantics. Ambient recall therefore stays on the explicit MCP path.
@@ -95,10 +95,12 @@ The repo-shipped flow looks like this:
 
 1. OpenClaw receives an inbound message.
 2. `amm-memory-capture` records the enriched inbound body as a `message_user` event.
-3. The agent can call `amm_recall` explicitly when memory context is needed.
-4. When OpenClaw sends a reply, `amm-memory-capture` records a `message_assistant` event.
-5. When `/stop` is issued, `amm-session-maintenance` records a stop event and runs the warm-path jobs.
-6. On a longer cadence, a host-level scheduler runs the cold-path jobs against the same amm database.
+3. When OpenClaw invokes a tool/function, `amm-memory-capture` records a `tool_call` event with tool name and input arguments.
+4. When that tool/function returns, `amm-memory-capture` records a `tool_result` event with output content.
+5. The agent can call `amm_recall` explicitly when memory context is needed.
+6. When OpenClaw sends a reply, `amm-memory-capture` records a `message_assistant` event.
+7. When `/stop` is issued, `amm-session-maintenance` records a stop event and runs the warm-path jobs.
+8. On a longer cadence, a host-level scheduler runs the cold-path jobs against the same amm database.
 
 That gives you a real OpenClaw integration without coupling amm to undocumented hook mutation internals.
 
@@ -158,7 +160,7 @@ If you want an OpenClaw-oriented instructions block, use something like this:
 
 - `amm-mcp` can be launched by OpenClaw as a subprocess
 - the OpenClaw runtime can call `amm_recall` successfully
-- the `amm-memory-capture` hook can ingest inbound and outbound message events into amm history
+- the `amm-memory-capture` hook can ingest inbound/outbound message events and tool call/result events into amm history
 - explicit `amm_recall` returns thin hints when the agent requests them
 - session-end or scheduled jobs can run the serialized warm-path jobs (`reflect`, `compress_history`, `consolidate_sessions`)
 - the same `AMM_DB_PATH` is visible to every OpenClaw-owned subprocess that calls amm
