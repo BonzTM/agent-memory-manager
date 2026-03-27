@@ -73,7 +73,6 @@ var (
 		"cleanup_recall_history": true,
 		"reprocess":              true,
 		"reprocess_all":          true,
-		"promote_high_value":     true,
 		"lifecycle_review":       true,
 		"cross_project_transfer": true,
 		"rebuild_entity_graph":   true,

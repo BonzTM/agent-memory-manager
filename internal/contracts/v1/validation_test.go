@@ -212,7 +212,6 @@ func TestValidateRunJob(t *testing.T) {
 		"cleanup_recall_history",
 		"reprocess",
 		"reprocess_all",
-		"promote_high_value",
 		"lifecycle_review",
 		"cross_project_transfer",
 		"archive_session_traces",

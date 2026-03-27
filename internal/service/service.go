@@ -370,7 +370,9 @@ func (s *AMMService) Remember(ctx context.Context, memory *core.Memory) (*core.M
 			old.SupersededBy = memory.ID
 			old.SupersededAt = &now
 			old.UpdatedAt = now
-			_ = s.repo.UpdateMemory(ctx, old)
+			if err := s.repo.UpdateMemory(ctx, old); err != nil {
+				slog.Error("failed to supersede memory", "old_id", old.ID, "new_id", memory.ID, "error", err)
+			}
 		}
 	}
 
@@ -488,7 +490,9 @@ func (s *AMMService) UpdateMemory(ctx context.Context, memory *core.Memory) (*co
 			old.SupersededBy = memory.ID
 			old.SupersededAt = &now
 			old.UpdatedAt = now
-			_ = s.repo.UpdateMemory(ctx, old)
+			if err := s.repo.UpdateMemory(ctx, old); err != nil {
+				slog.Error("failed to supersede memory", "old_id", old.ID, "new_id", memory.ID, "error", err)
+			}
 		}
 	}
 
@@ -806,12 +810,6 @@ func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error)
 		jobErr = err
 		if jobErr == nil {
 			job.Result = map[string]string{"action": "reprocess_all", "memories_created": fmt.Sprintf("%d", created), "memories_superseded": fmt.Sprintf("%d", superseded)}
-		}
-	case "promote_high_value":
-		count, err := s.PromoteHighValueMemories(ctx)
-		jobErr = err
-		if jobErr == nil {
-			job.Result = map[string]string{"action": "promote_high_value", "memories_promoted": fmt.Sprintf("%d", count)}
 		}
 	case "lifecycle_review":
 		count, err := s.LifecycleReview(ctx)
