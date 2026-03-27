@@ -122,6 +122,7 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 		}
 
 		resolvedActions := make(map[string]lifecycleMutationAction, len(batchByID))
+		mutatedMemoryIDs := make(map[string]bool, len(batchByID))
 		resolveAction := func(memoryID string, action lifecycleMutationAction) {
 			if memoryID == "" {
 				return
@@ -160,6 +161,7 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 			newImportance := minFloat(mem.Importance+lifecyclePromoteDelta, lifecyclePromoteCap)
 			if newImportance != mem.Importance {
 				mem.Importance = newImportance
+				mutatedMemoryIDs[mem.ID] = true
 				affected++
 			}
 		}
@@ -175,6 +177,7 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 			newImportance := maxFloat(mem.Importance-lifecycleDecayDelta, lifecycleDecayFloor)
 			if newImportance != mem.Importance {
 				mem.Importance = newImportance
+				mutatedMemoryIDs[mem.ID] = true
 				affected++
 			}
 		}
@@ -189,6 +192,7 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 			}
 			if mem.Status != core.MemoryStatusArchived {
 				mem.Status = core.MemoryStatusArchived
+				mutatedMemoryIDs[mem.ID] = true
 				affected++
 			}
 		}
@@ -207,6 +211,7 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 				merge.SupersededBy = keep.ID
 				supNow := now
 				merge.SupersededAt = &supNow
+				mutatedMemoryIDs[merge.ID] = true
 				affected++
 			}
 		}
@@ -220,8 +225,13 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 		}
 
 		for _, mem := range batch {
+			originalUpdatedAt := mem.UpdatedAt
 			markLifecycleReviewed(mem, modelName)
-			mem.UpdatedAt = time.Now().UTC()
+			if mutatedMemoryIDs[mem.ID] {
+				mem.UpdatedAt = time.Now().UTC()
+			} else {
+				mem.UpdatedAt = originalUpdatedAt
+			}
 			if err := s.repo.UpdateMemory(ctx, mem); err != nil {
 				return affected, fmt.Errorf("update lifecycle-reviewed memory %s: %w", mem.ID, err)
 			}

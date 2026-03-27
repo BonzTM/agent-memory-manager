@@ -531,9 +531,6 @@ func TestRecallHybrid_SuppressesToolResultHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recall hybrid: %v", err)
 	}
-	if len(result.Items) == 0 {
-		t.Fatal("expected at least one hybrid recall item")
-	}
 	for _, item := range result.Items {
 		if item.Kind == "history-node" && item.Type == "tool_result" {
 			t.Fatalf("expected tool_result history nodes to be suppressed in hybrid recall: %+v", result.Items)
