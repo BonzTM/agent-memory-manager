@@ -21,12 +21,35 @@ const (
 	// CmdUpdateMemory updates an existing memory.
 	CmdUpdateMemory = "update_memory"
 	CmdShare        = "share"
+	CmdForget       = "forget"
 	// CmdPolicyList lists ingestion policies.
 	CmdPolicyList = "policy_list"
 	// CmdPolicyAdd adds an ingestion policy.
 	CmdPolicyAdd = "policy_add"
 	// CmdPolicyRemove removes an ingestion policy by ID.
 	CmdPolicyRemove = "policy_remove"
+	// CmdRegisterProject stores a new project.
+	CmdRegisterProject = "register_project"
+	// CmdGetProject retrieves a project by ID.
+	CmdGetProject = "get_project"
+	// CmdListProjects lists registered projects.
+	CmdListProjects = "list_projects"
+	// CmdRemoveProject removes a project by ID.
+	CmdRemoveProject = "remove_project"
+	// CmdAddRelationship stores a relationship.
+	CmdAddRelationship = "add_relationship"
+	// CmdGetRelationship retrieves a relationship by ID.
+	CmdGetRelationship = "get_relationship"
+	// CmdListRelationships lists relationships.
+	CmdListRelationships = "list_relationships"
+	// CmdRemoveRelationship removes a relationship by ID.
+	CmdRemoveRelationship = "remove_relationship"
+	// CmdGetSummary retrieves a summary by ID.
+	CmdGetSummary = "get_summary"
+	// CmdGetEpisode retrieves an episode by ID.
+	CmdGetEpisode = "get_episode"
+	// CmdGetEntity retrieves an entity by ID.
+	CmdGetEntity = "get_entity"
 	// CmdRunJob executes a maintenance job.
 	CmdRunJob = "run_job"
 	// CmdRepair runs integrity checks and optional fixes.
@@ -90,6 +113,10 @@ var CommandRegistry = map[string]CommandInfo{
 		Name:        CmdShare,
 		Description: "Update the privacy level of an existing memory.",
 	},
+	CmdForget: {
+		Name:        CmdForget,
+		Description: "Forget (retract) a memory by ID.",
+	},
 	CmdPolicyList: {
 		Name:        CmdPolicyList,
 		Description: "List ingestion policies.",
@@ -101,6 +128,50 @@ var CommandRegistry = map[string]CommandInfo{
 	CmdPolicyRemove: {
 		Name:        CmdPolicyRemove,
 		Description: "Remove an ingestion policy by ID.",
+	},
+	CmdRegisterProject: {
+		Name:        CmdRegisterProject,
+		Description: "Register a project.",
+	},
+	CmdGetProject: {
+		Name:        CmdGetProject,
+		Description: "Retrieve a project by ID.",
+	},
+	CmdListProjects: {
+		Name:        CmdListProjects,
+		Description: "List all registered projects.",
+	},
+	CmdRemoveProject: {
+		Name:        CmdRemoveProject,
+		Description: "Remove a project by ID.",
+	},
+	CmdAddRelationship: {
+		Name:        CmdAddRelationship,
+		Description: "Add a relationship between entities.",
+	},
+	CmdGetRelationship: {
+		Name:        CmdGetRelationship,
+		Description: "Retrieve a relationship by ID.",
+	},
+	CmdListRelationships: {
+		Name:        CmdListRelationships,
+		Description: "List relationships.",
+	},
+	CmdRemoveRelationship: {
+		Name:        CmdRemoveRelationship,
+		Description: "Remove a relationship by ID.",
+	},
+	CmdGetSummary: {
+		Name:        CmdGetSummary,
+		Description: "Retrieve a summary by ID.",
+	},
+	CmdGetEpisode: {
+		Name:        CmdGetEpisode,
+		Description: "Retrieve an episode by ID.",
+	},
+	CmdGetEntity: {
+		Name:        CmdGetEntity,
+		Description: "Retrieve an entity by ID.",
 	},
 	CmdRunJob: {
 		Name:        CmdRunJob,

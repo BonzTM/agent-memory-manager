@@ -113,6 +113,8 @@ func Run(args []string) error {
 		return runGetMemory(cmdArgs)
 	case "share":
 		return runShare(cmdArgs)
+	case "forget":
+		return runForget(cmdArgs)
 	case "policy":
 		if len(cmdArgs) == 0 {
 			return fmt.Errorf("policy requires subcommand: list, add, remove")
@@ -127,6 +129,53 @@ func Run(args []string) error {
 		default:
 			return fmt.Errorf("unknown policy subcommand: %s", cmdArgs[0])
 		}
+	case "project":
+		if len(cmdArgs) == 0 {
+			return fmt.Errorf("project requires subcommand: add, show, list, remove")
+		}
+		switch cmdArgs[0] {
+		case "add":
+			return runProjectAdd(cmdArgs[1:])
+		case "show":
+			return runProjectShow(cmdArgs[1:])
+		case "list":
+			return runProjectList(cmdArgs[1:])
+		case "remove":
+			return runProjectRemove(cmdArgs[1:])
+		default:
+			return fmt.Errorf("unknown project subcommand: %s", cmdArgs[0])
+		}
+	case "relationship":
+		if len(cmdArgs) == 0 {
+			return fmt.Errorf("relationship requires subcommand: add, show, list, remove")
+		}
+		switch cmdArgs[0] {
+		case "add":
+			return runRelationshipAdd(cmdArgs[1:])
+		case "show":
+			return runRelationshipShow(cmdArgs[1:])
+		case "list":
+			return runRelationshipList(cmdArgs[1:])
+		case "remove":
+			return runRelationshipRemove(cmdArgs[1:])
+		default:
+			return fmt.Errorf("unknown relationship subcommand: %s", cmdArgs[0])
+		}
+	case "summary":
+		if len(cmdArgs) > 0 && cmdArgs[0] == "show" {
+			return runSummaryShow(cmdArgs[1:])
+		}
+		return runSummaryShow(cmdArgs)
+	case "episode":
+		if len(cmdArgs) > 0 && cmdArgs[0] == "show" {
+			return runEpisodeShow(cmdArgs[1:])
+		}
+		return runEpisodeShow(cmdArgs)
+	case "entity":
+		if len(cmdArgs) > 0 && cmdArgs[0] == "show" {
+			return runEntityShow(cmdArgs[1:])
+		}
+		return runEntityShow(cmdArgs)
 	case "jobs":
 		if len(cmdArgs) > 0 && cmdArgs[0] == "run" {
 			return runJob(cmdArgs[1:])
@@ -182,6 +231,7 @@ var boolFlags = map[string]bool{
 	"json":    true,
 	"check":   true,
 	"confirm": true,
+	"explain": true,
 }
 
 func positionalArgs(args []string) []string {
@@ -216,9 +266,21 @@ Core Commands:
   memory [show] <id>      Show a memory
   memory update <id>      Update a memory
   share <id>              Change memory privacy level
+  forget <id>             Forget (retract) a memory
   policy list             List ingestion policies
   policy add              Add an ingestion policy
   policy remove <id>      Remove an ingestion policy
+  project add             Register a project
+  project show <id>       Show a project
+  project list            List projects
+  project remove <id>     Remove a project
+  relationship add        Add a relationship
+  relationship show <id>  Show a relationship
+  relationship list       List relationships
+  relationship remove <id> Remove a relationship
+  summary show <id>       Show a summary
+  episode show <id>       Show an episode
+  entity show <id>        Show an entity
   jobs run <kind>         Run a maintenance job
   explain-recall          Explain why an item surfaced
   repair                  Run integrity checks/repairs
@@ -485,6 +547,7 @@ func runRecall(args []string) error {
 		ProjectID: flags["project"],
 		SessionID: flags["session"],
 		AgentID:   flags["agent-id"],
+		Explain:   flags["explain"] == "true",
 	}
 
 	ctx := context.Background()
@@ -735,6 +798,41 @@ func runShare(args []string) error {
 	return nil
 }
 
+func runForget(args []string) error {
+	pos := positionalArgs(args)
+	if len(pos) == 0 {
+		logCLIError("cli forget failed", fmt.Errorf("memory ID required"))
+		fail("forget", "VALIDATION_ERROR", "memory ID required")
+		return fmt.Errorf("memory ID required")
+	}
+
+	req := &v1.ForgetRequest{ID: pos[0]}
+	if err := v1.ValidateForget(req); err != nil {
+		logCLIError("cli forget failed", err, "id", req.ID)
+		fail("forget", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli forget failed", err, "id", req.ID)
+		fail("forget", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	result, err := svc.ForgetMemory(ctx, req.ID)
+	if err != nil {
+		logCLIError("cli forget failed", err, "id", req.ID)
+		fail("forget", "FORGET_ERROR", err.Error())
+		return err
+	}
+
+	success("forget", result)
+	return nil
+}
+
 func runPolicyList(_ []string) error {
 	slog.Debug("cli policy_list start")
 	svc, cleanup, err := getService()
@@ -835,6 +933,391 @@ func runPolicyRemove(args []string) error {
 	}
 	slog.Debug("cli policy_remove succeeded", "id", pos[0])
 	success("policy_remove", map[string]string{"id": pos[0], "status": "removed"})
+	return nil
+}
+
+func runProjectAdd(args []string) error {
+	flags := parseFlags(args)
+	req := &v1.RegisterProjectRequest{
+		Name:        flags["name"],
+		Path:        flags["path"],
+		Description: flags["description"],
+	}
+	if err := v1.ValidateRegisterProject(req); err != nil {
+		logCLIError("cli project_add failed", err, "name", req.Name)
+		fail("project_add", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli project_add failed", err, "name", req.Name)
+		fail("project_add", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	result, err := svc.RegisterProject(ctx, &core.Project{
+		Name:        req.Name,
+		Path:        req.Path,
+		Description: req.Description,
+	})
+	if err != nil {
+		logCLIError("cli project_add failed", err, "name", req.Name)
+		fail("project_add", "ADD_ERROR", err.Error())
+		return err
+	}
+
+	success("project_add", result)
+	return nil
+}
+
+func runProjectShow(args []string) error {
+	pos := positionalArgs(args)
+	if len(pos) == 0 {
+		err := fmt.Errorf("project ID required")
+		logCLIError("cli project show failed", err)
+		fail("project", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+	req := &v1.GetProjectRequest{ID: pos[0]}
+	if err := v1.ValidateGetProject(req); err != nil {
+		logCLIError("cli project show failed", err, "id", req.ID)
+		fail("project", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli project show failed", err, "id", req.ID)
+		fail("project", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	result, err := svc.GetProject(ctx, req.ID)
+	if err != nil {
+		logCLIError("cli project show failed", err, "id", req.ID)
+		fail("project", "GET_ERROR", err.Error())
+		return err
+	}
+
+	success("project", result)
+	return nil
+}
+
+func runProjectList(_ []string) error {
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli project_list failed", err)
+		fail("project_list", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	result, err := svc.ListProjects(ctx)
+	if err != nil {
+		logCLIError("cli project_list failed", err)
+		fail("project_list", "LIST_ERROR", err.Error())
+		return err
+	}
+
+	success("project_list", result)
+	return nil
+}
+
+func runProjectRemove(args []string) error {
+	pos := positionalArgs(args)
+	if len(pos) == 0 {
+		err := fmt.Errorf("project ID required")
+		logCLIError("cli project_remove failed", err)
+		fail("project_remove", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+	req := &v1.RemoveProjectRequest{ID: pos[0]}
+	if err := v1.ValidateRemoveProject(req); err != nil {
+		logCLIError("cli project_remove failed", err, "id", req.ID)
+		fail("project_remove", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli project_remove failed", err, "id", req.ID)
+		fail("project_remove", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	if err := svc.RemoveProject(ctx, req.ID); err != nil {
+		logCLIError("cli project_remove failed", err, "id", req.ID)
+		fail("project_remove", "REMOVE_ERROR", err.Error())
+		return err
+	}
+
+	success("project_remove", map[string]string{"id": req.ID, "status": "removed"})
+	return nil
+}
+
+func runRelationshipAdd(args []string) error {
+	flags := parseFlags(args)
+	req := &v1.AddRelationshipRequest{
+		FromEntityID:     flags["from"],
+		ToEntityID:       flags["to"],
+		RelationshipType: flags["type"],
+	}
+	if err := v1.ValidateAddRelationship(req); err != nil {
+		logCLIError("cli relationship_add failed", err, "from_entity_id", req.FromEntityID, "to_entity_id", req.ToEntityID)
+		fail("relationship_add", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli relationship_add failed", err, "from_entity_id", req.FromEntityID, "to_entity_id", req.ToEntityID)
+		fail("relationship_add", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	result, err := svc.AddRelationship(ctx, &core.Relationship{
+		FromEntityID:     req.FromEntityID,
+		ToEntityID:       req.ToEntityID,
+		RelationshipType: req.RelationshipType,
+	})
+	if err != nil {
+		logCLIError("cli relationship_add failed", err, "from_entity_id", req.FromEntityID, "to_entity_id", req.ToEntityID)
+		fail("relationship_add", "ADD_ERROR", err.Error())
+		return err
+	}
+
+	success("relationship_add", result)
+	return nil
+}
+
+func runRelationshipShow(args []string) error {
+	pos := positionalArgs(args)
+	if len(pos) == 0 {
+		err := fmt.Errorf("relationship ID required")
+		logCLIError("cli relationship show failed", err)
+		fail("relationship", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+	req := &v1.GetRelationshipRequest{ID: pos[0]}
+	if err := v1.ValidateGetRelationship(req); err != nil {
+		logCLIError("cli relationship show failed", err, "id", req.ID)
+		fail("relationship", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli relationship show failed", err, "id", req.ID)
+		fail("relationship", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	result, err := svc.GetRelationship(ctx, req.ID)
+	if err != nil {
+		logCLIError("cli relationship show failed", err, "id", req.ID)
+		fail("relationship", "GET_ERROR", err.Error())
+		return err
+	}
+
+	success("relationship", result)
+	return nil
+}
+
+func runRelationshipList(args []string) error {
+	flags := parseFlags(args)
+	limit := 0
+	if raw := strings.TrimSpace(flags["limit"]); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			logCLIError("cli relationship_list failed", err, "limit", raw)
+			fail("relationship_list", "VALIDATION_ERROR", "limit must be an integer")
+			return fmt.Errorf("limit must be an integer")
+		}
+		limit = parsed
+	}
+	req := &v1.ListRelationshipsRequest{
+		EntityID:         flags["entity-id"],
+		RelationshipType: flags["relationship-type"],
+		Limit:            limit,
+	}
+	if err := v1.ValidateListRelationships(req); err != nil {
+		logCLIError("cli relationship_list failed", err)
+		fail("relationship_list", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli relationship_list failed", err)
+		fail("relationship_list", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	result, err := svc.ListRelationships(ctx, core.ListRelationshipsOptions{
+		EntityID:         req.EntityID,
+		RelationshipType: req.RelationshipType,
+		Limit:            req.Limit,
+	})
+	if err != nil {
+		logCLIError("cli relationship_list failed", err)
+		fail("relationship_list", "LIST_ERROR", err.Error())
+		return err
+	}
+
+	success("relationship_list", result)
+	return nil
+}
+
+func runRelationshipRemove(args []string) error {
+	pos := positionalArgs(args)
+	if len(pos) == 0 {
+		err := fmt.Errorf("relationship ID required")
+		logCLIError("cli relationship_remove failed", err)
+		fail("relationship_remove", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+	req := &v1.RemoveRelationshipRequest{ID: pos[0]}
+	if err := v1.ValidateRemoveRelationship(req); err != nil {
+		logCLIError("cli relationship_remove failed", err, "id", req.ID)
+		fail("relationship_remove", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli relationship_remove failed", err, "id", req.ID)
+		fail("relationship_remove", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	if err := svc.RemoveRelationship(ctx, req.ID); err != nil {
+		logCLIError("cli relationship_remove failed", err, "id", req.ID)
+		fail("relationship_remove", "REMOVE_ERROR", err.Error())
+		return err
+	}
+
+	success("relationship_remove", map[string]string{"id": req.ID, "status": "removed"})
+	return nil
+}
+
+func runSummaryShow(args []string) error {
+	pos := positionalArgs(args)
+	if len(pos) == 0 {
+		err := fmt.Errorf("summary ID required")
+		logCLIError("cli summary show failed", err)
+		fail("summary", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+	req := &v1.GetSummaryRequest{ID: pos[0]}
+	if err := v1.ValidateGetSummary(req); err != nil {
+		logCLIError("cli summary show failed", err, "id", req.ID)
+		fail("summary", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli summary show failed", err, "id", req.ID)
+		fail("summary", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	result, err := svc.GetSummary(ctx, req.ID)
+	if err != nil {
+		logCLIError("cli summary show failed", err, "id", req.ID)
+		fail("summary", "GET_ERROR", err.Error())
+		return err
+	}
+
+	success("summary", result)
+	return nil
+}
+
+func runEpisodeShow(args []string) error {
+	pos := positionalArgs(args)
+	if len(pos) == 0 {
+		err := fmt.Errorf("episode ID required")
+		logCLIError("cli episode show failed", err)
+		fail("episode", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+	req := &v1.GetEpisodeRequest{ID: pos[0]}
+	if err := v1.ValidateGetEpisode(req); err != nil {
+		logCLIError("cli episode show failed", err, "id", req.ID)
+		fail("episode", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli episode show failed", err, "id", req.ID)
+		fail("episode", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	result, err := svc.GetEpisode(ctx, req.ID)
+	if err != nil {
+		logCLIError("cli episode show failed", err, "id", req.ID)
+		fail("episode", "GET_ERROR", err.Error())
+		return err
+	}
+
+	success("episode", result)
+	return nil
+}
+
+func runEntityShow(args []string) error {
+	pos := positionalArgs(args)
+	if len(pos) == 0 {
+		err := fmt.Errorf("entity ID required")
+		logCLIError("cli entity show failed", err)
+		fail("entity", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+	req := &v1.GetEntityRequest{ID: pos[0]}
+	if err := v1.ValidateGetEntity(req); err != nil {
+		logCLIError("cli entity show failed", err, "id", req.ID)
+		fail("entity", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli entity show failed", err, "id", req.ID)
+		fail("entity", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+	result, err := svc.GetEntity(ctx, req.ID)
+	if err != nil {
+		logCLIError("cli entity show failed", err, "id", req.ID)
+		fail("entity", "GET_ERROR", err.Error())
+		return err
+	}
+
+	success("entity", result)
 	return nil
 }
 
@@ -1277,6 +1760,23 @@ func dispatchEnvelope(ctx context.Context, svc core.Service, envelope CommandEnv
 		}
 		success("run", updated)
 
+	case "forget":
+		var payload v1.ForgetRequest
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			fail("run", "PARSE_ERROR", err.Error())
+			return err
+		}
+		if err := v1.ValidateForget(&payload); err != nil {
+			fail("run", "VALIDATION_ERROR", err.Error())
+			return err
+		}
+		forgotten, err := svc.ForgetMemory(ctx, payload.ID)
+		if err != nil {
+			fail("run", "FORGET_ERROR", err.Error())
+			return err
+		}
+		success("run", forgotten)
+
 	case "policy_list":
 		policies, err := svc.ListPolicies(ctx)
 		if err != nil {
@@ -1311,6 +1811,166 @@ func dispatchEnvelope(ctx context.Context, svc core.Service, envelope CommandEnv
 			return err
 		}
 		success("run", map[string]string{"id": payload.ID, "status": "removed"})
+
+	case "register_project":
+		var project core.Project
+		if err := json.Unmarshal(envelope.Payload, &project); err != nil {
+			fail("run", "PARSE_ERROR", err.Error())
+			return err
+		}
+		result, err := svc.RegisterProject(ctx, &project)
+		if err != nil {
+			fail("run", "ADD_ERROR", err.Error())
+			return err
+		}
+		success("run", result)
+
+	case "get_project":
+		var payload struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			fail("run", "PARSE_ERROR", err.Error())
+			return err
+		}
+		result, err := svc.GetProject(ctx, payload.ID)
+		if err != nil {
+			fail("run", "GET_ERROR", err.Error())
+			return err
+		}
+		success("run", result)
+
+	case "list_projects":
+		result, err := svc.ListProjects(ctx)
+		if err != nil {
+			fail("run", "LIST_ERROR", err.Error())
+			return err
+		}
+		success("run", result)
+
+	case "remove_project":
+		var payload struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			fail("run", "PARSE_ERROR", err.Error())
+			return err
+		}
+		if err := svc.RemoveProject(ctx, payload.ID); err != nil {
+			fail("run", "REMOVE_ERROR", err.Error())
+			return err
+		}
+		success("run", map[string]string{"id": payload.ID, "status": "removed"})
+
+	case "add_relationship":
+		var rel core.Relationship
+		if err := json.Unmarshal(envelope.Payload, &rel); err != nil {
+			fail("run", "PARSE_ERROR", err.Error())
+			return err
+		}
+		result, err := svc.AddRelationship(ctx, &rel)
+		if err != nil {
+			fail("run", "ADD_ERROR", err.Error())
+			return err
+		}
+		success("run", result)
+
+	case "get_relationship":
+		var payload struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			fail("run", "PARSE_ERROR", err.Error())
+			return err
+		}
+		result, err := svc.GetRelationship(ctx, payload.ID)
+		if err != nil {
+			fail("run", "GET_ERROR", err.Error())
+			return err
+		}
+		success("run", result)
+
+	case "list_relationships":
+		var payload struct {
+			EntityID         string `json:"entity_id,omitempty"`
+			RelationshipType string `json:"relationship_type,omitempty"`
+			Limit            int    `json:"limit,omitempty"`
+		}
+		if len(envelope.Payload) > 0 {
+			if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+				fail("run", "PARSE_ERROR", err.Error())
+				return err
+			}
+		}
+		result, err := svc.ListRelationships(ctx, core.ListRelationshipsOptions{
+			EntityID:         payload.EntityID,
+			RelationshipType: payload.RelationshipType,
+			Limit:            payload.Limit,
+		})
+		if err != nil {
+			fail("run", "LIST_ERROR", err.Error())
+			return err
+		}
+		success("run", result)
+
+	case "remove_relationship":
+		var payload struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			fail("run", "PARSE_ERROR", err.Error())
+			return err
+		}
+		if err := svc.RemoveRelationship(ctx, payload.ID); err != nil {
+			fail("run", "REMOVE_ERROR", err.Error())
+			return err
+		}
+		success("run", map[string]string{"id": payload.ID, "status": "removed"})
+
+	case "get_summary":
+		var payload struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			fail("run", "PARSE_ERROR", err.Error())
+			return err
+		}
+		result, err := svc.GetSummary(ctx, payload.ID)
+		if err != nil {
+			fail("run", "GET_ERROR", err.Error())
+			return err
+		}
+		success("run", result)
+
+	case "get_episode":
+		var payload struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			fail("run", "PARSE_ERROR", err.Error())
+			return err
+		}
+		result, err := svc.GetEpisode(ctx, payload.ID)
+		if err != nil {
+			fail("run", "GET_ERROR", err.Error())
+			return err
+		}
+		success("run", result)
+
+	case "get_entity":
+		var payload struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+			fail("run", "PARSE_ERROR", err.Error())
+			return err
+		}
+		result, err := svc.GetEntity(ctx, payload.ID)
+		if err != nil {
+			fail("run", "GET_ERROR", err.Error())
+			return err
+		}
+		success("run", result)
 
 	case "run_job":
 		var payload struct {

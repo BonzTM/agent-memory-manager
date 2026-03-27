@@ -235,3 +235,32 @@ func TestShareCommand(t *testing.T) {
 	}
 	assertEnvelope(t, stderr, false, "share")
 }
+
+func TestForgetCommand(t *testing.T) {
+	setTempDBPath(t)
+
+	stdout, stderr, err := captureRun(t, []string{"remember", "--type", "fact", "--scope", "global", "--body", "forget me", "--tight", "forget me", "--agent-id", "agent-a"})
+	if err != nil {
+		t.Fatalf("remember error: %v stderr=%s", err, stderr)
+	}
+	created := decodeEnvelopeResult(t, stdout)
+	memoryID, _ := created["id"].(string)
+	if memoryID == "" {
+		t.Fatalf("expected memory ID, got result=%v", created)
+	}
+
+	stdout, stderr, err = captureRun(t, []string{"forget", memoryID})
+	if err != nil {
+		t.Fatalf("forget error: %v stderr=%s", err, stderr)
+	}
+	updated := decodeEnvelopeResult(t, stdout)
+	if updated["status"] != "retracted" {
+		t.Fatalf("expected status retracted, got %v", updated["status"])
+	}
+
+	_, stderr, err = captureRun(t, []string{"forget"})
+	if err == nil {
+		t.Fatal("expected forget validation error")
+	}
+	assertEnvelope(t, stderr, false, "forget")
+}
