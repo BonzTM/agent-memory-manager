@@ -621,8 +621,9 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 	if err != nil {
 		return nil, fmt.Errorf("search entities: %w", err)
 	}
+	entityItems := make([]core.RecallItem, 0, len(entities))
 	for i, ent := range entities {
-		items = append(items, core.RecallItem{
+		entityItems = append(entityItems, core.RecallItem{
 			ID:               ent.ID,
 			Kind:             "entity",
 			Type:             ent.Type,
@@ -630,6 +631,12 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 			TightDescription: ent.Description,
 		})
 	}
+
+	items = append(items, entityItems...)
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Score > items[j].Score
+	})
+
 	return items, nil
 }
 

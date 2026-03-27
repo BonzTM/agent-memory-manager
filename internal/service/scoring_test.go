@@ -407,6 +407,41 @@ func TestScoreItem_FinalScore(t *testing.T) {
 	}
 }
 
+func TestScoreItem_KindBoostPrioritizesMemoriesOverHistoryNodes(t *testing.T) {
+	now := time.Now().UTC()
+	sctx := ScoringContext{
+		Query:         "sqlite migration decision",
+		QueryEntities: []string{"SQLite"},
+		ProjectID:     "proj_1",
+		RecentRecalls: map[string]bool{},
+		Now:           now,
+	}
+
+	base := ScoringCandidate{
+		ID:          "item_1",
+		Subject:     "SQLite migration",
+		Body:        "We decided to keep SQLite migrations append-only",
+		Importance:  0.9,
+		ProjectID:   "proj_1",
+		Scope:       core.ScopeProject,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		FTSPosition: 0,
+	}
+
+	memory := base
+	memory.Kind = "memory"
+	history := base
+	history.Kind = "history-node"
+
+	memoryScore := ScoreItem(memory, sctx)
+	historyScore := ScoreItem(history, sctx)
+
+	if memoryScore.FinalScore <= historyScore.FinalScore {
+		t.Fatalf("expected memory score (%f) > history-node score (%f)", memoryScore.FinalScore, historyScore.FinalScore)
+	}
+}
+
 func TestShouldIncludeRecallCandidate(t *testing.T) {
 	t.Run("filters low score", func(t *testing.T) {
 		candidate := ScoringCandidate{Kind: "memory", Confidence: 0.9}

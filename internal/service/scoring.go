@@ -27,6 +27,7 @@ type ScoringWeights struct {
 	TemporalValidity    float64 `json:"temporal_validity"`
 	StructuralProximity float64 `json:"structural_proximity"`
 	Freshness           float64 `json:"freshness"`
+	KindBoost           float64 `json:"kind_boost"`
 	RepetitionPenalty   float64 `json:"repetition_penalty"`
 }
 
@@ -43,6 +44,7 @@ func DefaultScoringWeights() ScoringWeights {
 		TemporalValidity:    0.05 * scoringNormalizationFactor,
 		StructuralProximity: 0.05 * scoringNormalizationFactor,
 		Freshness:           0.04 * scoringNormalizationFactor,
+		KindBoost:           0.15,
 		RepetitionPenalty:   0.10,
 	}
 }
@@ -154,6 +156,9 @@ func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 		weights.StructuralProximity*b.StructuralProximity+
 		weights.Freshness*b.Freshness) - weights.RepetitionPenalty*b.RepetitionPenalty
 
+	kindMultiplier := signalKindBoost(item.Kind)
+	b.FinalScore *= (1 - weights.KindBoost) + (weights.KindBoost * kindMultiplier)
+
 	// Clamp to [0, 1].
 	if b.FinalScore < 0 {
 		b.FinalScore = 0
@@ -163,6 +168,21 @@ func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 	}
 
 	return b
+}
+
+func signalKindBoost(kind string) float64 {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "memory":
+		return 1.0
+	case "episode":
+		return 0.80
+	case "summary":
+		return 0.60
+	case "event", "history-node":
+		return 0.45
+	default:
+		return 0.60
+	}
 }
 
 // --- signal implementations ---
