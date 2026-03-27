@@ -60,10 +60,52 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 				contents = append(contents, evt.Content)
 			}
 
-			candidates, err := s.summarizer.ExtractMemoryCandidateBatch(ctx, contents)
-			if err != nil {
-				return created, fmt.Errorf("extract memory candidate batch: %w", err)
+			candidates := make([]core.MemoryCandidate, 0)
+			analysisEntities := make([]core.EntityCandidate, 0)
+			analysisRelationships := make([]core.RelationshipCandidate, 0)
+			usedAnalysis := false
+
+			if s.intelligence != nil && s.hasLLMSummarizer {
+				analysisInputs := make([]core.EventContent, 0, len(batch))
+				for idx, evt := range batch {
+					analysisInputs = append(analysisInputs, core.EventContent{
+						Index:     idx + 1,
+						Content:   evt.Content,
+						ProjectID: evt.ProjectID,
+						SessionID: evt.SessionID,
+					})
+				}
+
+				analysis, analysisErr := s.intelligence.AnalyzeEvents(ctx, analysisInputs)
+				if analysisErr == nil {
+					if analysis != nil {
+						candidates = append(candidates, analysis.Memories...)
+						analysisEntities = append(analysisEntities, analysis.Entities...)
+						analysisRelationships = append(analysisRelationships, analysis.Relationships...)
+					}
+					usedAnalysis = len(candidates) > 0
+					if len(candidates) == 0 {
+						extracted, err := s.summarizer.ExtractMemoryCandidateBatch(ctx, contents)
+						if err != nil {
+							return created, fmt.Errorf("extract memory candidate batch: %w", err)
+						}
+						candidates = append(candidates, extracted...)
+					}
+				} else {
+					extracted, err := s.summarizer.ExtractMemoryCandidateBatch(ctx, contents)
+					if err != nil {
+						return created, fmt.Errorf("extract memory candidate batch: %w", err)
+					}
+					candidates = append(candidates, extracted...)
+				}
+			} else {
+				extracted, err := s.summarizer.ExtractMemoryCandidateBatch(ctx, contents)
+				if err != nil {
+					return created, fmt.Errorf("extract memory candidate batch: %w", err)
+				}
+				candidates = append(candidates, extracted...)
 			}
+
 			if len(candidates) == 0 {
 				continue
 			}
@@ -84,6 +126,12 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 					continue
 				}
 				sourceContent := joinEventContent(candidateEvents)
+				candidateEntities := []core.EntityCandidate(nil)
+				candidateRelationships := []core.RelationshipCandidate(nil)
+				if usedAnalysis {
+					candidateEntities = selectAnalysisEntitiesForContent(analysisEntities, sourceContent)
+					candidateRelationships = selectAnalysisRelationshipsForContent(analysisRelationships, analysisEntities, sourceContent)
+				}
 
 				now := time.Now().UTC()
 				importance := importanceForCandidate(candidate)
@@ -164,8 +212,19 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 						}
 					}
 
-					if err := s.linkEntitiesToMemory(ctx, duplicate.ID, sourceContent); err != nil {
-						return created, fmt.Errorf("link reflected entities: %w", err)
+					if usedAnalysis && len(candidateEntities) > 0 {
+						if err := s.linkEntitiesFromAnalysis(ctx, duplicate.ID, candidateEntities); err != nil {
+							return created, fmt.Errorf("link reflected analysis entities: %w", err)
+						}
+					} else {
+						if err := s.linkEntitiesToMemory(ctx, duplicate.ID, sourceContent); err != nil {
+							return created, fmt.Errorf("link reflected entities: %w", err)
+						}
+					}
+					if usedAnalysis && len(candidateRelationships) > 0 {
+						if err := s.createRelationshipsFromAnalysis(ctx, candidateRelationships); err != nil {
+							return created, fmt.Errorf("create reflected relationships: %w", err)
+						}
 					}
 					continue
 				}
@@ -193,8 +252,20 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 					return created, fmt.Errorf("insert reflected memory: %w", err)
 				}
 
-				if err := s.linkEntitiesToMemory(ctx, mem.ID, sourceContent); err != nil {
-					return created, fmt.Errorf("link reflected entities: %w", err)
+				if usedAnalysis && len(candidateEntities) > 0 {
+					if err := s.linkEntitiesFromAnalysis(ctx, mem.ID, candidateEntities); err != nil {
+						return created, fmt.Errorf("link reflected analysis entities: %w", err)
+					}
+				} else {
+					if err := s.linkEntitiesToMemory(ctx, mem.ID, sourceContent); err != nil {
+						return created, fmt.Errorf("link reflected entities: %w", err)
+					}
+				}
+
+				if usedAnalysis && len(candidateRelationships) > 0 {
+					if err := s.createRelationshipsFromAnalysis(ctx, candidateRelationships); err != nil {
+						return created, fmt.Errorf("create reflected relationships: %w", err)
+					}
 				}
 
 				created++

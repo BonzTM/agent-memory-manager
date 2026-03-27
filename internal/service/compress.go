@@ -469,8 +469,8 @@ func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
 			if trimmedBody := strings.TrimSpace(result.Body); trimmedBody != "" {
 				body = trimmedBody
 			}
-			if trimmedTight := strings.TrimSpace(result.TightDescription); trimmedTight != "" {
-				tightDesc = trimmedTight
+			if cleaned, ok := sanitizeTightDescription(result.TightDescription); ok {
+				tightDesc = cleaned
 			}
 		}
 		if body == "" {
@@ -711,7 +711,12 @@ func (s *AMMService) insertNarrativeEpisode(
 		ID:               generateID("ep_"),
 		Title:            title,
 		Summary:          summary,
-		TightDescription: extractTightDescription(summary, 160),
+		TightDescription: func() string {
+			if td, ok := sanitizeTightDescription(extractTightDescription(summary, 160)); ok {
+				return td
+			}
+			return fallbackSessionTightDesc(evts)
+		}(),
 		Scope:            scope,
 		ProjectID:        projectID,
 		SessionID:        sessionID,
@@ -981,25 +986,17 @@ func inferScopeFromEvents(events []core.Event) (core.Scope, string) {
 	return core.ScopeProject, projectID
 }
 
-// buildTopicSnippets extracts the first n content snippets from events.
 func buildTopicSnippets(events []core.Event, n int) string {
-	if n > len(events) {
-		n = len(events)
-	}
 	snippets := make([]string, 0, n)
-	for i := 0; i < n; i++ {
-		s := events[i].Content
+	for i := 0; i < len(events) && len(snippets) < n; i++ {
+		s := sanitizeSnippet(events[i].Content)
+		if s == "" {
+			continue
+		}
 		if len(s) > 40 {
 			s = s[:40] + "..."
 		}
 		snippets = append(snippets, s)
 	}
-	result := ""
-	for i, s := range snippets {
-		if i > 0 {
-			result += ", "
-		}
-		result += s
-	}
-	return result
+	return strings.Join(snippets, ", ")
 }

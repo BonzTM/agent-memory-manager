@@ -114,6 +114,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 
 		candidates := make([]core.MemoryCandidate, 0)
 		analysisEntities := make([]core.EntityCandidate, 0)
+		analysisRelationships := make([]core.RelationshipCandidate, 0)
 		if s.intelligence != nil && s.hasLLMSummarizer {
 			analysisInputs := make([]core.EventContent, 0, len(filtered))
 			for idx, evt := range filtered {
@@ -131,6 +132,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 			if analysis != nil {
 				candidates = append(candidates, analysis.Memories...)
 				analysisEntities = append(analysisEntities, analysis.Entities...)
+				analysisRelationships = append(analysisRelationships, analysis.Relationships...)
 			}
 		} else {
 			extracted, err := s.summarizer.ExtractMemoryCandidateBatch(ctx, contents)
@@ -230,6 +232,12 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 						if err := s.linkEntitiesFromAnalysis(ctx, duplicate.ID, candidateEntities); err != nil {
 							return created, superseded, fmt.Errorf("link reprocessed analysis entities: %w", err)
 						}
+						candidateRelationships := selectAnalysisRelationshipsForContent(analysisRelationships, analysisEntities, sourceContent)
+						if len(candidateRelationships) > 0 {
+							if err := s.createRelationshipsFromAnalysis(ctx, candidateRelationships); err != nil {
+								return created, superseded, fmt.Errorf("create reprocessed relationships: %w", err)
+							}
+						}
 					}
 				}
 				if err := s.linkEntitiesToMemory(ctx, duplicate.ID, sourceContent); err != nil {
@@ -270,6 +278,12 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 				if len(candidateEntities) > 0 {
 					if err := s.linkEntitiesFromAnalysis(ctx, mem.ID, candidateEntities); err != nil {
 						return created, superseded, fmt.Errorf("link reprocessed analysis entities: %w", err)
+					}
+					candidateRelationships := selectAnalysisRelationshipsForContent(analysisRelationships, analysisEntities, sourceContent)
+					if len(candidateRelationships) > 0 {
+						if err := s.createRelationshipsFromAnalysis(ctx, candidateRelationships); err != nil {
+							return created, superseded, fmt.Errorf("create reprocessed relationships: %w", err)
+						}
 					}
 				}
 			}
@@ -413,6 +427,51 @@ func selectAnalysisEntitiesForContent(entities []core.EntityCandidate, sourceCon
 	for _, entity := range entities {
 		if analysisEntityMatchesContent(entity, content) {
 			selected = append(selected, entity)
+		}
+	}
+	return selected
+}
+
+func selectAnalysisRelationshipsForContent(relationships []core.RelationshipCandidate, entities []core.EntityCandidate, sourceContent string) []core.RelationshipCandidate {
+	if len(relationships) == 0 {
+		return nil
+	}
+	content := strings.ToLower(strings.TrimSpace(sourceContent))
+	if content == "" {
+		return nil
+	}
+	entityByCanonical := make(map[string]core.EntityCandidate, len(entities))
+	for _, entity := range entities {
+		canonical := strings.ToLower(strings.TrimSpace(entity.CanonicalName))
+		if canonical == "" {
+			continue
+		}
+		entityByCanonical[canonical] = entity
+	}
+	selected := make([]core.RelationshipCandidate, 0, len(relationships))
+	for _, relationship := range relationships {
+		fromTerm := strings.ToLower(strings.TrimSpace(relationship.FromEntity))
+		toTerm := strings.ToLower(strings.TrimSpace(relationship.ToEntity))
+		if fromTerm == "" || toTerm == "" {
+			continue
+		}
+
+		fromMatches := strings.Contains(content, fromTerm)
+		if !fromMatches {
+			if fromEntity, ok := entityByCanonical[fromTerm]; ok {
+				fromMatches = analysisEntityMatchesContent(fromEntity, content)
+			}
+		}
+
+		toMatches := strings.Contains(content, toTerm)
+		if !toMatches {
+			if toEntity, ok := entityByCanonical[toTerm]; ok {
+				toMatches = analysisEntityMatchesContent(toEntity, content)
+			}
+		}
+
+		if fromMatches && toMatches {
+			selected = append(selected, relationship)
 		}
 	}
 	return selected
