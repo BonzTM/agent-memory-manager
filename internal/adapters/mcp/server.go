@@ -65,6 +65,18 @@ func tools() []Tool {
 		{Name: "amm_policy_list", Description: "List all ingestion policies", InputSchema: policyListSchema()},
 		{Name: "amm_policy_add", Description: "Add an ingestion policy", InputSchema: policyAddSchema()},
 		{Name: "amm_policy_remove", Description: "Remove an ingestion policy by ID", InputSchema: policyRemoveSchema()},
+		{Name: "amm_register_project", Description: "Register a new project", InputSchema: projectSchema()},
+		{Name: "amm_get_project", Description: "Get a project by ID", InputSchema: idSchema()},
+		{Name: "amm_list_projects", Description: "List all projects", InputSchema: emptySchema()},
+		{Name: "amm_remove_project", Description: "Remove a project by ID", InputSchema: idSchema()},
+		{Name: "amm_add_relationship", Description: "Add an entity relationship", InputSchema: addRelationshipSchema()},
+		{Name: "amm_get_relationship", Description: "Get a relationship by ID", InputSchema: idSchema()},
+		{Name: "amm_list_relationships", Description: "List relationships", InputSchema: listRelationshipsSchema()},
+		{Name: "amm_remove_relationship", Description: "Remove a relationship by ID", InputSchema: idSchema()},
+		{Name: "amm_get_summary", Description: "Get a summary by ID", InputSchema: idSchema()},
+		{Name: "amm_get_episode", Description: "Get an episode by ID", InputSchema: idSchema()},
+		{Name: "amm_get_entity", Description: "Get an entity by ID", InputSchema: idSchema()},
+		{Name: "amm_forget", Description: "Forget (retract) a memory by ID", InputSchema: idSchema()},
 		{Name: "amm_reset_derived", Description: "Purge all derived data while preserving events", InputSchema: resetDerivedSchema()},
 	}
 }
@@ -203,6 +215,7 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 		var args struct {
 			Query   string             `json:"query"`
 			AgentID string             `json:"agent_id"`
+			Explain bool               `json:"explain"`
 			Opts    core.RecallOptions `json:"opts"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
@@ -210,6 +223,9 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 		}
 		if args.Opts.AgentID == "" && args.AgentID != "" {
 			args.Opts.AgentID = args.AgentID
+		}
+		if args.Explain {
+			args.Opts.Explain = true
 		}
 		result, callErr = svc.Recall(ctx, args.Query, args.Opts)
 
@@ -269,6 +285,16 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 		}
 		result, callErr = svc.ShareMemory(ctx, args.ID, core.PrivacyLevel(args.Privacy))
 
+	case "amm_forget":
+		var args v1.ForgetRequest
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return invalidArgs(err)
+		}
+		if err := v1.ValidateForget(&args); err != nil {
+			return invalidArgs(err)
+		}
+		result, callErr = svc.ForgetMemory(ctx, args.ID)
+
 	case "amm_policy_list":
 		result, callErr = svc.ListPolicies(ctx)
 
@@ -300,6 +326,105 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 		if callErr == nil {
 			result = map[string]string{"id": args.ID, "status": "removed"}
 		}
+
+	case "amm_register_project":
+		var project core.Project
+		if err := json.Unmarshal(params.Arguments, &project); err != nil {
+			return invalidArgs(err)
+		}
+		result, callErr = svc.RegisterProject(ctx, &project)
+
+	case "amm_get_project":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return invalidArgs(err)
+		}
+		result, callErr = svc.GetProject(ctx, args.ID)
+
+	case "amm_list_projects":
+		result, callErr = svc.ListProjects(ctx)
+
+	case "amm_remove_project":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return invalidArgs(err)
+		}
+		callErr = svc.RemoveProject(ctx, args.ID)
+		if callErr == nil {
+			result = map[string]string{"id": args.ID, "status": "removed"}
+		}
+
+	case "amm_add_relationship":
+		var rel core.Relationship
+		if err := json.Unmarshal(params.Arguments, &rel); err != nil {
+			return invalidArgs(err)
+		}
+		result, callErr = svc.AddRelationship(ctx, &rel)
+
+	case "amm_get_relationship":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return invalidArgs(err)
+		}
+		result, callErr = svc.GetRelationship(ctx, args.ID)
+
+	case "amm_list_relationships":
+		var args struct {
+			EntityID         string `json:"entity_id"`
+			RelationshipType string `json:"relationship_type"`
+			Limit            int    `json:"limit"`
+		}
+		_ = json.Unmarshal(params.Arguments, &args)
+		result, callErr = svc.ListRelationships(ctx, core.ListRelationshipsOptions{
+			EntityID:         args.EntityID,
+			RelationshipType: args.RelationshipType,
+			Limit:            args.Limit,
+		})
+
+	case "amm_remove_relationship":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return invalidArgs(err)
+		}
+		callErr = svc.RemoveRelationship(ctx, args.ID)
+		if callErr == nil {
+			result = map[string]string{"id": args.ID, "status": "removed"}
+		}
+
+	case "amm_get_summary":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return invalidArgs(err)
+		}
+		result, callErr = svc.GetSummary(ctx, args.ID)
+
+	case "amm_get_episode":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return invalidArgs(err)
+		}
+		result, callErr = svc.GetEpisode(ctx, args.ID)
+
+	case "amm_get_entity":
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			return invalidArgs(err)
+		}
+		result, callErr = svc.GetEntity(ctx, args.ID)
 
 	case "amm_jobs_run":
 		var args struct {
@@ -430,6 +555,7 @@ func recallSchema() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"query":    map[string]string{"type": "string", "description": "Search query"},
 			"agent_id": map[string]string{"type": "string", "description": "Agent identifier"},
+			"explain":  map[string]string{"type": "boolean", "description": "Include score signal breakdowns in each recall item"},
 			"opts": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -438,6 +564,7 @@ func recallSchema() map[string]interface{} {
 					"session_id": map[string]string{"type": "string"},
 					"agent_id":   map[string]string{"type": "string"},
 					"limit":      map[string]string{"type": "integer"},
+					"explain":    map[string]string{"type": "boolean"},
 				},
 			},
 		},
@@ -588,6 +715,41 @@ func policyRemoveSchema() map[string]interface{} {
 			"id": map[string]string{"type": "string", "description": "Policy ID to remove"},
 		},
 		"required": []string{"id"},
+	}
+}
+
+func projectSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"name":        map[string]string{"type": "string", "description": "Project name"},
+			"path":        map[string]string{"type": "string", "description": "Project path"},
+			"description": map[string]string{"type": "string", "description": "Project description"},
+		},
+		"required": []string{"name"},
+	}
+}
+
+func listRelationshipsSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"entity_id":         map[string]string{"type": "string", "description": "Filter by entity ID"},
+			"relationship_type": map[string]string{"type": "string", "description": "Filter by relationship type"},
+			"limit":             map[string]string{"type": "integer", "description": "Max results to return"},
+		},
+	}
+}
+
+func addRelationshipSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"from_entity_id":    map[string]string{"type": "string", "description": "Source entity ID"},
+			"to_entity_id":      map[string]string{"type": "string", "description": "Destination entity ID"},
+			"relationship_type": map[string]string{"type": "string", "description": "Relationship type"},
+		},
+		"required": []string{"from_entity_id", "to_entity_id", "relationship_type"},
 	}
 }
 

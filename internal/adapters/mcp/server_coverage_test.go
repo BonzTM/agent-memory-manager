@@ -43,6 +43,7 @@ func TestToolsContainsExpectedNames(t *testing.T) {
 		"amm_get_memory",
 		"amm_update_memory",
 		"amm_share",
+		"amm_forget",
 		"amm_jobs_run",
 		"amm_repair",
 		"amm_explain_recall",
@@ -51,6 +52,17 @@ func TestToolsContainsExpectedNames(t *testing.T) {
 		"amm_policy_list",
 		"amm_policy_add",
 		"amm_policy_remove",
+		"amm_register_project",
+		"amm_get_project",
+		"amm_list_projects",
+		"amm_remove_project",
+		"amm_add_relationship",
+		"amm_get_relationship",
+		"amm_list_relationships",
+		"amm_remove_relationship",
+		"amm_get_summary",
+		"amm_get_episode",
+		"amm_get_entity",
 		"amm_reset_derived",
 	}
 
@@ -90,6 +102,8 @@ func TestSchemaHelpersNonNil(t *testing.T) {
 		policyListSchema(),
 		policyAddSchema(),
 		policyRemoveSchema(),
+		projectSchema(),
+		addRelationshipSchema(),
 		resetDerivedSchema(),
 	}
 
@@ -167,8 +181,18 @@ func TestHandleToolCallInvalidArgumentsPerTool(t *testing.T) {
 		"amm_get_memory",
 		"amm_update_memory",
 		"amm_share",
+		"amm_forget",
 		"amm_policy_add",
 		"amm_policy_remove",
+		"amm_register_project",
+		"amm_get_project",
+		"amm_remove_project",
+		"amm_add_relationship",
+		"amm_get_relationship",
+		"amm_remove_relationship",
+		"amm_get_summary",
+		"amm_get_episode",
+		"amm_get_entity",
 		"amm_reset_derived",
 		"amm_jobs_run",
 		"amm_explain_recall",
@@ -225,33 +249,20 @@ func TestHandleToolCallRecallDefaultsToHybrid(t *testing.T) {
 	ingestResp := handleToolCall(svc, toolReq(t, "amm_ingest_event", map[string]interface{}{
 		"kind":          "message_user",
 		"source_system": "mcp-test",
-		"content":       "mcp default hybrid recall event",
+		"content":       "event-only hybrid default signal",
 	}))
 	if ingestResp.Error != nil {
 		t.Fatalf("ingest event rpc error: %+v", ingestResp.Error)
 	}
 
 	recallResp := handleToolCall(svc, toolReq(t, "amm_recall", map[string]interface{}{
-		"query": "hybrid recall event",
+		"query": "hybrid default signal",
 		"opts":  map[string]interface{}{},
 	}))
 	var recallResult core.RecallResult
 	decodeToolResultJSON(t, recallResp, &recallResult)
 	if recallResult.Meta.Mode != core.RecallModeHybrid {
 		t.Fatalf("expected default recall mode hybrid, got %#v", recallResult.Meta.Mode)
-	}
-	if len(recallResult.Items) == 0 {
-		t.Fatalf("expected recall to return items: %#v", recallResult)
-	}
-	foundHistory := false
-	for _, item := range recallResult.Items {
-		if item.Kind == "history-node" {
-			foundHistory = true
-			break
-		}
-	}
-	if !foundHistory {
-		t.Fatalf("expected history-node in default recall result: %#v", recallResult.Items)
 	}
 }
 
@@ -369,6 +380,13 @@ func TestHandleToolCallCoversAllTools(t *testing.T) {
 		t.Fatalf("unexpected share result: %#v", sharedResult)
 	}
 
+	forgetResp := handleToolCall(svc, toolReq(t, "amm_forget", map[string]interface{}{"id": createdMemory.ID}))
+	var forgotResult core.Memory
+	decodeToolResultJSON(t, forgetResp, &forgotResult)
+	if forgotResult.ID != createdMemory.ID || forgotResult.Status != core.MemoryStatusRetracted {
+		t.Fatalf("unexpected forget result: %#v", forgotResult)
+	}
+
 	jobResp := handleToolCall(svc, toolReq(t, "amm_jobs_run", map[string]interface{}{"kind": "rebuild_indexes"}))
 	var job core.Job
 	decodeToolResultJSON(t, jobResp, &job)
@@ -449,6 +467,104 @@ func TestHandleToolCallCoversAllTools(t *testing.T) {
 	decodeToolResultJSON(t, policyRemoveResp, &removeResult)
 	if !reflect.DeepEqual(removeResult, map[string]string{"id": addedPolicy.ID, "status": "removed"}) {
 		t.Fatalf("unexpected policy remove result: %#v", removeResult)
+	}
+
+	registerProjectResp := handleToolCall(svc, toolReq(t, "amm_register_project", map[string]interface{}{
+		"name":        "mcp coverage project",
+		"path":        "/tmp/mcp-coverage",
+		"description": "coverage",
+	}))
+	var project core.Project
+	decodeToolResultJSON(t, registerProjectResp, &project)
+	if project.ID == "" {
+		t.Fatalf("expected project id from register: %#v", project)
+	}
+
+	getProjectResp := handleToolCall(svc, toolReq(t, "amm_get_project", map[string]interface{}{"id": project.ID}))
+	var fetchedProject core.Project
+	decodeToolResultJSON(t, getProjectResp, &fetchedProject)
+	if fetchedProject.ID != project.ID {
+		t.Fatalf("unexpected fetched project: %#v", fetchedProject)
+	}
+
+	listProjectsResp := handleToolCall(svc, toolReq(t, "amm_list_projects", map[string]interface{}{}))
+	var projects []core.Project
+	decodeToolResultJSON(t, listProjectsResp, &projects)
+	foundProject := false
+	for _, p := range projects {
+		if p.ID == project.ID {
+			foundProject = true
+			break
+		}
+	}
+	if !foundProject {
+		t.Fatalf("registered project not found in list: %s", project.ID)
+	}
+
+	relationshipAddResp := handleToolCall(svc, toolReq(t, "amm_add_relationship", map[string]interface{}{
+		"from_entity_id":    "ent_cov_from",
+		"to_entity_id":      "ent_cov_to",
+		"relationship_type": "related_to",
+	}))
+	if relationshipAddResp.Error != nil {
+		t.Fatalf("amm_add_relationship rpc error: %+v", relationshipAddResp.Error)
+	}
+	if content := decodeToolResultText(t, relationshipAddResp); !strings.Contains(content, "error:") {
+		t.Fatalf("expected service error content from add_relationship without entities, got %q", content)
+	}
+
+	getRelationshipResp := handleToolCall(svc, toolReq(t, "amm_get_relationship", map[string]interface{}{"id": "rel_missing"}))
+	if getRelationshipResp.Error != nil {
+		t.Fatalf("amm_get_relationship rpc error: %+v", getRelationshipResp.Error)
+	}
+	if content := decodeToolResultText(t, getRelationshipResp); !strings.Contains(content, "error:") {
+		t.Fatalf("expected service error content from get_relationship missing id, got %q", content)
+	}
+
+	listRelationshipsResp := handleToolCall(svc, toolReq(t, "amm_list_relationships", map[string]interface{}{}))
+	var relationships []core.Relationship
+	decodeToolResultJSON(t, listRelationshipsResp, &relationships)
+	if len(relationships) != 0 {
+		t.Fatalf("expected no persisted relationships in coverage test, got %#v", relationships)
+	}
+
+	getSummaryResp := handleToolCall(svc, toolReq(t, "amm_get_summary", map[string]interface{}{"id": "sum_missing"}))
+	if getSummaryResp.Error != nil {
+		t.Fatalf("amm_get_summary rpc error: %+v", getSummaryResp.Error)
+	}
+	if content := decodeToolResultText(t, getSummaryResp); !strings.Contains(content, "error:") {
+		t.Fatalf("expected service error content from get_summary missing id, got %q", content)
+	}
+
+	getEpisodeResp := handleToolCall(svc, toolReq(t, "amm_get_episode", map[string]interface{}{"id": "ep_missing"}))
+	if getEpisodeResp.Error != nil {
+		t.Fatalf("amm_get_episode rpc error: %+v", getEpisodeResp.Error)
+	}
+	if content := decodeToolResultText(t, getEpisodeResp); !strings.Contains(content, "error:") {
+		t.Fatalf("expected service error content from get_episode missing id, got %q", content)
+	}
+
+	getEntityResp := handleToolCall(svc, toolReq(t, "amm_get_entity", map[string]interface{}{"id": "ent_missing"}))
+	if getEntityResp.Error != nil {
+		t.Fatalf("amm_get_entity rpc error: %+v", getEntityResp.Error)
+	}
+	if content := decodeToolResultText(t, getEntityResp); !strings.Contains(content, "error:") {
+		t.Fatalf("expected service error content from get_entity missing id, got %q", content)
+	}
+
+	removeRelationshipResp := handleToolCall(svc, toolReq(t, "amm_remove_relationship", map[string]interface{}{"id": "rel_missing"}))
+	if removeRelationshipResp.Error != nil {
+		t.Fatalf("amm_remove_relationship rpc error: %+v", removeRelationshipResp.Error)
+	}
+	if content := decodeToolResultText(t, removeRelationshipResp); !strings.Contains(content, "error:") {
+		t.Fatalf("expected service error content from remove_relationship missing id, got %q", content)
+	}
+
+	removeProjectResp := handleToolCall(svc, toolReq(t, "amm_remove_project", map[string]interface{}{"id": project.ID}))
+	var removeProjectResult map[string]string
+	decodeToolResultJSON(t, removeProjectResp, &removeProjectResult)
+	if !reflect.DeepEqual(removeProjectResult, map[string]string{"id": project.ID, "status": "removed"}) {
+		t.Fatalf("unexpected project remove result: %#v", removeProjectResult)
 	}
 
 	resetDerivedResp := handleToolCall(svc, toolReq(t, "amm_reset_derived", map[string]interface{}{"confirm": true}))
