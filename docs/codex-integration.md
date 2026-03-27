@@ -1,6 +1,6 @@
 # Codex Integration Guide
 
-This guide shows how to use amm with Codex without pretending amm owns the Codex runtime. The integration boundary is simple:
+This guide shows how to use AMM with Codex without pretending AMM owns the Codex runtime. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md). The integration boundary is simple:
 
 - Codex owns prompt execution, hook registration, and context injection.
 - amm owns durable storage, recall, and maintenance jobs through `amm` and `amm-mcp`.

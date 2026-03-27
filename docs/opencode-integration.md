@@ -1,6 +1,6 @@
 # OpenCode Integration Guide
 
-OpenCode fits amm well as an MCP-first runtime with a small plugin layer.
+AMM fits OpenCode well as an MCP-first runtime with a small plugin layer. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md).
 
 The supported integration boundary is:
 

@@ -1,8 +1,8 @@
 # OpenClaw Integration Guide
 
-OpenClaw is the runtime in this pairing; amm is the memory substrate.
+OpenClaw is the runtime in this pairing; AMM is the memory substrate. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md).
 
-That distinction matters, because this repository only promises the amm side of the boundary:
+That distinction matters, because this repository only promises the AMM side of the boundary:
 
 - `amm` for ingestion, recall, expansion, and maintenance jobs
 - `amm-mcp` for stdio MCP access

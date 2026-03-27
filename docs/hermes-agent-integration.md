@@ -1,9 +1,9 @@
 # Hermes-Agent Integration Guide
 
-Hermes and amm fit together cleanly as a sidecar pattern:
+Hermes and AMM fit together cleanly as a sidecar pattern. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md).
 
 - **Hermes-agent** owns the runtime, hooks, scheduling, and agent behavior.
-- **amm** owns durable history, recall, summaries, and maintenance jobs.
+- **AMM** owns durable history, recall, summaries, and maintenance jobs.
 
 That means the integration contract stays simple:
 
