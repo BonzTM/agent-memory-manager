@@ -38,6 +38,13 @@ func buildSummaryEmbeddingText(summary *core.Summary) string {
 	return buildEmbeddingText(summary.Title, summary.Body, summary.TightDescription)
 }
 
+func buildEpisodeEmbeddingText(episode *core.Episode) string {
+	if episode == nil {
+		return ""
+	}
+	return buildEmbeddingText(episode.Title, episode.Summary, episode.TightDescription)
+}
+
 func (s *AMMService) upsertEmbeddingBestEffort(ctx context.Context, objectID, objectKind, text string) {
 	if s.embeddingProvider == nil {
 		return
@@ -107,7 +114,12 @@ func (s *AMMService) rebuildEmbeddings(ctx context.Context, forceAll bool) error
 		return fmt.Errorf("embed missing summaries: %w", err)
 	}
 
-	slog.Debug("embeddings rebuild done", "memories_embedded", memoryEmbedded, "summaries_embedded", summaryEmbedded)
+	episodeEmbedded, err := s.embedMissing(ctx, "episode", model, batchSize)
+	if err != nil {
+		return fmt.Errorf("embed missing episodes: %w", err)
+	}
+
+	slog.Debug("embeddings rebuild done", "memories_embedded", memoryEmbedded, "summaries_embedded", summaryEmbedded, "episodes_embedded", episodeEmbedded)
 	return nil
 }
 
@@ -131,6 +143,15 @@ func (s *AMMService) embedMissing(ctx context.Context, kind, model string, batch
 		items = make([]embeddable, len(summaries))
 		for i := range summaries {
 			items[i] = embeddable{id: summaries[i].ID, text: buildSummaryEmbeddingText(&summaries[i])}
+		}
+	case "episode":
+		episodes, err := s.repo.ListUnembeddedEpisodes(ctx, model, 50000)
+		if err != nil {
+			return 0, err
+		}
+		items = make([]embeddable, len(episodes))
+		for i := range episodes {
+			items[i] = embeddable{id: episodes[i].ID, text: buildEpisodeEmbeddingText(&episodes[i])}
 		}
 	}
 
@@ -215,6 +236,19 @@ func (s *AMMService) rebuildEmbeddingsFull(ctx context.Context, model string, ba
 		return err
 	}
 
-	slog.Debug("full embeddings rebuild done", "memories_embedded", memEmbedded, "summaries_embedded", sumEmbedded)
+	episodes, err := s.repo.ListEpisodes(ctx, core.ListEpisodesOptions{Limit: 50000})
+	if err != nil {
+		return fmt.Errorf("list episodes for full embedding rebuild: %w", err)
+	}
+	episodeItems := make([]embeddable, len(episodes))
+	for i := range episodes {
+		episodeItems[i] = embeddable{id: episodes[i].ID, text: buildEpisodeEmbeddingText(&episodes[i])}
+	}
+	episodeEmbedded, err := s.embedBatch(ctx, episodeItems, "episode", model, batchSize)
+	if err != nil {
+		return err
+	}
+
+	slog.Debug("full embeddings rebuild done", "memories_embedded", memEmbedded, "summaries_embedded", sumEmbedded, "episodes_embedded", episodeEmbedded)
 	return nil
 }

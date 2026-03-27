@@ -7,9 +7,32 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
+
+var ammToolNames = map[string]struct{}{
+	"amm_recall":            {},
+	"amm_remember":          {},
+	"amm_expand":            {},
+	"amm_describe":          {},
+	"amm_ingest_event":      {},
+	"amm_ingest_transcript": {},
+	"amm_history":           {},
+	"amm_status":            {},
+	"amm_jobs_run":          {},
+	"amm_share":             {},
+	"amm_reset_derived":     {},
+	"amm_repair":            {},
+	"amm_policy_add":        {},
+	"amm_policy_list":       {},
+	"amm_policy_remove":     {},
+	"amm_get_memory":        {},
+	"amm_update_memory":     {},
+	"amm_explain_recall":    {},
+	"amm_init":              {},
+}
 
 // CheckIngestionPolicy returns the effective ingestion mode for event based on
 // the highest-priority matching policy.
@@ -120,6 +143,10 @@ func detectConservativeNoise(event *core.Event) (string, bool) {
 		return "", false
 	}
 
+	if strings.EqualFold(strings.TrimSpace(event.Kind), "tool_call") && containsAMMToolCallName(event.Content) {
+		return "amm_self_reference", true
+	}
+
 	if strings.EqualFold(strings.TrimSpace(event.Kind), "tool_result") {
 		return "tool_result", true
 	}
@@ -140,6 +167,17 @@ func detectConservativeNoise(event *core.Event) (string, bool) {
 	}
 
 	return "", false
+}
+
+func containsAMMToolCallName(content string) bool {
+	for _, token := range strings.FieldsFunc(strings.ToLower(content), func(r rune) bool {
+		return !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_')
+	}) {
+		if _, ok := ammToolNames[token]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func isLargeJSONBlob(content string) bool {

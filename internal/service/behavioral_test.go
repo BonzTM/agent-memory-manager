@@ -2339,6 +2339,16 @@ func TestIngestionPolicy_NoiseHeuristicDowngradesConservativeCases(t *testing.T)
 			noiseKind: "tool_result",
 		},
 		{
+			name: "amm tool call",
+			event: &core.Event{
+				Kind:         "tool_call",
+				SourceSystem: "test",
+				PrivacyLevel: core.PrivacyPrivate,
+				Content:      `{"tool":"amm_recall","arguments":{"query":"preferences"}}`,
+			},
+			noiseKind: "amm_self_reference",
+		},
+		{
 			name: "large json blob",
 			event: &core.Event{
 				Kind:         "message",
