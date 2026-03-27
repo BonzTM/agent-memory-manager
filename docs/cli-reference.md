@@ -421,6 +421,30 @@ amm memory mem_xyz789
 
 ---
 
+### memory update <id>
+
+Update an existing memory.
+
+```
+amm memory update <id> [--body <body>] [--tight <summary>] [--status <status>] [--type <type>] [--scope <scope>]
+```
+
+| Flag | Description |
+|---|---|
+| `--body` | Updated memory body text |
+| `--tight` | Updated one-line summary |
+| `--status` | Updated status: `active`, `superseded`, `archived`, `retracted` |
+| `--type` | Updated memory type |
+| `--scope` | Updated scope |
+
+**Example:**
+
+```bash
+amm memory update mem_xyz789 --status archived
+```
+
+---
+
 ### share
 
 Update a memory's privacy level.
@@ -451,6 +475,272 @@ amm share mem_xyz789 --privacy shared
     "privacy_level": "shared"
   }
 }
+```
+
+---
+
+### forget
+
+Forget (retract) a memory by ID.
+
+```
+amm forget <id>
+```
+
+**Example:**
+
+```bash
+amm forget mem_xyz789
+```
+
+---
+
+### policy list
+
+List all ingestion policies.
+
+```
+amm policy list
+```
+
+---
+
+### policy add
+
+Add an ingestion policy.
+
+```
+amm policy add --pattern-type <type> --pattern <pattern> --mode <mode> [--priority <priority>] [--match-mode <match-mode>]
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--pattern-type` | Yes | `session`, `source`, `surface`, `agent`, `project`, or `runtime` |
+| `--pattern` | Yes | Pattern string to match |
+| `--mode` | Yes | `full`, `read_only`, or `ignore` |
+| `--priority` | No | Integer priority (higher wins) |
+| `--match-mode` | No | `exact`, `glob`, or `regex` |
+
+---
+
+### policy remove
+
+Remove an ingestion policy by ID.
+
+```
+amm policy remove <id>
+```
+
+---
+
+### project add
+
+Register a new project.
+
+```
+amm project add --name <name> --path <path> --description <description>
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--name` | Yes | Project name |
+| `--path` | Yes | Absolute or relative project path |
+| `--description` | Yes | Human-readable project description |
+
+**Example:**
+
+```bash
+amm project add --name "amm" --path "/home/user/src/agent-memory-manager" --description "Agent memory manager repository"
+```
+
+---
+
+### project show
+
+Show a project by ID.
+
+```
+amm project show <id>
+```
+
+`<id>` is positional and required.
+
+**Example:**
+
+```bash
+amm project show proj_abc123
+```
+
+---
+
+### project list
+
+List all registered projects.
+
+```
+amm project list
+```
+
+No flags or positional arguments.
+
+**Example:**
+
+```bash
+amm project list
+```
+
+---
+
+### project remove
+
+Remove a project by ID.
+
+```
+amm project remove <id>
+```
+
+`<id>` is positional and required.
+
+**Example:**
+
+```bash
+amm project remove proj_abc123
+```
+
+---
+
+### relationship add
+
+Add a directed relationship between entities.
+
+```
+amm relationship add --from <id> --to <id> --type <type>
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--from` | Yes | Source entity ID |
+| `--to` | Yes | Destination entity ID |
+| `--type` | Yes | Relationship type |
+
+**Example:**
+
+```bash
+amm relationship add --from ent_parent --to ent_child --type parent_of
+```
+
+---
+
+### relationship show
+
+Show a relationship by ID.
+
+```
+amm relationship show <id>
+```
+
+`<id>` is positional and required.
+
+**Example:**
+
+```bash
+amm relationship show rel_abc123
+```
+
+---
+
+### relationship list
+
+List relationships with optional filters.
+
+```
+amm relationship list [--entity-id <id>] [--relationship-type <type>] [--limit <n>]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--entity-id` | Filter by entity ID |
+| `--relationship-type` | Filter by relationship type |
+| `--limit` | Max results to return |
+
+**Example:**
+
+```bash
+amm relationship list
+amm relationship list --entity-id ent_abc123
+amm relationship list --relationship-type depends_on --limit 10
+```
+
+---
+
+### relationship remove
+
+Remove a relationship by ID.
+
+```
+amm relationship remove <id>
+```
+
+`<id>` is positional and required.
+
+**Example:**
+
+```bash
+amm relationship remove rel_abc123
+```
+
+---
+
+### summary show
+
+Show a summary by ID.
+
+```
+amm summary show <id>
+```
+
+`<id>` is positional and required.
+
+**Example:**
+
+```bash
+amm summary show sum_abc123
+```
+
+---
+
+### episode show
+
+Show an episode by ID.
+
+```
+amm episode show <id>
+```
+
+`<id>` is positional and required.
+
+**Example:**
+
+```bash
+amm episode show ep_abc123
+```
+
+---
+
+### entity show
+
+Show an entity by ID.
+
+```
+amm entity show <id>
+```
+
+`<id>` is positional and required.
+
+**Example:**
+
+```bash
+amm entity show ent_abc123
 ```
 
 ---

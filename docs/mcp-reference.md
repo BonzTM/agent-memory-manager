@@ -525,6 +525,412 @@ Update a memory privacy level.
 
 ---
 
+### amm_forget
+
+Forget (retract) a memory by ID. The memory is marked as retracted and excluded from recall. Future reflect/reprocess runs will not re-extract forgotten content.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "Memory ID to forget"}
+  },
+  "required": ["id"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 20,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_forget",
+    "arguments": {
+      "id": "mem_abc123"
+    }
+  }
+}
+```
+
+---
+
+### amm_register_project
+
+Register a new project.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "name":        {"type": "string", "description": "Project name"},
+    "path":        {"type": "string", "description": "Project path"},
+    "description": {"type": "string", "description": "Project description"}
+  },
+  "required": ["name", "path", "description"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 20,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_register_project",
+    "arguments": {
+      "name": "amm",
+      "path": "/home/user/src/agent-memory-manager",
+      "description": "Agent memory manager repository"
+    }
+  }
+}
+```
+
+---
+
+### amm_get_project
+
+Get a project by ID.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "Item ID"}
+  },
+  "required": ["id"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 21,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_get_project",
+    "arguments": {
+      "id": "proj_abc123"
+    }
+  }
+}
+```
+
+---
+
+### amm_list_projects
+
+List all projects.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 22,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_list_projects",
+    "arguments": {}
+  }
+}
+```
+
+---
+
+### amm_remove_project
+
+Remove a project by ID.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "Item ID"}
+  },
+  "required": ["id"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 23,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_remove_project",
+    "arguments": {
+      "id": "proj_abc123"
+    }
+  }
+}
+```
+
+---
+
+### amm_add_relationship
+
+Add an entity relationship.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "from_entity_id":    {"type": "string", "description": "Source entity ID"},
+    "to_entity_id":      {"type": "string", "description": "Destination entity ID"},
+    "relationship_type": {"type": "string", "description": "Relationship type"}
+  },
+  "required": ["from_entity_id", "to_entity_id", "relationship_type"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 24,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_add_relationship",
+    "arguments": {
+      "from_entity_id": "ent_parent",
+      "to_entity_id": "ent_child",
+      "relationship_type": "parent_of"
+    }
+  }
+}
+```
+
+---
+
+### amm_get_relationship
+
+Get a relationship by ID.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "Item ID"}
+  },
+  "required": ["id"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 25,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_get_relationship",
+    "arguments": {
+      "id": "rel_abc123"
+    }
+  }
+}
+```
+
+---
+
+### amm_list_relationships
+
+List relationships.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 26,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_list_relationships",
+    "arguments": {}
+  }
+}
+```
+
+---
+
+### amm_remove_relationship
+
+Remove a relationship by ID.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "Item ID"}
+  },
+  "required": ["id"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 27,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_remove_relationship",
+    "arguments": {
+      "id": "rel_abc123"
+    }
+  }
+}
+```
+
+---
+
+### amm_get_summary
+
+Get a summary by ID.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "Item ID"}
+  },
+  "required": ["id"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 28,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_get_summary",
+    "arguments": {
+      "id": "sum_abc123"
+    }
+  }
+}
+```
+
+---
+
+### amm_get_episode
+
+Get an episode by ID.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "Item ID"}
+  },
+  "required": ["id"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 29,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_get_episode",
+    "arguments": {
+      "id": "ep_abc123"
+    }
+  }
+}
+```
+
+---
+
+### amm_get_entity
+
+Get an entity by ID.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "Item ID"}
+  },
+  "required": ["id"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 30,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_get_entity",
+    "arguments": {
+      "id": "ent_abc123"
+    }
+  }
+}
+```
+
+---
+
 ### amm_jobs_run
 
 Run a maintenance job.
