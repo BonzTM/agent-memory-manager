@@ -130,7 +130,6 @@ Full reference in [Configuration Documentation](docs/configuration.md).
 | `form_episodes` | Group related events into narrative episodes. |
 | `detect_contradictions` | Find conflicting claims or stale truths. |
 | `decay_stale_memory` | Downrank stale assumptions and open loops. |
-| `promote_high_value` | Promote frequently accessed memories. |
 | `lifecycle_review` | LLM-powered review for memory decay and promotion. |
 | `cross_project_transfer` | Promote reusable memories to global scope. |
 | `archive_session_traces` | Archive low-salience session memories. |

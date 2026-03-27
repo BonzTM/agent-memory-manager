@@ -406,7 +406,6 @@ After events accumulate, background workers extract structure and consolidate kn
 | `form_episodes` | Groups related events into narrative episodes |
 | `detect_contradictions` | Finds conflicting memories |
 | `decay_stale_memory` | Reduces importance of untouched memories over time |
-| `promote_high_value` | Promotes high-value memories based on usage/confidence |
 | `lifecycle_review` | Runs LLM-powered batch review for decay/promote/contradict decisions |
 | `cross_project_transfer` | Promotes reusable project memories into global scope |
 | `archive_session_traces` | Archives low-salience session memories |
@@ -425,7 +424,7 @@ Workers can be triggered manually, on a schedule, or after a threshold of new ev
 
 We distinguish between **baseline** jobs (essential for daily memory building) and **optional** jobs (aggressive optimization or repair).
 
-- **Baseline Jobs**: The shared runner (`examples/scripts/run-workers.sh`) includes the full current sequence: `reflect`, `compress_history`, `consolidate_sessions`, `build_topic_summaries`, `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `form_episodes`, `detect_contradictions`, `decay_stale_memory`, `promote_high_value`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces`, `rebuild_indexes`, `cleanup_recall_history`, and `update_ranking_weights`.
+- **Baseline Jobs**: The shared runner (`examples/scripts/run-workers.sh`) includes the full current sequence: `reflect`, `compress_history`, `consolidate_sessions`, `build_topic_summaries`, `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `form_episodes`, `detect_contradictions`, `decay_stale_memory`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces`, `rebuild_indexes`, `cleanup_recall_history`, and `update_ranking_weights`.
 - **System Repairs**: Structural repairs like `repair_links` are not part of the baseline; run them via `amm repair --fix links` as needed.
 
 For migration/upgrade cleanup of derived data (keeping events), run `amm reset-derived` before re-running the baseline sequence.

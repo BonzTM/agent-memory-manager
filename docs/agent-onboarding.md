@@ -364,7 +364,7 @@ The baseline runner follows a 6-phase structure to ensure clean dependencies:
 2. **Phase 2: Initial Indexing** — `rebuild_indexes` builds embeddings so downstream jobs can use semantic scoring.
 3. **Phase 3: Compression** — `compress_history`, `consolidate_sessions`, `build_topic_summaries` structure the raw history.
 4. **Phase 4: Linking** — `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `form_episodes` build the knowledge graph.
-5. **Phase 5: Quality** — `detect_contradictions`, `decay_stale_memory`, `promote_high_value`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces` refine the store.
+5. **Phase 5: Quality** — `detect_contradictions`, `decay_stale_memory`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces` refine the store.
 6. **Phase 6: Finalization** — `rebuild_indexes` (catches items from phases 3-5), `cleanup_recall_history`, `update_ranking_weights` finalize the cycle.
 
 ### Option B: Structural Repair (As Needed)
@@ -398,7 +398,6 @@ If you prefer individual cron entries, you must stagger them so they do not fire
 0 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run merge_duplicates >/dev/null 2>&1
 10 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run detect_contradictions >/dev/null 2>&1
 20 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run decay_stale_memory >/dev/null 2>&1
-30 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run promote_high_value >/dev/null 2>&1
 40 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run lifecycle_review >/dev/null 2>&1
 50 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run cross_project_transfer >/dev/null 2>&1
 

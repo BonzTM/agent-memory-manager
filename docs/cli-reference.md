@@ -485,10 +485,10 @@ Do not combine a positional job kind with `--reprocess` or `--reprocess-all`.
 2. `rebuild_indexes` (Phase 2: Initial embedding)
 3. `compress_history`, `consolidate_sessions`, `build_topic_summaries` (Phase 3: Compression)
 4. `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `form_episodes` (Phase 4: Linking)
-5. `detect_contradictions`, `decay_stale_memory`, `promote_high_value`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces` (Phase 5: Quality)
+5. `detect_contradictions`, `decay_stale_memory`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces` (Phase 5: Quality)
 6. `rebuild_indexes`, `cleanup_recall_history`, `update_ranking_weights` (Phase 6: Finalization)
 
-**Available job kinds (21):**
+**Available job kinds (20):**
 
 | Kind | Description |
 |---|---|
@@ -505,7 +505,6 @@ Do not combine a positional job kind with `--reprocess` or `--reprocess-all`.
 | `rebuild_indexes` | Rebuild FTS and embeddings (incremental — skips existing) |
 | `rebuild_indexes_full` | Rebuild FTS and all embeddings from scratch |
 | `cleanup_recall_history` | Clean up recall history tracking data |
-| `promote_high_value` | Promote high-value memories based on access patterns |
 | `lifecycle_review` | LLM-powered batch review for decay/promote/contradict |
 | `cross_project_transfer` | Detect and promote cross-project memories to global |
 | `rebuild_entity_graph` | Rebuild pre-computed entity neighborhoods |

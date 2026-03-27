@@ -541,7 +541,7 @@ Run a maintenance job.
 }
 ```
 
-**Available job kinds (21):**
+**Available job kinds (20):**
 
 | Kind | Description |
 |---|---|
@@ -558,7 +558,6 @@ Run a maintenance job.
 | `rebuild_indexes` | Rebuild FTS and embeddings (incremental — skips existing) |
 | `rebuild_indexes_full` | Rebuild FTS and all embeddings from scratch |
 | `cleanup_recall_history` | Clean up recall history tracking data |
-| `promote_high_value` | Promote high-value memories based on access patterns |
 | `lifecycle_review` | LLM-powered batch review for decay/promote/contradict |
 | `cross_project_transfer` | Detect and promote cross-project memories to global |
 | `rebuild_entity_graph` | Rebuild pre-computed entity neighborhoods |
