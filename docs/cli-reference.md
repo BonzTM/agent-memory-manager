@@ -42,7 +42,7 @@ On failure the envelope goes to stderr with `"ok": false` and an `"error"` objec
 ## Building
 
 ```bash
-CGO_ENABLED=1 go build -tags fts5 -o amm ./cmd/amm
+go build -o amm ./cmd/amm
 ```
 
 ---

@@ -7,6 +7,6 @@ Claude companion for amm (Agent Memory Manager). Primary contract is `AGENTS.md`
 
 ## Claude-Specific Notes
 
-- Prefer targeted package tests (`go test -tags fts5 ./internal/<pkg>/...`) before running the full suite.
+- Prefer targeted package tests (`go test ./internal/<pkg>/...`) before running the full suite.
 - Use AMM's own MCP tools (`amm_recall`, `amm_remember`, etc.) for durable memory — do not write to the SQLite database directly.
 - When making contract or schema changes, verify CLI/MCP parity by checking both `cmd/amm` and `cmd/amm-mcp` wiring.

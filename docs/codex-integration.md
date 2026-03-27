@@ -34,8 +34,8 @@ If the repo also uses ACM, ACM owns task workflow and AMM owns durable memory.
 ```bash
 mkdir -p /tmp/amm-build
 
-CGO_ENABLED=1 go build -tags fts5 -o /tmp/amm-build/amm ./cmd/amm
-CGO_ENABLED=1 go build -tags fts5 -o /tmp/amm-build/amm-mcp ./cmd/amm-mcp
+go build -o /tmp/amm-build/amm ./cmd/amm
+go build -o /tmp/amm-build/amm-mcp ./cmd/amm-mcp
 
 sudo install -m 755 /tmp/amm-build/amm /usr/local/bin/amm
 sudo install -m 755 /tmp/amm-build/amm-mcp /usr/local/bin/amm-mcp

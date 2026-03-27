@@ -5,7 +5,7 @@ amm exposes all its functionality as MCP (Model Context Protocol) tools over a s
 ## Starting the Server
 
 ```bash
-CGO_ENABLED=1 go build -tags fts5 -o amm-mcp ./cmd/amm-mcp
+go build -o amm-mcp ./cmd/amm-mcp
 AMM_DB_PATH=~/.amm/amm.db ./amm-mcp
 ```
 

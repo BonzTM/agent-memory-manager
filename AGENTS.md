@@ -66,27 +66,24 @@ deploy/
 ## Prerequisites
 
 - **Go 1.21+** (module requires 1.26.1; any recent Go toolchain handles this)
-- **CGO enabled** — SQLite is accessed via `github.com/mattn/go-sqlite3`, which requires a C compiler (`gcc` or `cc`) and SQLite headers
 - **Python 3** — needed for validation scripts in `scripts/`
 - **`.env` file** — copy `.env.example` to `.env` and populate `ACM_*` variables if using ACM workflows
 
 ## Build & Test
 
 ```bash
-# Build all three binaries (CGO + FTS5 required)
-CGO_ENABLED=1 go build -tags fts5 ./cmd/amm ./cmd/amm-mcp ./cmd/amm-http
+# Build all three binaries
+go build ./cmd/amm ./cmd/amm-mcp ./cmd/amm-http
 
 # Run targeted package tests (prefer this first)
-CGO_ENABLED=1 go test -tags fts5 ./internal/core/... ./internal/runtime/... -count=1
+go test ./internal/core/... ./internal/runtime/... -count=1
 
 # Run full test suite
-CGO_ENABLED=1 go test -tags fts5 ./... -count=1
+go test ./... -count=1
 
 # Initialize a fresh database
 AMM_DB_PATH=~/.amm/amm.db ./amm init
 ```
-
-The `-tags fts5` flag is mandatory — FTS5 support is compile-time enforced.
 
 ## Go Conventions
 
@@ -130,9 +127,5 @@ Changes to these areas require extra care — verify thoroughly and flag in PR d
 
 | Problem | Likely cause | Fix |
 |---------|-------------|-----|
-| `cgo: C compiler not found` | CGO_ENABLED=1 but no `gcc`/`cc` | Install `build-essential` (Debian) or `gcc` |
-| `undefined: sqlite3` or link errors | Missing CGO or SQLite headers | Ensure `CGO_ENABLED=1` and `libsqlite3-dev` installed |
-| `unknown build flag -tags fts5` | Old Go version | Upgrade to Go 1.21+ |
-| FTS5 queries return empty results | Binary built without `-tags fts5` | Rebuild with the tag |
 | Tests fail with "database is locked" | Concurrent test processes sharing a DB file | Use `-count=1` to disable test caching; ensure tests use isolated temp DBs |
 | `acm` commands fail | Missing `.env` or ACM not installed | Check `.env` exists with `ACM_*` vars; run `acm status` to debug |

@@ -40,9 +40,9 @@ docker run -v ~/.amm:/data -e AMM_DB_PATH=/data/amm.db ghcr.io/bonztm/agent-memo
 ```
 
 ### 3. Build from Source
-If you prefer building locally, ensure you have Go 1.21+ and a C compiler (CGO is required for SQLite).
+If you prefer building locally, ensure you have Go 1.21+.
 ```bash
-CGO_ENABLED=1 go build -tags fts5 ./cmd/amm ./cmd/amm-mcp ./cmd/amm-http
+go build ./cmd/amm ./cmd/amm-mcp ./cmd/amm-http
 ```
 See [Getting Started](docs/getting-started.md) for more build options.
 

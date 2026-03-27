@@ -31,13 +31,6 @@ For production deployments, see the [PostgreSQL Backend](postgres.md) guide and 
 ### 3. Build from Source
 If you prefer to build locally, you need:
 - Go 1.21 or later
-- A C compiler (gcc or clang) for CGO support
-- SQLite development headers
-
-**On Ubuntu/Debian:**
-```bash
-sudo apt-get install build-essential libsqlite3-dev
-```
 
 **Build Commands:**
 ```bash
@@ -45,8 +38,8 @@ sudo apt-get install build-essential libsqlite3-dev
 git clone https://github.com/bonztm/agent-memory-manager.git
 cd agent-memory-manager
 
-# Build all three binaries with FTS5 support
-CGO_ENABLED=1 go build -tags fts5 ./cmd/amm ./cmd/amm-mcp ./cmd/amm-http
+# Build all three binaries
+go build ./cmd/amm ./cmd/amm-mcp ./cmd/amm-http
 ```
 
 ---

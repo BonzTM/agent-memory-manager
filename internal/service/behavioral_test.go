@@ -1,5 +1,3 @@
-//go:build fts5
-
 package service
 
 import (
@@ -3317,8 +3315,8 @@ func TestRecallHybrid_FindsEmbeddingCandidatesNotInFTS(t *testing.T) {
 		ID:               "mem_hybrid_embedding_only",
 		Type:             core.MemoryTypeFact,
 		Scope:            core.ScopeGlobal,
-		Body:             "CGO_ENABLED=1 required for SQLite builds",
-		TightDescription: "CGO requirement for SQLite build",
+		Body:             "Pure Go driver modernc.org/sqlite used for database access",
+		TightDescription: "SQLite driver choice",
 		Confidence:       0.9,
 		Importance:       0.7,
 		PrivacyLevel:     core.PrivacyPrivate,
@@ -3380,8 +3378,8 @@ func TestRecallHybrid_MergesFTSAndEmbeddingCandidates(t *testing.T) {
 		ID:               "mem_hybrid_embedding",
 		Type:             core.MemoryTypeFact,
 		Scope:            core.ScopeGlobal,
-		Body:             "CGO_ENABLED=1 required for SQLite builds",
-		TightDescription: "CGO requirement for SQLite build",
+		Body:             "Pure Go driver modernc.org/sqlite used for database access",
+		TightDescription: "SQLite driver choice",
 		Confidence:       0.9,
 		Importance:       0.7,
 		PrivacyLevel:     core.PrivacyPrivate,

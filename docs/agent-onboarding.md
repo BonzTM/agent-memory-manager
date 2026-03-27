@@ -30,7 +30,7 @@ Once amm is installed, the agent should follow the same durable-memory rules reg
 jq --version
 ```
 
-If the user wants to build from source, they also need Go 1.21+ plus CGO prerequisites. Use [Getting Started](getting-started.md) for full install instructions.
+If the user wants to build from source, they need Go 1.21+. Use [Getting Started](getting-started.md) for full install instructions.
 
 ---
 
@@ -520,4 +520,4 @@ Run through this checklist to confirm everything is working:
 
 **MCP server returns parse errors** -- Ensure you are sending one JSON-RPC message per line. The MCP server reads newline-delimited JSON from stdin.
 
-**CGO build errors** -- Install a C compiler. On Debian/Ubuntu: `sudo apt install build-essential`. On macOS: `xcode-select --install`. On Alpine: `apk add gcc musl-dev`.
+**CGO build errors** -- These typically no longer occur since the migration to a pure Go SQLite driver. If you encounter build issues, ensure you are using Go 1.21+ and have a clean environment.

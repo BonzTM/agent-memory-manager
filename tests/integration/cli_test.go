@@ -30,9 +30,8 @@ func TestMain(m *testing.M) {
 		}
 	}
 
-	cmd := exec.Command(goBin, "build", "-tags", "fts5", "-o", binaryPath, "./cmd/amm")
+	cmd := exec.Command(goBin, "build", "-o", binaryPath, "./cmd/amm")
 	cmd.Dir = filepath.Join("..", "..")
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.RemoveAll(tmpDir)
 		panic("build failed: " + string(out) + ": " + err.Error())

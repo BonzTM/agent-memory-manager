@@ -20,16 +20,12 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
-            cc: gcc
           - goos: linux
             goarch: arm64
-            zig_target: aarch64-linux-musl
           - goos: darwin
             goarch: amd64
-            zig_target: x86_64-macos
           - goos: darwin
             goarch: arm64
-            zig_target: aarch64-macos
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -40,26 +36,17 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y gcc libsqlite3-dev
-
-      - name: Install Zig
-        if: matrix.zig_target != ''
-        uses: mlugg/setup-zig@v1
-
       - name: Build binaries
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: '1'
-          CC: ${{ matrix.zig_target != '' && format('zig cc -target {0}', matrix.zig_target) || matrix.cc }}
         run: |
           LDFLAGS="-s -w"
           LDFLAGS="$LDFLAGS -X github.com/bonztm/agent-memory-manager/internal/buildinfo.Version=${{ env.VERSION }}"
           LDFLAGS="$LDFLAGS -X github.com/bonztm/agent-memory-manager/internal/buildinfo.CommitShort=${GITHUB_SHA::7}"
           mkdir -p dist
           for bin in amm amm-mcp amm-http; do
-            go build -tags fts5 -ldflags "$LDFLAGS" -o "dist/${bin}" "./cmd/${bin}"
+            go build -ldflags "$LDFLAGS" -o "dist/${bin}" "./cmd/${bin}"
           done
           cd dist && tar czf "../amm-${{ env.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" amm amm-mcp amm-http
 

@@ -9,7 +9,7 @@ AMM is a Go-based system that provides persistent, typed, temporal memory for ag
 - **API-First**: A single `Service` interface defines all business logic. CLI, MCP, and HTTP are thin adapters.
 - **Pluggable Storage**: Supports SQLite (local, single file) and PostgreSQL (networked, high-concurrency).
 - **Single Binary Distribution**: `go build` produces self-contained executables for the CLI (`amm`), MCP (`amm-mcp`), and HTTP server (`amm-http`).
-- **Standard Library First**: Minimal dependencies, relying on Go standard library and mature drivers (`mattn/go-sqlite3`, `lib/pq`).
+- **Standard Library First**: Minimal dependencies, relying on Go standard library and mature drivers (`modernc.org/sqlite`, `lib/pq`).
 
 The service layer (`internal/core/Service`) is the only entry point for business logic. This ensures consistent behavior regardless of the interface used.
 

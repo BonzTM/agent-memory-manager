@@ -1,5 +1,3 @@
-//go:build fts5
-
 package service
 
 import (

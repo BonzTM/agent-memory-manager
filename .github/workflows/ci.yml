@@ -37,22 +37,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y gcc libsqlite3-dev
-
       - name: Test
         env:
-          CGO_ENABLED: '1'
           AMM_TEST_POSTGRES_DSN: 'postgres://amm_test:amm_test@localhost:5432/amm_test?sslmode=disable'
-        run: go test -tags fts5 ./... -count=1 -race -coverprofile=coverage.out
+        run: go test ./... -count=1 -race -coverprofile=coverage.out
 
       - name: Build
-        env:
-          CGO_ENABLED: '1'
         run: |
           mkdir -p dist
           for bin in amm amm-mcp amm-http; do
-            go build -tags fts5 -o "dist/${bin}" "./cmd/${bin}"
+            go build -o "dist/${bin}" "./cmd/${bin}"
           done
 
       - name: Upload binaries

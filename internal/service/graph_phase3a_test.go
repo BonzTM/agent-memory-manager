@@ -1,5 +1,3 @@
-//go:build fts5
-
 package service
 
 import (
@@ -16,7 +14,7 @@ func TestRecall_EntityRelationshipBoost(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	sqliteEntity := &core.Entity{ID: "ent_sqlite_phase3a", Type: "technology", CanonicalName: "SQLite", CreatedAt: now, UpdatedAt: now}
-	driverEntity := &core.Entity{ID: "ent_go_sqlite3_phase3a", Type: "technology", CanonicalName: "go-sqlite3", CreatedAt: now, UpdatedAt: now}
+	driverEntity := &core.Entity{ID: "ent_modernc_sqlite_phase3a", Type: "technology", CanonicalName: "modernc-sqlite", CreatedAt: now, UpdatedAt: now}
 	for _, entity := range []*core.Entity{sqliteEntity, driverEntity} {
 		if err := repo.InsertEntity(ctx, entity); err != nil {
 			t.Fatalf("insert entity %s: %v", entity.ID, err)
@@ -26,7 +24,7 @@ func TestRecall_EntityRelationshipBoost(t *testing.T) {
 	memory, err := svc.Remember(ctx, &core.Memory{
 		Type:             core.MemoryTypeFact,
 		Scope:            core.ScopeGlobal,
-		Body:             "Use the mattn Go driver for local persistence",
+		Body:             "Use the modernc pure-Go driver for local persistence",
 		TightDescription: "Go driver selection",
 		Confidence:       0.9,
 		Importance:       0.7,
@@ -46,7 +44,7 @@ func TestRecall_EntityRelationshipBoost(t *testing.T) {
 	withoutBreakdown := ScoreItem(candidates[0], withoutRelationship)
 
 	if err := repo.InsertRelationship(ctx, &core.Relationship{
-		ID:               "rel_go_sqlite3_depends_sqlite_phase3a",
+		ID:               "rel_modernc_sqlite_depends_sqlite_phase3a",
 		FromEntityID:     driverEntity.ID,
 		ToEntityID:       sqliteEntity.ID,
 		RelationshipType: "depends-on",
