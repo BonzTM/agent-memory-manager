@@ -1,15 +1,14 @@
-name: Release
+name: Go Build
 
 on:
-  release:
-    types: [published]
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   packages: write
-
-env:
-  VERSION: ${{ github.event.release.tag_name }}
 
 jobs:
   build:
@@ -54,19 +53,21 @@ jobs:
           CGO_ENABLED: '1'
           CC: ${{ matrix.zig_target != '' && format('zig cc -target {0}', matrix.zig_target) || matrix.cc }}
         run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
           LDFLAGS="-s -w"
-          LDFLAGS="$LDFLAGS -X github.com/bonztm/agent-memory-manager/internal/buildinfo.Version=${{ env.VERSION }}"
-          LDFLAGS="$LDFLAGS -X github.com/bonztm/agent-memory-manager/internal/buildinfo.CommitShort=${GITHUB_SHA::7}"
+          LDFLAGS="$LDFLAGS -X github.com/bonztm/agent-memory-manager/internal/buildinfo.Version=${SHORT_SHA}"
+          LDFLAGS="$LDFLAGS -X github.com/bonztm/agent-memory-manager/internal/buildinfo.CommitShort=${SHORT_SHA}"
           mkdir -p dist
           for bin in amm amm-mcp amm-http; do
             go build -tags fts5 -ldflags "$LDFLAGS" -o "dist/${bin}" "./cmd/${bin}"
           done
-          cd dist && tar czf "../amm-${{ env.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" amm amm-mcp amm-http
 
-      - name: Upload release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ env.VERSION }}" "amm-${{ env.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" --clobber
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: amm-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+          if-no-files-found: error
 
   docker:
     name: Docker Image
@@ -75,6 +76,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set short SHA
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -95,7 +99,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: VERSION=${{ env.VERSION }}
+          build-args: VERSION=${{ env.SHORT_SHA }}
           tags: |
-            ghcr.io/bonztm/agent-memory-manager:${{ env.VERSION }}
-            ghcr.io/bonztm/agent-memory-manager:latest
+            ghcr.io/bonztm/agent-memory-manager:${{ env.SHORT_SHA }}
+            ghcr.io/bonztm/agent-memory-manager:edge
