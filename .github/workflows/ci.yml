@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: amm_test
+          POSTGRES_PASSWORD: amm_test
+          POSTGRES_DB: amm_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y gcc libsqlite3-dev
+
+      - name: Test
+        env:
+          CGO_ENABLED: '1'
+          AMM_TEST_POSTGRES_DSN: 'postgres://amm_test:amm_test@localhost:5432/amm_test?sslmode=disable'
+        run: go test -tags fts5 ./... -count=1 -race -coverprofile=coverage.out
+
+      - name: Build
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          mkdir -p dist
+          for bin in amm amm-mcp amm-http; do
+            go build -tags fts5 -o "dist/${bin}" "./cmd/${bin}"
+          done
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: amm-binaries
+          path: dist/
+          if-no-files-found: error
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
