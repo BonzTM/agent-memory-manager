@@ -46,6 +46,11 @@ AMM loads configuration in the following order:
 | `AMM_AUTO_CONSOLIDATE` | Automatically run consolidate job | `true` |
 | `AMM_AUTO_DETECT_CONTRADICTIONS` | Automatically run contradiction detection | `true` |
 
+### Compression
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `AMM_ESCALATION_DETERMINISTIC_MAX_CHARS` | Maximum characters for the Level-3 deterministic truncation fallback in the compression pipeline | `2048` |
+
 ### Summarizer (LLM Extraction & Reflection)
 Set `AMM_SUMMARIZER_ENDPOINT` and `AMM_SUMMARIZER_API_KEY` to enable LLM-backed memory extraction, NER entity extraction, and relationship inference. Without these, AMM falls back to heuristic extraction.
 
@@ -117,6 +122,9 @@ Full reference — all supported keys shown with their defaults:
     "auto_consolidate": true,
     "auto_detect_contradictions": true
   },
+  "compression": {
+    "escalation_deterministic_max_chars": 2048
+  },
   "summarizer": {
     "endpoint": "https://api.openai.com/v1",
     "api_key": "sk-...",
@@ -176,6 +184,11 @@ auto_compress = true
 auto_consolidate = true
 auto_detect_contradictions = true
 
+[compression]
+# Maximum characters for the Level-3 deterministic truncation fallback.
+# Env: AMM_ESCALATION_DETERMINISTIC_MAX_CHARS
+escalation_deterministic_max_chars = 2048
+
 [summarizer]
 endpoint = "https://api.openai.com/v1"
 api_key = "sk-..."
@@ -217,6 +230,24 @@ endpoint = "http://localhost:11434/v1"
 api_key = "ollama"
 model = "nomic-embed-text"
 ```
+
+---
+
+## Compression Behaviour
+
+The compression pipeline uses three-level escalation to guarantee convergence. All body
+summarization calls follow this fallback chain:
+
+1. **Level 1 (Normal)**: LLM summarize at `maxChars` target. Used if output is non-empty and shorter than input.
+2. **Level 2 (Aggressive)**: LLM summarize at `maxChars/2` target. Used if level 1 failed to reduce.
+3. **Level 3 (Deterministic)**: Truncate to `min(len, maxChars, escalation_deterministic_max_chars)` and append `[Truncated from N chars]`. Always succeeds. No LLM call.
+
+`escalation_deterministic_max_chars` defaults to `2048` and is configurable via `AMM_ESCALATION_DETERMINISTIC_MAX_CHARS` or `[compression].escalation_deterministic_max_chars`.
+
+The `summaries` table includes a `depth` field:
+- `depth=0` — leaf summaries (cover raw events) or session summaries
+- `depth=1` — topic/condensed summaries (cover leaf summaries)
+- `depth=2+` — reserved for future higher condensed levels
 
 ---
 

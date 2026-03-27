@@ -139,6 +139,28 @@ flowchart TD
     Sum --> Rank["Ranked Results"]
 ```
 
+## Compression Pipeline (Three-Level Escalation)
+
+```mermaid
+flowchart TD
+    Input["Text to Summarize"] --> L1["Level 1: LLM Summarize\ntarget = maxChars"]
+    L1 -->|"output < input"| Done["✓ Return Result"]
+    L1 -->|"output ≥ input\nor empty"| L2["Level 2: LLM Summarize\ntarget = maxChars / 2"]
+    L2 -->|"output < input"| Done
+    L2 -->|"output ≥ input\nor empty"| L3["Level 3: Deterministic Truncate\nmin(len, maxChars, escalation_deterministic_max_chars)\n+ '[Truncated from N chars]'\nNo LLM call"]
+    L3 --> Done
+```
+
+## Summary DAG Depth Model
+
+```mermaid
+flowchart BT
+    E1["Event"] & E2["Event"] & E3["Event"] --> LS1["Leaf Summary\ndepth=0, kind=leaf"]
+    E4["Event"] & E5["Event"] & E6["Event"] --> LS2["Leaf Summary\ndepth=0, kind=leaf"]
+    LS1 & LS2 --> TS["Topic Summary\ndepth=1, kind=topic"]
+    E7["Event (session)"] --> SS["Session Summary\ndepth=0, kind=session"]
+```
+
 ## Module Layout
 
 ```mermaid

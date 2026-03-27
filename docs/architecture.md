@@ -31,6 +31,8 @@ AMM organizes information into five layers, from ephemeral state to durable trut
 - **Summaries linked to source spans**
 - Built by compression workers from raw history.
 - Hierarchy is tracked via `summary_edges`, enabling drill-down from high-level summaries to raw events.
+- Summaries carry a `depth` field (0 = leaf/session, 1 = topic/condensed, 2+ = higher condensed) enabling efficient DAG queries by level.
+- All body summarization uses three-level escalation (normal → aggressive → deterministic truncate) guaranteeing convergence — the output is always shorter than the input.
 
 ### Layer D: Canonical Memory Layer
 - **Typed durable memory records**
@@ -78,9 +80,21 @@ AMM runs a staged intelligence pipeline to extract knowledge from raw history:
 1. **Ingest**: Raw events are appended to the history layer.
 2. **Reflect**: Processes events in batches to extract candidate memories (facts, preferences, etc.).
 3. **Index**: Generates text indexes and optional vector embeddings.
-4. **Compress**: Builds hierarchical summaries over event spans.
+4. **Compress**: Builds hierarchical summaries over event spans. Uses three-level escalation (normal → aggressive → deterministic truncate) to guarantee convergence at every level (leaf, topic, session).
 5. **Consolidate**: Groups related activity into narrative episodes.
 6. **Enrich**: Links memories to canonical entities and builds the relationship graph.
+
+### Compression Convergence Guarantee
+
+Every summarization call in the compression pipeline uses `summarizeWithEscalation`, which enforces:
+
+| Level | Strategy | Condition to use |
+|-------|----------|-----------------|
+| 1 | LLM summarize, target `maxChars` | Output non-empty and shorter than input |
+| 2 | LLM summarize, target `maxChars/2` | Output non-empty and shorter than input |
+| 3 | Deterministic truncate to `min(len, maxChars, escalation_deterministic_max_chars)` + `[Truncated from N chars]` | Always — no LLM call |
+
+This means compaction can never produce output longer than input, regardless of LLM behaviour.
 
 ---
 
@@ -109,3 +123,4 @@ Recall uses a weighted multi-signal formula to rank results:
 2. **Canonical tables are truth.** Derived indexes (FTS, embeddings) can always be rebuilt.
 3. **History is append-only.** Raw events are never modified, ensuring a perfect audit trail.
 4. **Schema changes are forward-only.** All modifications use the built-in migration system.
+5. **Compression always converges.** The three-level escalation guarantee means summarization can never produce output longer than its input.

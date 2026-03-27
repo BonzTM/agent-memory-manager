@@ -29,6 +29,7 @@
         "policy_add",
         "policy_remove",
         "run_job",
+        "reset_derived",
         "explain_recall",
         "repair",
         "status"

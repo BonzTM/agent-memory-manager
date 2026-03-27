@@ -89,9 +89,18 @@ echo "--- Step 12: Archive Session Traces ---"
 $AMM jobs run archive_session_traces | parse_field '"  Memories archived:", d["result"]["result"].get("memories_archived", "0")'
 echo ""
 
-# 14. Rebuild indexes
-echo "--- Step 14: Rebuild Indexes ---"
+# 13. Rebuild indexes
+echo "--- Step 13: Rebuild Indexes ---"
 $AMM jobs run rebuild_indexes | parse_field '"  Result:", d["result"]["result"].get("action", "done")'
+echo ""
+
+# 14. DB Trim and Compaction (Phase 7)
+echo "--- Step 14: DB Trim and Compaction ---"
+$AMM jobs run purge_old_events | parse_field '"  Events deleted:", d["result"]["result"].get("deleted", "0")'
+$AMM jobs run purge_old_jobs | parse_field '"  Jobs deleted:", d["result"]["result"].get("deleted", "0")'
+$AMM jobs run expire_retrieval_cache | parse_field '"  Cache entries expired:", d["result"]["result"].get("deleted", "0")'
+$AMM jobs run purge_relevance_feedback | parse_field '"  Feedback rows deleted:", d["result"]["result"].get("deleted", "0")'
+$AMM jobs run vacuum_analyze | parse_field '"  Status:", d["result"]["result"].get("status", "done")'
 echo ""
 
 # 15. Repair links

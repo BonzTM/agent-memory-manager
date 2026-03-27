@@ -777,8 +777,9 @@ Do not combine a positional job kind with `--reprocess` or `--reprocess-all`.
 4. `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `form_episodes` (Phase 4: Linking)
 5. `detect_contradictions`, `decay_stale_memory`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces` (Phase 5: Quality)
 6. `rebuild_indexes`, `cleanup_recall_history`, `update_ranking_weights` (Phase 6: Finalization)
+7. `purge_old_events`, `purge_old_jobs`, `expire_retrieval_cache`, `purge_relevance_feedback`, `vacuum_analyze` (Phase 7: DB trim and compaction)
 
-**Available job kinds (20):**
+**Available job kinds (25):**
 
 | Kind | Description |
 |---|---|
@@ -802,6 +803,11 @@ Do not combine a positional job kind with `--reprocess` or `--reprocess-all`.
 | `update_ranking_weights` | Update scoring weights from relevance feedback |
 | `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM. Uses endgame pipeline logic (triage, entity linking, processing ledger). |
 | `reprocess_all` | Batch re-extract all memories unconditionally, superseding both heuristic and LLM results. Uses endgame pipeline logic. |
+| `purge_old_events` | Delete reflected events older than 30 days to reclaim space |
+| `purge_old_jobs` | Delete completed and failed job records older than 30 days |
+| `expire_retrieval_cache` | Delete expired retrieval cache entries |
+| `purge_relevance_feedback` | Delete relevance feedback signals older than 30 days |
+| `vacuum_analyze` | Run backend-specific DB maintenance (SQLite: WAL checkpoint + ANALYZE + VACUUM; Postgres: ANALYZE) |
 
 **Example:**
 

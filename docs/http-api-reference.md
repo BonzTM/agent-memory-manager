@@ -183,10 +183,10 @@ Create a directed relationship between entities.
 ## Maintenance
 
 ### POST /v1/jobs/{kind}
-Trigger a background maintenance job.
+Trigger a background maintenance job. 25 job kinds are available, including Phase 7 trim and compaction jobs.
 
 **Path Parameters**
-- `kind`: `reflect`, `rebuild_indexes`, `compress_history`, etc.
+- `kind`: `reflect`, `rebuild_indexes`, `compress_history`, `purge_old_events`, `vacuum_analyze`, etc.
 
 ### POST /v1/init
 Initialize the database. Safe to call multiple times.

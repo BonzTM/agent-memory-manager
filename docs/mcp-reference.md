@@ -947,7 +947,7 @@ Run a maintenance job.
 }
 ```
 
-**Available job kinds (20):**
+**Available job kinds (25):**
 
 | Kind | Description |
 |---|---|
@@ -971,6 +971,11 @@ Run a maintenance job.
 | `update_ranking_weights` | Update scoring weights from relevance feedback |
 | `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM. Uses endgame pipeline logic (triage, entity linking, processing ledger). |
 | `reprocess_all` | Batch re-extract all memories unconditionally, superseding both heuristic and LLM results. Uses endgame pipeline logic. |
+| `purge_old_events` | Delete reflected events older than 30 days to reclaim space |
+| `purge_old_jobs` | Delete completed and failed job records older than 30 days |
+| `expire_retrieval_cache` | Delete expired retrieval cache entries |
+| `purge_relevance_feedback` | Delete relevance feedback signals older than 30 days |
+| `vacuum_analyze` | Run backend-specific DB maintenance (SQLite: WAL checkpoint + ANALYZE + VACUUM; Postgres: ANALYZE) |
 
 **Example:**
 

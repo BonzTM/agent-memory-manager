@@ -1,0 +1,8 @@
+{
+  "version": "amm.v1",
+  "command": "run_job",
+  "request_id": "example-compress-001",
+  "payload": {
+    "kind": "compress_history"
+  }
+}

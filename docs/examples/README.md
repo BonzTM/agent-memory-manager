@@ -8,7 +8,8 @@ This directory contains example JSON request envelopes for use with `amm run --i
 - `ingest-transcript.json` - Bulk event ingestion
 - `remember.json` - Store a durable memory
 - `recall.json` - Retrieve memories
-- `run-job.json` - Execute a maintenance job
+- `run-job.json` - Execute a maintenance job (reflect)
+- `run-job-compress.json` - Run the compress job (builds hierarchical summaries with three-level escalation)
 
 ## Usage
 
