@@ -25,6 +25,10 @@ jobs:
             goarch: amd64
           - goos: darwin
             goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -44,9 +48,11 @@ jobs:
           LDFLAGS="-s -w"
           LDFLAGS="$LDFLAGS -X github.com/bonztm/agent-memory-manager/internal/buildinfo.Version=${SHORT_SHA}"
           LDFLAGS="$LDFLAGS -X github.com/bonztm/agent-memory-manager/internal/buildinfo.CommitShort=${SHORT_SHA}"
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
           mkdir -p dist
           for bin in amm amm-mcp amm-http; do
-            go build -ldflags "$LDFLAGS" -o "dist/${bin}" "./cmd/${bin}"
+            go build -ldflags "$LDFLAGS" -o "dist/${bin}${EXT}" "./cmd/${bin}"
           done
 
       - name: Upload artifacts

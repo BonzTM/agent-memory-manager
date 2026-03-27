@@ -26,6 +26,10 @@ jobs:
             goarch: amd64
           - goos: darwin
             goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -44,16 +48,33 @@ jobs:
           LDFLAGS="-s -w"
           LDFLAGS="$LDFLAGS -X github.com/bonztm/agent-memory-manager/internal/buildinfo.Version=${{ env.VERSION }}"
           LDFLAGS="$LDFLAGS -X github.com/bonztm/agent-memory-manager/internal/buildinfo.CommitShort=${GITHUB_SHA::7}"
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
           mkdir -p dist
           for bin in amm amm-mcp amm-http; do
-            go build -ldflags "$LDFLAGS" -o "dist/${bin}" "./cmd/${bin}"
+            go build -ldflags "$LDFLAGS" -o "dist/${bin}${EXT}" "./cmd/${bin}"
           done
-          cd dist && tar czf "../amm-${{ env.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" amm amm-mcp amm-http
+
+      - name: Package release archive
+        run: |
+          cd dist
+          ARCHIVE="amm-${{ env.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip "../${ARCHIVE}.zip" amm.exe amm-mcp.exe amm-http.exe
+          else
+            tar czf "../${ARCHIVE}.tar.gz" amm amm-mcp amm-http
+          fi
 
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ env.VERSION }}" "amm-${{ env.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" --clobber
+        run: |
+          ARCHIVE="amm-${{ env.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            gh release upload "${{ env.VERSION }}" "${ARCHIVE}.zip" --clobber
+          else
+            gh release upload "${{ env.VERSION }}" "${ARCHIVE}.tar.gz" --clobber
+          fi
 
   docker:
     name: Docker Image
