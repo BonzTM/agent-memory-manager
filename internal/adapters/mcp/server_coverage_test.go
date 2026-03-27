@@ -262,8 +262,16 @@ func TestHandleToolCallCoversAllTools(t *testing.T) {
 	if initResp.Error != nil {
 		t.Fatalf("amm_init rpc error: %+v", initResp.Error)
 	}
-	if got := decodeToolResultText(t, initResp); got != "null" {
-		t.Fatalf("expected amm_init to return null payload, got %q", got)
+	var initResult struct {
+		Message string            `json:"message"`
+		Status  core.StatusResult `json:"status"`
+	}
+	decodeToolResultJSON(t, initResp, &initResult)
+	if initResult.Message != "already initialized" {
+		t.Fatalf("expected amm_init message to report already initialized, got %q", initResult.Message)
+	}
+	if !initResult.Status.Initialized {
+		t.Fatalf("expected amm_init status to report initialized, got %#v", initResult.Status)
 	}
 
 	ingestEventResp := handleToolCall(svc, toolReq(t, "amm_ingest_event", map[string]interface{}{

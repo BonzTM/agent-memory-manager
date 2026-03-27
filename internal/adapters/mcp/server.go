@@ -166,7 +166,15 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 
 	switch params.Name {
 	case "amm_init":
-		callErr = svc.Init(ctx, "")
+		status, err := svc.Status(ctx)
+		if err != nil {
+			callErr = err
+			break
+		}
+		result = map[string]interface{}{
+			"message": "already initialized",
+			"status":  status,
+		}
 
 	case "amm_ingest_event":
 		var evt core.Event
