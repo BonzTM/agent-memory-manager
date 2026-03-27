@@ -305,6 +305,14 @@ CREATE TABLE IF NOT EXISTS retrieval_cache (
 );
 `,
 	},
+	{
+		Version:     2,
+		Description: "add depth and condensed_kind to summaries",
+		SQL: `
+ALTER TABLE summaries ADD COLUMN depth INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE summaries ADD COLUMN condensed_kind TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

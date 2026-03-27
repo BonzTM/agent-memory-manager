@@ -130,6 +130,8 @@ type Event struct {
 type Summary struct {
 	ID               string            `json:"id"`
 	Kind             string            `json:"kind"` // leaf, session, topic, episode, condensed
+	Depth            int               `json:"depth"`
+	CondensedKind    string            `json:"condensed_kind,omitempty"`
 	Scope            Scope             `json:"scope"`
 	ProjectID        string            `json:"project_id,omitempty"`
 	SessionID        string            `json:"session_id,omitempty"`

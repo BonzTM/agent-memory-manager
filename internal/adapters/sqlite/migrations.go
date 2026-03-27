@@ -557,6 +557,14 @@ CREATE TABLE IF NOT EXISTS entity_graph_projection (
 CREATE INDEX IF NOT EXISTS idx_entity_graph_proj_entity ON entity_graph_projection(entity_id);
 `,
 	},
+	{
+		Version:     9,
+		Description: "add depth and condensed_kind to summaries",
+		SQL: `
+ALTER TABLE summaries ADD COLUMN depth INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE summaries ADD COLUMN condensed_kind TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 // Migrate runs all pending migrations.
