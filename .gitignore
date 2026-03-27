@@ -1,3 +1,8 @@
+# Agent tool configs (local-only)
+.claude/
+.opencode/
+.codex/
+
 # ACM local state
 .acm/context.db
 .acm/context.db-shm
