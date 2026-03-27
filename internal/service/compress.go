@@ -164,8 +164,8 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 			if trimmedBody := strings.TrimSpace(result.Body); trimmedBody != "" {
 				body = trimmedBody
 			}
-			if trimmedTight := strings.TrimSpace(result.TightDescription); trimmedTight != "" {
-				tightDesc = trimmedTight
+			if cleaned, ok := sanitizeTightDescription(result.TightDescription); ok {
+				tightDesc = cleaned
 			}
 		}
 
@@ -175,8 +175,10 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 			if err != nil {
 				return created, fmt.Errorf("summarize leaf body: %w", err)
 			}
-			if tightResult, err := s.summarizer.Summarize(ctx, body, 100); err == nil && strings.TrimSpace(tightResult) != "" {
-				tightDesc = tightResult
+			if tightResult, err := s.summarizer.Summarize(ctx, body, 100); err == nil {
+				if cleaned, ok := sanitizeTightDescription(tightResult); ok {
+					tightDesc = cleaned
+				}
 			}
 		}
 
@@ -544,9 +546,10 @@ func (s *AMMService) summarizeTopicGroup(ctx context.Context, mergedBody string)
 	if strings.TrimSpace(summaryBody) != "" {
 		body = summaryBody
 	}
-	tight, err := s.summarizer.Summarize(ctx, mergedBody, 100)
-	if err == nil && strings.TrimSpace(tight) != "" {
-		tightDesc = tight
+	if tight, err := s.summarizer.Summarize(ctx, mergedBody, 100); err == nil {
+		if cleaned, ok := sanitizeTightDescription(tight); ok {
+			tightDesc = cleaned
+		}
 	}
 
 	return body, tightDesc, nil
@@ -657,9 +660,9 @@ func (s *AMMService) buildSessionNarrative(
 			if body == "" {
 				body = joinedContent
 			}
-			tightDesc := strings.TrimSpace(result.TightDesc)
-			if tightDesc == "" {
-				tightDesc = fallbackSessionTightDesc(evts)
+			tightDesc := fallbackSessionTightDesc(evts)
+			if cleaned, ok := sanitizeTightDescription(result.TightDesc); ok {
+				tightDesc = cleaned
 			}
 			return body, tightDesc, result, true, nil
 		}
@@ -671,8 +674,10 @@ func (s *AMMService) buildSessionNarrative(
 	}
 
 	tightDesc := fallbackSessionTightDesc(evts)
-	if tightResult, err := s.summarizer.Summarize(ctx, body, 100); err == nil && strings.TrimSpace(tightResult) != "" {
-		tightDesc = tightResult
+	if tightResult, err := s.summarizer.Summarize(ctx, body, 100); err == nil {
+		if cleaned, ok := sanitizeTightDescription(tightResult); ok {
+			tightDesc = cleaned
+		}
 	}
 
 	return body, tightDesc, nil, false, nil
@@ -810,7 +815,16 @@ func (s *AMMService) insertNarrativeMemoryIfNotDuplicate(
 		ProjectID:        projectID,
 		SessionID:        sessionID,
 		Body:             trimmedBody,
-		TightDescription: extractTightDescription(trimmedBody, 120),
+		TightDescription: func() string {
+			td := extractTightDescription(trimmedBody, 120)
+			if _, ok := sanitizeTightDescription(td); !ok {
+				if len(trimmedBody) > 120 {
+					return trimmedBody[:120]
+				}
+				return trimmedBody
+			}
+			return td
+		}(),
 		Confidence:       0.85,
 		Importance:       importanceForCandidate(core.MemoryCandidate{Type: memoryType}),
 		Status:           core.MemoryStatusActive,

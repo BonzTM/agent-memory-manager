@@ -420,13 +420,10 @@ func parseCompressionResults(raw string, requiredIndexes []int) ([]core.Compress
 		if item.Body == "" {
 			continue
 		}
-		if cleaned, ok := sanitizeTightDescription(item.TightDescription); !ok {
-			item.TightDescription = ""
-		} else {
+		if cleaned, ok := sanitizeTightDescription(item.TightDescription); ok {
 			item.TightDescription = cleaned
-		}
-		if item.TightDescription == "" {
-			continue
+		} else {
+			item.TightDescription = ""
 		}
 		byIndex[item.Index] = item
 	}
