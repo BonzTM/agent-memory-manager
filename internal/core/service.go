@@ -38,6 +38,9 @@ type Service interface {
 	// ShareMemory updates a memory's privacy level.
 	ShareMemory(ctx context.Context, id string, privacy PrivacyLevel) (*Memory, error)
 
+	// ForgetMemory retracts a memory by ID.
+	ForgetMemory(ctx context.Context, id string) (*Memory, error)
+
 	// ListPolicies returns all configured ingestion policies.
 	ListPolicies(ctx context.Context) ([]IngestionPolicy, error)
 

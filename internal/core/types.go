@@ -282,14 +282,15 @@ type IngestionPolicy struct {
 
 // RecallItem is a thin retrieval result for ambient/describe responses.
 type RecallItem struct {
-	ID               string   `json:"id"`
-	Kind             string   `json:"kind"` // memory, episode, summary, history-node
-	Type             string   `json:"type,omitempty"`
-	Scope            Scope    `json:"scope"`
-	Score            float64  `json:"score"`
-	TightDescription string   `json:"tight_description"`
-	Confidence       *float64 `json:"confidence,omitempty"`
-	ObservedAt       string   `json:"observed_at,omitempty"`
+	ID               string             `json:"id"`
+	Kind             string             `json:"kind"` // memory, episode, summary, history-node
+	Type             string             `json:"type,omitempty"`
+	Scope            Scope              `json:"scope"`
+	Score            float64            `json:"score"`
+	Signals          map[string]float64 `json:"signals,omitempty"`
+	TightDescription string             `json:"tight_description"`
+	Confidence       *float64           `json:"confidence,omitempty"`
+	ObservedAt       string             `json:"observed_at,omitempty"`
 }
 
 // RecallResult is the response from a recall operation.
