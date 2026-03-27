@@ -341,6 +341,19 @@ func TestValidateShare(t *testing.T) {
 	}
 }
 
+func TestValidateForget(t *testing.T) {
+	if err := ValidateForget(&ForgetRequest{ID: "m1"}); err != nil {
+		t.Fatalf("expected valid request, got %v", err)
+	}
+
+	if err := ValidateForget(nil); err == nil || !strings.Contains(err.Error(), "request is nil") {
+		t.Fatalf("expected nil request error, got %v", err)
+	}
+	if err := ValidateForget(&ForgetRequest{}); err == nil || !strings.Contains(err.Error(), "id is required") {
+		t.Fatalf("expected missing id error, got %v", err)
+	}
+}
+
 func TestValidatePolicyAdd(t *testing.T) {
 	if err := ValidatePolicyAdd(&PolicyAddRequest{PatternType: "source", Pattern: "svc-*", Mode: "read_only"}); err != nil {
 		t.Fatalf("expected valid request, got %v", err)
@@ -395,4 +408,90 @@ func TestValidateResetDerived(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateProjectAndRelationshipAndLookupRequests(t *testing.T) {
+	t.Run("register project", func(t *testing.T) {
+		if err := ValidateRegisterProject(&RegisterProjectRequest{Name: "proj"}); err != nil {
+			t.Fatalf("expected valid register project, got %v", err)
+		}
+		if err := ValidateRegisterProject(nil); err == nil || !strings.Contains(err.Error(), "request is nil") {
+			t.Fatalf("expected nil request error, got %v", err)
+		}
+		if err := ValidateRegisterProject(&RegisterProjectRequest{}); err == nil || !strings.Contains(err.Error(), "name is required") {
+			t.Fatalf("expected missing name error, got %v", err)
+		}
+	})
+
+	t.Run("project id requests", func(t *testing.T) {
+		if err := ValidateGetProject(&GetProjectRequest{ID: "proj_1"}); err != nil {
+			t.Fatalf("expected valid get project request, got %v", err)
+		}
+		if err := ValidateRemoveProject(&RemoveProjectRequest{ID: "proj_1"}); err != nil {
+			t.Fatalf("expected valid remove project request, got %v", err)
+		}
+		if err := ValidateGetProject(&GetProjectRequest{}); err == nil || !strings.Contains(err.Error(), "id is required") {
+			t.Fatalf("expected missing id error, got %v", err)
+		}
+		if err := ValidateRemoveProject(nil); err == nil || !strings.Contains(err.Error(), "request is nil") {
+			t.Fatalf("expected nil request error, got %v", err)
+		}
+	})
+
+	t.Run("add relationship", func(t *testing.T) {
+		if err := ValidateAddRelationship(&AddRelationshipRequest{FromEntityID: "ent_a", ToEntityID: "ent_b", RelationshipType: "related_to"}); err != nil {
+			t.Fatalf("expected valid add relationship request, got %v", err)
+		}
+		if err := ValidateAddRelationship(&AddRelationshipRequest{ToEntityID: "ent_b", RelationshipType: "related_to"}); err == nil || !strings.Contains(err.Error(), "from_entity_id is required") {
+			t.Fatalf("expected missing from_entity_id error, got %v", err)
+		}
+		if err := ValidateAddRelationship(&AddRelationshipRequest{FromEntityID: "ent_a", RelationshipType: "related_to"}); err == nil || !strings.Contains(err.Error(), "to_entity_id is required") {
+			t.Fatalf("expected missing to_entity_id error, got %v", err)
+		}
+		if err := ValidateAddRelationship(&AddRelationshipRequest{FromEntityID: "ent_a", ToEntityID: "ent_b"}); err == nil || !strings.Contains(err.Error(), "relationship_type is required") {
+			t.Fatalf("expected missing relationship_type error, got %v", err)
+		}
+	})
+
+	t.Run("relationship list and id requests", func(t *testing.T) {
+		if err := ValidateListRelationships(&ListRelationshipsRequest{EntityID: "ent", RelationshipType: "related_to", Limit: 0}); err != nil {
+			t.Fatalf("expected valid list relationships request, got %v", err)
+		}
+		if err := ValidateListRelationships(&ListRelationshipsRequest{Limit: -1}); err == nil || !strings.Contains(err.Error(), "limit must be non-negative") {
+			t.Fatalf("expected negative limit error, got %v", err)
+		}
+		if err := ValidateGetRelationship(&GetRelationshipRequest{ID: "rel_1"}); err != nil {
+			t.Fatalf("expected valid get relationship request, got %v", err)
+		}
+		if err := ValidateRemoveRelationship(&RemoveRelationshipRequest{ID: "rel_1"}); err != nil {
+			t.Fatalf("expected valid remove relationship request, got %v", err)
+		}
+		if err := ValidateGetRelationship(nil); err == nil || !strings.Contains(err.Error(), "request is nil") {
+			t.Fatalf("expected nil request error, got %v", err)
+		}
+		if err := ValidateRemoveRelationship(&RemoveRelationshipRequest{}); err == nil || !strings.Contains(err.Error(), "id is required") {
+			t.Fatalf("expected missing id error, got %v", err)
+		}
+	})
+
+	t.Run("summary episode entity id requests", func(t *testing.T) {
+		if err := ValidateGetSummary(&GetSummaryRequest{ID: "sum_1"}); err != nil {
+			t.Fatalf("expected valid get summary request, got %v", err)
+		}
+		if err := ValidateGetEpisode(&GetEpisodeRequest{ID: "ep_1"}); err != nil {
+			t.Fatalf("expected valid get episode request, got %v", err)
+		}
+		if err := ValidateGetEntity(&GetEntityRequest{ID: "ent_1"}); err != nil {
+			t.Fatalf("expected valid get entity request, got %v", err)
+		}
+		if err := ValidateGetSummary(nil); err == nil || !strings.Contains(err.Error(), "request is nil") {
+			t.Fatalf("expected nil summary request error, got %v", err)
+		}
+		if err := ValidateGetEpisode(&GetEpisodeRequest{}); err == nil || !strings.Contains(err.Error(), "id is required") {
+			t.Fatalf("expected missing episode id error, got %v", err)
+		}
+		if err := ValidateGetEntity(&GetEntityRequest{}); err == nil || !strings.Contains(err.Error(), "id is required") {
+			t.Fatalf("expected missing entity id error, got %v", err)
+		}
+	})
 }

@@ -298,6 +298,16 @@ func ValidateShare(req ShareRequest) error {
 	return nil
 }
 
+func ValidateForget(req *ForgetRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		return fmt.Errorf("id is required")
+	}
+	return nil
+}
+
 // ValidateUpdateMemory validates an UpdateMemoryRequest before mutable memory
 // fields are updated.
 func ValidateUpdateMemory(req *UpdateMemoryRequest) error {
@@ -352,6 +362,112 @@ func ValidateResetDerived(req *ResetDerivedRequest) error {
 	}
 	if !req.Confirm {
 		return fmt.Errorf("confirm must be true")
+	}
+	return nil
+}
+
+func ValidateRegisterProject(req *RegisterProjectRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		return fmt.Errorf("name is required")
+	}
+	return nil
+}
+
+func ValidateGetProject(req *GetProjectRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		return fmt.Errorf("id is required")
+	}
+	return nil
+}
+
+func ValidateRemoveProject(req *RemoveProjectRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		return fmt.Errorf("id is required")
+	}
+	return nil
+}
+
+func ValidateAddRelationship(req *AddRelationshipRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.FromEntityID) == "" {
+		return fmt.Errorf("from_entity_id is required")
+	}
+	if strings.TrimSpace(req.ToEntityID) == "" {
+		return fmt.Errorf("to_entity_id is required")
+	}
+	if strings.TrimSpace(req.RelationshipType) == "" {
+		return fmt.Errorf("relationship_type is required")
+	}
+	return nil
+}
+
+func ValidateGetRelationship(req *GetRelationshipRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		return fmt.Errorf("id is required")
+	}
+	return nil
+}
+
+func ValidateListRelationships(req *ListRelationshipsRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if req.Limit < 0 {
+		return fmt.Errorf("limit must be non-negative")
+	}
+	return nil
+}
+
+func ValidateRemoveRelationship(req *RemoveRelationshipRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		return fmt.Errorf("id is required")
+	}
+	return nil
+}
+
+func ValidateGetSummary(req *GetSummaryRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		return fmt.Errorf("id is required")
+	}
+	return nil
+}
+
+func ValidateGetEpisode(req *GetEpisodeRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		return fmt.Errorf("id is required")
+	}
+	return nil
+}
+
+func ValidateGetEntity(req *GetEntityRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		return fmt.Errorf("id is required")
 	}
 	return nil
 }

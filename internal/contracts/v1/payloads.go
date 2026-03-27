@@ -101,14 +101,15 @@ type RecallResponse struct {
 // It exposes the thin fields needed to display or decide whether to expand a
 // recalled item.
 type RecallItemResponse struct {
-	ID               string   `json:"id"`
-	Kind             string   `json:"kind"`
-	Type             string   `json:"type,omitempty"`
-	Scope            string   `json:"scope"`
-	Score            float64  `json:"score"`
-	TightDescription string   `json:"tight_description"`
-	Confidence       *float64 `json:"confidence,omitempty"`
-	ObservedAt       string   `json:"observed_at,omitempty"`
+	ID               string             `json:"id"`
+	Kind             string             `json:"kind"`
+	Type             string             `json:"type,omitempty"`
+	Scope            string             `json:"scope"`
+	Score            float64            `json:"score"`
+	Signals          map[string]float64 `json:"signals,omitempty"`
+	TightDescription string             `json:"tight_description"`
+	Confidence       *float64           `json:"confidence,omitempty"`
+	ObservedAt       string             `json:"observed_at,omitempty"`
 }
 
 // RecallMetaResponse contains metadata about a recall operation.
@@ -293,6 +294,10 @@ type ShareRequest struct {
 	Privacy string `json:"privacy"`
 }
 
+type ForgetRequest struct {
+	ID string `json:"id"`
+}
+
 // UpdateMemoryRequest is the request payload for the update_memory command.
 //
 // It identifies an existing memory and supplies any mutable fields that should
@@ -345,6 +350,66 @@ type PolicyAddResponse struct {
 //
 // It identifies the ingestion policy to delete.
 type PolicyRemoveRequest struct {
+	ID string `json:"id"`
+}
+
+// RegisterProjectRequest is the request payload for register_project.
+//
+// It describes the project identity and optional metadata fields.
+type RegisterProjectRequest struct {
+	Name        string            `json:"name"`
+	Path        string            `json:"path,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+// GetProjectRequest is the request payload for get_project.
+type GetProjectRequest struct {
+	ID string `json:"id"`
+}
+
+// RemoveProjectRequest is the request payload for remove_project.
+type RemoveProjectRequest struct {
+	ID string `json:"id"`
+}
+
+// AddRelationshipRequest is the request payload for add_relationship.
+type AddRelationshipRequest struct {
+	FromEntityID     string            `json:"from_entity_id"`
+	ToEntityID       string            `json:"to_entity_id"`
+	RelationshipType string            `json:"relationship_type"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+}
+
+// GetRelationshipRequest is the request payload for get_relationship.
+type GetRelationshipRequest struct {
+	ID string `json:"id"`
+}
+
+// ListRelationshipsRequest is the request payload for list_relationships.
+type ListRelationshipsRequest struct {
+	EntityID         string `json:"entity_id,omitempty"`
+	RelationshipType string `json:"relationship_type,omitempty"`
+	Limit            int    `json:"limit,omitempty"`
+}
+
+// RemoveRelationshipRequest is the request payload for remove_relationship.
+type RemoveRelationshipRequest struct {
+	ID string `json:"id"`
+}
+
+// GetSummaryRequest is the request payload for get_summary.
+type GetSummaryRequest struct {
+	ID string `json:"id"`
+}
+
+// GetEpisodeRequest is the request payload for get_episode.
+type GetEpisodeRequest struct {
+	ID string `json:"id"`
+}
+
+// GetEntityRequest is the request payload for get_entity.
+type GetEntityRequest struct {
 	ID string `json:"id"`
 }
 
