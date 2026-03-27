@@ -51,6 +51,7 @@ type Repository interface {
 	InsertMemory(ctx context.Context, memory *Memory) error
 	// GetMemory retrieves a memory by ID.
 	GetMemory(ctx context.Context, id string) (*Memory, error)
+	GetMemoriesByIDs(ctx context.Context, ids []string) (map[string]*Memory, error)
 	// UpdateMemory persists changes to an existing memory.
 	UpdateMemory(ctx context.Context, memory *Memory) error
 	// ListMemories returns memories matching the supplied options.
@@ -156,6 +157,7 @@ type Repository interface {
 	CleanupRecallHistory(ctx context.Context, olderThanDays int) (int64, error)
 	InsertRelevanceFeedback(ctx context.Context, sessionID, itemID, itemKind, action string) error
 	ListRelevanceFeedback(ctx context.Context, itemID string) ([]RelevanceFeedbackEntry, error)
+	CountExpandedFeedbackBatch(ctx context.Context, memoryIDs []string) (map[string]int, error)
 
 	UpsertEmbedding(ctx context.Context, embedding *EmbeddingRecord) error
 	GetEmbedding(ctx context.Context, objectID, objectKind, model string) (*EmbeddingRecord, error)
@@ -164,6 +166,7 @@ type Repository interface {
 	DeleteEmbeddings(ctx context.Context, objectID, objectKind, model string) error
 	ListUnembeddedMemories(ctx context.Context, model string, limit int) ([]Memory, error)
 	ListUnembeddedSummaries(ctx context.Context, model string, limit int) ([]Summary, error)
+	ListUnembeddedEpisodes(ctx context.Context, model string, limit int) ([]Episode, error)
 
 	// CountEvents returns the total number of events.
 	CountEvents(ctx context.Context) (int64, error)

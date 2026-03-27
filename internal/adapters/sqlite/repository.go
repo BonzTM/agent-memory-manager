@@ -716,6 +716,38 @@ func (r *SQLiteRepository) GetMemory(ctx context.Context, id string) (*core.Memo
 	return m, nil
 }
 
+func (r *SQLiteRepository) GetMemoriesByIDs(ctx context.Context, ids []string) (map[string]*core.Memory, error) {
+	memories := make(map[string]*core.Memory, len(ids))
+	if len(ids) == 0 {
+		return memories, nil
+	}
+
+	placeholder := strings.Repeat("?,", len(ids)-1) + "?"
+	query := "SELECT " + memoryCols + " FROM memories WHERE id IN (" + placeholder + ")"
+	args := make([]interface{}, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		m, err := r.scanMemory(rows)
+		if err != nil {
+			return nil, err
+		}
+		memories[m.ID] = m
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return memories, nil
+}
+
 func (r *SQLiteRepository) UpdateMemory(ctx context.Context, memory *core.Memory) error {
 	_, err := r.ExecContext(ctx, `
 		UPDATE memories SET type=?, scope=?, project_id=?, session_id=?, agent_id=?,
@@ -822,59 +854,6 @@ func (r *SQLiteRepository) SearchMemories(ctx context.Context, query string, opt
 		memories = append(memories, *m)
 	}
 	return memories, rows.Err()
-}
-
-func buildMemoryFuzzyFTSQuery(text string) string {
-	tokens := strings.Fields(strings.ToLower(sanitizeFTS5Query(text)))
-	if len(tokens) == 0 {
-		return ""
-	}
-	stopwords := map[string]bool{
-		"the": true, "and": true, "for": true, "with": true, "that": true,
-		"this": true, "from": true, "have": true, "has": true, "are": true,
-		"was": true, "were": true, "you": true, "your": true, "not": true,
-		"but": true, "can": true, "will": true, "into": true, "about": true,
-	}
-	seen := make(map[string]bool, len(tokens))
-	selected := make([]string, 0, 10)
-	for _, token := range tokens {
-		token = strings.Map(func(r rune) rune {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-				return r
-			}
-			return -1
-		}, token)
-		if seen[token] || stopwords[token] {
-			continue
-		}
-		if len(token) < 3 {
-			continue
-		}
-		seen[token] = true
-		selected = append(selected, token)
-		if len(selected) == 10 {
-			break
-		}
-	}
-	if len(selected) == 0 {
-		for _, token := range tokens {
-			token = strings.Map(func(r rune) rune {
-				if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-					return r
-				}
-				return -1
-			}, token)
-			if len(token) < 2 || seen[token] {
-				continue
-			}
-			seen[token] = true
-			selected = append(selected, token)
-			if len(selected) == 5 {
-				break
-			}
-		}
-	}
-	return strings.Join(selected, " ")
 }
 
 func (r *SQLiteRepository) SearchMemoriesFuzzy(ctx context.Context, text string, opts core.ListMemoriesOptions) ([]core.Memory, error) {
@@ -2441,6 +2420,46 @@ func (r *SQLiteRepository) ListRelevanceFeedback(ctx context.Context, itemID str
 	return entries, rows.Err()
 }
 
+func (r *SQLiteRepository) CountExpandedFeedbackBatch(ctx context.Context, memoryIDs []string) (map[string]int, error) {
+	counts := make(map[string]int, len(memoryIDs))
+	if len(memoryIDs) == 0 {
+		return counts, nil
+	}
+	for _, id := range memoryIDs {
+		counts[id] = 0
+	}
+
+	placeholder := strings.Repeat("?,", len(memoryIDs)-1) + "?"
+	query := `
+		SELECT item_id, COUNT(*)
+		FROM relevance_feedback
+		WHERE item_kind = 'memory' AND action = 'expanded' AND item_id IN (` + placeholder + `)
+		GROUP BY item_id`
+	args := make([]interface{}, 0, len(memoryIDs))
+	for _, id := range memoryIDs {
+		args = append(args, id)
+	}
+
+	rows, err := r.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var memoryID string
+		var count int
+		if err := rows.Scan(&memoryID, &count); err != nil {
+			return nil, err
+		}
+		counts[memoryID] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
 func (r *SQLiteRepository) UpsertEmbedding(ctx context.Context, embedding *core.EmbeddingRecord) error {
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO embeddings (object_id, object_kind, embedding_json, model, created_at)
@@ -2520,6 +2539,7 @@ func (r *SQLiteRepository) ListEmbeddingsByKind(ctx context.Context, objectKind,
 		SELECT object_id, object_kind, embedding_json, model, created_at
 		FROM embeddings
 		WHERE object_kind = ? AND model = ?
+		ORDER BY created_at DESC
 		LIMIT ?`, objectKind, model, defaultLimit(limit))
 	if err != nil {
 		return nil, err
@@ -2606,6 +2626,30 @@ func (r *SQLiteRepository) ListUnembeddedSummaries(ctx context.Context, model st
 		summaries = append(summaries, sm)
 	}
 	return summaries, rows.Err()
+}
+
+func (r *SQLiteRepository) ListUnembeddedEpisodes(ctx context.Context, model string, limit int) ([]core.Episode, error) {
+	query := "SELECT " + episodeCols + ` FROM episodes ep
+		WHERE NOT EXISTS (
+			SELECT 1 FROM embeddings e
+			WHERE e.object_id = ep.id AND e.object_kind = 'episode' AND e.model = ?
+		)
+		ORDER BY ep.created_at DESC LIMIT ?`
+	rows, err := r.QueryContext(ctx, query, model, defaultLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	episodes := make([]core.Episode, 0)
+	for rows.Next() {
+		ep, err := r.scanEpisode(rows)
+		if err != nil {
+			return nil, err
+		}
+		episodes = append(episodes, *ep)
+	}
+	return episodes, rows.Err()
 }
 
 func normalizeRowsAffected(n int64) int64 {
