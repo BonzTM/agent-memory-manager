@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: amm
+      POSTGRES_PASSWORD: amm
+      POSTGRES_DB: amm
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amm"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  amm:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      AMM_STORAGE_BACKEND: postgres
+      AMM_POSTGRES_DSN: "postgres://amm:amm@postgres:5432/amm?sslmode=disable"
+      AMM_HTTP_ADDR: ":8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pg-data:

@@ -1,0 +1,13 @@
+services:
+  amm:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - amm-data:/data
+    environment:
+      AMM_DB_PATH: /data/amm.db
+      AMM_HTTP_ADDR: ":8080"
+
+volumes:
+  amm-data:

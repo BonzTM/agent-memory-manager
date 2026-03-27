@@ -1,0 +1,19 @@
+{{- if and (eq .Values.backend "sqlite") .Values.sqlite.persistence.enabled -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "amm.fullname" . }}
+  labels:
+    {{- include "amm.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- range .Values.sqlite.persistence.accessModes }}
+    - {{ . }}
+    {{- end }}
+  {{- if .Values.sqlite.persistence.storageClass }}
+  storageClassName: {{ .Values.sqlite.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.sqlite.persistence.size }}
+{{- end }}
