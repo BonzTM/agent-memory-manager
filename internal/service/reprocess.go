@@ -34,10 +34,14 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 
 	eventToMemories := make(map[string][]*core.Memory)
 	activeMemories := make([]*core.Memory, 0, len(existingMemories))
+	retractedMemories := make([]*core.Memory, 0)
 	for i := range existingMemories {
 		mem := &existingMemories[i]
 		if mem.Status == core.MemoryStatusActive {
 			activeMemories = append(activeMemories, mem)
+		}
+		if mem.Status == core.MemoryStatusRetracted {
+			retractedMemories = append(retractedMemories, mem)
 		}
 		for _, eid := range mem.SourceEventIDs {
 			eventToMemories[eid] = append(eventToMemories[eid], mem)
@@ -164,6 +168,10 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 				SourceEventIDs:   sourceEventIDs,
 			}
 
+			if matchesRetractedMemory(retractedMemories, candidateMemory) {
+				continue
+			}
+
 			duplicates := findDuplicateActiveMemories(activeMemories, candidateMemory)
 			if len(duplicates) > 0 {
 				now := time.Now().UTC()
@@ -249,6 +257,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 				UpdatedAt:        now,
 			}
 			markExtracted(mem, method, s.extractionModelName())
+			setProcessingMeta(mem, "source_system", "reprocess")
 			if shouldMarkInsertedAsUpgraded(eventToMemories, sourceEventIDs, method) {
 				setProcessingMeta(mem, MetaExtractionQuality, QualityUpgraded)
 			}

@@ -101,6 +101,16 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 				}
 
 				fuzzyText := strings.TrimSpace(strings.Join([]string{candidateMemory.Subject, candidateMemory.TightDescription, candidateMemory.Body}, " "))
+
+				retractedResults, _ := s.repo.SearchMemoriesFuzzy(ctx, fuzzyText, core.ListMemoriesOptions{Type: candidate.Type, Scope: scope, ProjectID: projectID, Status: core.MemoryStatusRetracted, Limit: 20})
+				retractedPtrs := make([]*core.Memory, 0, len(retractedResults))
+				for i := range retractedResults {
+					retractedPtrs = append(retractedPtrs, &retractedResults[i])
+				}
+				if matchesRetractedMemory(retractedPtrs, candidateMemory) {
+					continue
+				}
+
 				existing, err := s.repo.SearchMemoriesFuzzy(ctx, fuzzyText, core.ListMemoriesOptions{Type: candidate.Type, Scope: scope, ProjectID: projectID, Status: core.MemoryStatusActive, Limit: 100})
 				if err != nil {
 					return created, fmt.Errorf("search memories for reflect duplicate detection: %w", err)
@@ -177,6 +187,7 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 					UpdatedAt:        now,
 				}
 				markExtracted(mem, s.extractionMethod(), s.extractionModelName())
+				setProcessingMeta(mem, "source_system", "reflect")
 
 				if err := s.repo.InsertMemory(ctx, mem); err != nil {
 					return created, fmt.Errorf("insert reflected memory: %w", err)

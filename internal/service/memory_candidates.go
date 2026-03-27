@@ -57,6 +57,20 @@ func selectDuplicateKeeper(duplicates []*core.Memory) *core.Memory {
 	return keeper
 }
 
+// matchesRetractedMemory checks if a candidate memory is similar to any retracted memory,
+// indicating the user explicitly forgot this content and it should not be re-extracted.
+func matchesRetractedMemory(retractedMemories []*core.Memory, candidate core.Memory) bool {
+	for _, retracted := range retractedMemories {
+		if retracted == nil || retracted.Status != core.MemoryStatusRetracted {
+			continue
+		}
+		if memoriesLikelyDuplicate(*retracted, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
 func findDuplicateActiveMemories(activeMemories []*core.Memory, candidate core.Memory) []*core.Memory {
 	duplicates := make([]*core.Memory, 0, 4)
 	for _, existing := range activeMemories {
