@@ -30,6 +30,7 @@ type recordingBatchSummarizer struct {
 
 type reprocessIntelligenceStub struct {
 	analysisResult   *core.AnalysisResult
+	analyzeErr       error
 	triageDecisions  map[int]core.TriageDecision
 	triageByContains map[string]core.TriageDecision
 	analyzeBatchLens []int
@@ -81,6 +82,9 @@ func (s *reprocessIntelligenceStub) ExtractMemoryCandidateBatch(context.Context,
 
 func (s *reprocessIntelligenceStub) AnalyzeEvents(_ context.Context, events []core.EventContent) (*core.AnalysisResult, error) {
 	s.analyzeBatchLens = append(s.analyzeBatchLens, len(events))
+	if s.analyzeErr != nil {
+		return nil, s.analyzeErr
+	}
 	if s.analysisResult == nil {
 		return &core.AnalysisResult{}, nil
 	}
@@ -866,6 +870,15 @@ func TestReprocessAll_UsesIntelligenceAnalyzeAfterTriageAndLinksEntities(t *test
 				CanonicalName: "Redis Cache",
 				Type:          "technology",
 				Aliases:       []string{"redis"},
+			}, {
+				CanonicalName: "API Gateway",
+				Type:          "service",
+				Aliases:       []string{"api"},
+			}},
+			Relationships: []core.RelationshipCandidate{{
+				FromEntity: "API Gateway",
+				ToEntity:   "Redis Cache",
+				Type:       "uses",
 			}},
 		},
 		triageByContains: map[string]core.TriageDecision{
@@ -924,6 +937,32 @@ func TestReprocessAll_UsesIntelligenceAnalyzeAfterTriageAndLinksEntities(t *test
 	}
 	if !foundRedisCache {
 		t.Fatalf("expected memory entity link from analysis candidates, got %#v", linked)
+	}
+
+	apiEntities, err := repo.SearchEntities(ctx, "API Gateway", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	redisEntities, err := repo.SearchEntities(ctx, "Redis Cache", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(apiEntities) == 0 || len(redisEntities) == 0 {
+		t.Fatalf("expected API Gateway and Redis Cache entities, got api=%#v redis=%#v", apiEntities, redisEntities)
+	}
+	rels, err := repo.ListRelationshipsByEntityIDs(ctx, []string{apiEntities[0].ID, redisEntities[0].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundUses := false
+	for _, rel := range rels {
+		if rel.FromEntityID == apiEntities[0].ID && rel.ToEntityID == redisEntities[0].ID && rel.RelationshipType == "uses" {
+			foundUses = true
+			break
+		}
+	}
+	if !foundUses {
+		t.Fatalf("expected analyzed relationship API Gateway -> Redis Cache uses, got %#v", rels)
 	}
 }
 
