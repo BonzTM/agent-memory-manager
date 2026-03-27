@@ -38,20 +38,43 @@ func (s *AMMService) UpdateRankingWeights(ctx context.Context) (int, error) {
 	}
 
 	totalShown := 0.0
+	memoryIDs := make([]string, 0, len(stats))
+	seenMemoryIDs := make(map[string]struct{}, len(stats))
 	for _, stat := range stats {
 		if stat.AccessCount <= 0 {
 			continue
 		}
-		memory, err := s.repo.GetMemory(ctx, stat.MemoryID)
-		if err != nil || memory == nil {
+		if _, exists := seenMemoryIDs[stat.MemoryID]; exists {
+			continue
+		}
+		seenMemoryIDs[stat.MemoryID] = struct{}{}
+		memoryIDs = append(memoryIDs, stat.MemoryID)
+	}
+
+	if len(memoryIDs) == 0 {
+		return 0, nil
+	}
+
+	memoriesByID, err := s.repo.GetMemoriesByIDs(ctx, memoryIDs)
+	if err != nil {
+		return 0, err
+	}
+	expandedCountsByID, err := s.repo.CountExpandedFeedbackBatch(ctx, memoryIDs)
+	if err != nil {
+		return 0, err
+	}
+
+	for _, stat := range stats {
+		if stat.AccessCount <= 0 {
+			continue
+		}
+		memory := memoriesByID[stat.MemoryID]
+		if memory == nil {
 			continue
 		}
 
 		shownCount := float64(stat.AccessCount)
-		expandedCount, err := s.countExpandedFeedback(ctx, memory.ID)
-		if err != nil {
-			return 0, err
-		}
+		expandedCount := float64(expandedCountsByID[memory.ID])
 		if expandedCount > shownCount {
 			expandedCount = shownCount
 		}
@@ -95,20 +118,6 @@ func (s *AMMService) UpdateRankingWeights(ctx context.Context) (int, error) {
 		s.setScoringWeights(updated)
 	}
 	return updatesApplied, nil
-}
-
-func (s *AMMService) countExpandedFeedback(ctx context.Context, memoryID string) (float64, error) {
-	entries, err := s.repo.ListRelevanceFeedback(ctx, memoryID)
-	if err != nil {
-		return 0, err
-	}
-	count := 0.0
-	for _, entry := range entries {
-		if entry.Action == "expanded" {
-			count += 1.0
-		}
-	}
-	return count, nil
 }
 
 func bayesianSignalWeight(prior float64, agg *signalAggregate, dataCount float64) float64 {
