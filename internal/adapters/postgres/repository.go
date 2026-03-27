@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"path/filepath"
 	"regexp"
@@ -436,11 +437,11 @@ func (r *Repository) InsertSummary(ctx context.Context, summary *core.Summary) e
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO summaries (id, kind, scope, project_id, session_id, agent_id,
 			title, body, tight_description, privacy_level, source_span_json,
-			metadata_json, created_at, updated_at)
-		VALUES ($1,$2,$3,NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14)`,
+			metadata_json, depth, condensed_kind, created_at, updated_at)
+		VALUES ($1,$2,$3,NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14,$15,$16)`,
 		summary.ID, summary.Kind, string(summary.Scope), summary.ProjectID, summary.SessionID, summary.AgentID,
 		summary.Title, summary.Body, summary.TightDescription, string(summary.PrivacyLevel),
-		marshalSourceSpan(summary.SourceSpan), marshalMapJSON(summary.Metadata), summary.CreatedAt.UTC(), summary.UpdatedAt.UTC(),
+		marshalSourceSpan(summary.SourceSpan), marshalMapJSON(summary.Metadata), summary.Depth, summary.CondensedKind, summary.CreatedAt.UTC(), summary.UpdatedAt.UTC(),
 	)
 	return wrapErr("insert summary", err)
 }
@@ -449,12 +450,12 @@ func (r *Repository) GetSummary(ctx context.Context, id string) (*core.Summary, 
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, kind, scope, COALESCE(project_id,''), COALESCE(session_id,''), COALESCE(agent_id,''),
 			COALESCE(title,''), body, tight_description, privacy_level,
-			source_span_json, metadata_json, created_at, updated_at
+			source_span_json, metadata_json, depth, COALESCE(condensed_kind,''), created_at, updated_at
 		FROM summaries WHERE id = $1`, id)
 	var s core.Summary
 	var span, meta []byte
 	if err := row.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID, &s.AgentID,
-		&s.Title, &s.Body, &s.TightDescription, &s.PrivacyLevel, &span, &meta, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		&s.Title, &s.Body, &s.TightDescription, &s.PrivacyLevel, &span, &meta, &s.Depth, &s.CondensedKind, &s.CreatedAt, &s.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errNotFound("summary", id)
 		}
@@ -468,7 +469,7 @@ func (r *Repository) GetSummary(ctx context.Context, id string) (*core.Summary, 
 func (r *Repository) ListSummaries(ctx context.Context, opts core.ListSummariesOptions) ([]core.Summary, error) {
 	query := `SELECT id, kind, scope, COALESCE(project_id,''), COALESCE(session_id,''), COALESCE(agent_id,''),
 		COALESCE(title,''), body, tight_description, privacy_level,
-		source_span_json, metadata_json, created_at, updated_at
+		source_span_json, metadata_json, depth, COALESCE(condensed_kind,''), created_at, updated_at
 		FROM summaries WHERE 1=1`
 	args := make([]any, 0)
 	i := 1
@@ -504,7 +505,7 @@ func (r *Repository) ListSummaries(ctx context.Context, opts core.ListSummariesO
 		var s core.Summary
 		var span, meta []byte
 		if err := rows.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID, &s.AgentID,
-			&s.Title, &s.Body, &s.TightDescription, &s.PrivacyLevel, &span, &meta, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			&s.Title, &s.Body, &s.TightDescription, &s.PrivacyLevel, &span, &meta, &s.Depth, &s.CondensedKind, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, wrapErr("list summaries", err)
 		}
 		s.SourceSpan = parseSourceSpanJSON(span)
@@ -521,7 +522,7 @@ func (r *Repository) SearchSummaries(ctx context.Context, query string, limit in
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, kind, scope, COALESCE(project_id,''), COALESCE(session_id,''), COALESCE(agent_id,''),
 			COALESCE(title,''), body, tight_description, privacy_level,
-			source_span_json, metadata_json, created_at, updated_at
+			source_span_json, metadata_json, depth, COALESCE(condensed_kind,''), created_at, updated_at
 		FROM summaries
 		WHERE summaries_fts @@ plainto_tsquery('simple', $1)
 		ORDER BY ts_rank(summaries_fts, plainto_tsquery('simple', $1)) DESC, created_at DESC
@@ -535,7 +536,7 @@ func (r *Repository) SearchSummaries(ctx context.Context, query string, limit in
 		var s core.Summary
 		var span, meta []byte
 		if err := rows.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID, &s.AgentID,
-			&s.Title, &s.Body, &s.TightDescription, &s.PrivacyLevel, &span, &meta, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			&s.Title, &s.Body, &s.TightDescription, &s.PrivacyLevel, &span, &meta, &s.Depth, &s.CondensedKind, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, wrapErr("search summaries", err)
 		}
 		s.SourceSpan = parseSourceSpanJSON(span)
@@ -2092,6 +2093,56 @@ func (r *Repository) CleanupRecallHistory(ctx context.Context, olderThanDays int
 	return res.RowsAffected()
 }
 
+func (r *Repository) PurgeOldEvents(ctx context.Context, olderThanDays int) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `
+		DELETE FROM events
+		WHERE occurred_at < NOW() - ($1::text || ' days')::interval
+		  AND reflected_at IS NOT NULL`, olderThanDays)
+	if err != nil {
+		return 0, wrapErr("purge old events", err)
+	}
+	return res.RowsAffected()
+}
+
+func (r *Repository) PurgeOldJobs(ctx context.Context, olderThanDays int) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `
+		DELETE FROM jobs
+		WHERE created_at < NOW() - ($1::text || ' days')::interval
+		  AND status IN ('completed', 'failed')`, olderThanDays)
+	if err != nil {
+		return 0, wrapErr("purge old jobs", err)
+	}
+	return res.RowsAffected()
+}
+
+func (r *Repository) ExpireRetrievalCache(ctx context.Context) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `
+		DELETE FROM retrieval_cache
+		WHERE expires_at < NOW()`)
+	if err != nil {
+		return 0, wrapErr("expire retrieval cache", err)
+	}
+	return res.RowsAffected()
+}
+
+func (r *Repository) PurgeOldRelevanceFeedback(ctx context.Context, olderThanDays int) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `
+		DELETE FROM relevance_feedback
+		WHERE created_at < NOW() - ($1::text || ' days')::interval`, olderThanDays)
+	if err != nil {
+		return 0, wrapErr("purge old relevance feedback", err)
+	}
+	return res.RowsAffected()
+}
+
+func (r *Repository) VacuumAnalyze(ctx context.Context) error {
+	if _, err := r.db.ExecContext(ctx, `ANALYZE`); err != nil {
+		slog.Warn("Postgres vacuum/analyze maintenance step failed", "step", "analyze", "error", err)
+		return wrapErr("vacuum analyze", err)
+	}
+	return nil
+}
+
 func (r *Repository) InsertRelevanceFeedback(ctx context.Context, sessionID, itemID, itemKind, action string) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO relevance_feedback (session_id, item_id, item_kind, action, created_at)
@@ -2265,7 +2316,7 @@ func (r *Repository) ListUnembeddedSummaries(ctx context.Context, model string, 
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, kind, scope, COALESCE(project_id,''), COALESCE(session_id,''), COALESCE(agent_id,''),
 			COALESCE(title,''), body, tight_description, privacy_level,
-			source_span_json, metadata_json, created_at, updated_at
+			source_span_json, metadata_json, depth, COALESCE(condensed_kind,''), created_at, updated_at
 		FROM summaries s
 		WHERE NOT EXISTS (
 			SELECT 1 FROM embeddings e
@@ -2282,7 +2333,7 @@ func (r *Repository) ListUnembeddedSummaries(ctx context.Context, model string, 
 		var s core.Summary
 		var span, meta []byte
 		if err := rows.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID, &s.AgentID,
-			&s.Title, &s.Body, &s.TightDescription, &s.PrivacyLevel, &span, &meta, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			&s.Title, &s.Body, &s.TightDescription, &s.PrivacyLevel, &span, &meta, &s.Depth, &s.CondensedKind, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, wrapErr("list unembedded summaries", err)
 		}
 		s.SourceSpan = parseSourceSpanJSON(span)

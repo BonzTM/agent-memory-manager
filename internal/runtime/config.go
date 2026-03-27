@@ -12,16 +12,17 @@ import (
 )
 
 const (
-	defaultSummarizerBatchSize      = 20
-	defaultReflectBatchSize         = 100
-	defaultReflectLLMBatchSize      = 20
-	defaultLifecycleReviewBatchSize = 50
-	defaultCompressChunkSize        = 10
-	defaultCompressMaxEvents        = 200
-	defaultCompressBatchSize        = 15
-	defaultTopicBatchSize           = 15
-	defaultEmbeddingBatchSize       = 64
-	defaultCrossProjectSimilarity   = 0.7
+	defaultSummarizerBatchSize             = 20
+	defaultReflectBatchSize                = 100
+	defaultReflectLLMBatchSize             = 20
+	defaultLifecycleReviewBatchSize        = 50
+	defaultCompressChunkSize               = 10
+	defaultCompressMaxEvents               = 200
+	defaultCompressBatchSize               = 15
+	defaultTopicBatchSize                  = 15
+	defaultEmbeddingBatchSize              = 64
+	defaultCrossProjectSimilarity          = 0.7
+	defaultEscalationDeterministicMaxChars = 2048
 )
 
 // Config holds all runtime configuration for amm.
@@ -31,9 +32,14 @@ type Config struct {
 	Retrieval   RetrievalConfig   `json:"retrieval"`
 	Privacy     PrivacyConfig     `json:"privacy"`
 	Maintenance MaintenanceConfig `json:"maintenance"`
+	Compression CompressionConfig `json:"compression"`
 	Summarizer  SummarizerConfig  `json:"summarizer"`
 	Embeddings  EmbeddingsConfig  `json:"embeddings"`
 	HTTP        HTTPConfig        `json:"http"`
+}
+
+type CompressionConfig struct {
+	EscalationDeterministicMaxChars int `json:"escalation_deterministic_max_chars"`
 }
 
 type HTTPConfig struct {
@@ -122,6 +128,9 @@ func DefaultConfig() Config {
 			AutoCompress:             true,
 			AutoConsolidate:          true,
 			AutoDetectContradictions: true,
+		},
+		Compression: CompressionConfig{
+			EscalationDeterministicMaxChars: defaultEscalationDeterministicMaxChars,
 		},
 		Summarizer: SummarizerConfig{
 			BatchSize:                       defaultSummarizerBatchSize,
@@ -244,6 +253,10 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			if b, err := strconv.ParseBool(val); err == nil {
 				cfg.Maintenance.AutoDetectContradictions = b
 			}
+		case "compression.escalation_deterministic_max_chars":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.Compression.EscalationDeterministicMaxChars = n
+			}
 		case "summarizer.endpoint":
 			cfg.Summarizer.Endpoint = val
 		case "summarizer.api_key":
@@ -355,6 +368,7 @@ func LoadConfigWithEnv() Config {
 //	AMM_AUTO_COMPRESS     -> Maintenance.AutoCompress  (true/false)
 //	AMM_AUTO_CONSOLIDATE  -> Maintenance.AutoConsolidate (true/false)
 //	AMM_AUTO_DETECT_CONTRADICTIONS -> Maintenance.AutoDetectContradictions (true/false)
+//	AMM_ESCALATION_DETERMINISTIC_MAX_CHARS -> Compression.EscalationDeterministicMaxChars
 //	AMM_SUMMARIZER_ENDPOINT -> Summarizer.Endpoint
 //	AMM_SUMMARIZER_API_KEY -> Summarizer.APIKey
 //	AMM_SUMMARIZER_MODEL -> Summarizer.Model
@@ -426,6 +440,11 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_AUTO_DETECT_CONTRADICTIONS"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			base.Maintenance.AutoDetectContradictions = b
+		}
+	}
+	if v := os.Getenv("AMM_ESCALATION_DETERMINISTIC_MAX_CHARS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Compression.EscalationDeterministicMaxChars = n
 		}
 	}
 	if v := os.Getenv("AMM_SUMMARIZER_ENDPOINT"); v != "" {
@@ -526,5 +545,8 @@ func ConfigFromEnv(base Config) Config {
 func applyConfigDefaults(cfg *Config) {
 	if strings.TrimSpace(cfg.HTTP.Addr) == "" {
 		cfg.HTTP.Addr = ":8080"
+	}
+	if cfg.Compression.EscalationDeterministicMaxChars <= 0 {
+		cfg.Compression.EscalationDeterministicMaxChars = defaultEscalationDeterministicMaxChars
 	}
 }

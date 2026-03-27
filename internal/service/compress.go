@@ -10,13 +10,14 @@ import (
 )
 
 const (
-	defaultCompressChunkSize = 10
-	defaultCompressMaxEvents = 200
-	defaultCompressBatchSize = 15
-	defaultTopicBatchSize    = 15
-	leafBodyMaxChars         = 1000
-	sessionBodyMaxChars      = 2000
-	topicBodyMaxChars        = 2000
+	defaultCompressChunkSize              = 10
+	defaultCompressMaxEvents              = 200
+	defaultCompressBatchSize              = 15
+	defaultTopicBatchSize                 = 15
+	leafBodyMaxChars                      = 1000
+	sessionBodyMaxChars                   = 2000
+	topicBodyMaxChars                     = 2000
+	defaultEscalationDeterministicMaxChars = 2048
 )
 
 type compressEventChunkPlan struct {
@@ -161,7 +162,7 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 		tightDesc := fmt.Sprintf("Summary of %d events from %s to %s", len(plan.chunk), plan.firstTime, plan.lastTime)
 		body := ""
 		if result, ok := batchResults[plan.index]; ok {
-			if trimmedBody := strings.TrimSpace(result.Body); trimmedBody != "" {
+			if trimmedBody := strings.TrimSpace(result.Body); trimmedBody != "" && len(trimmedBody) < len(plan.joinedBody) {
 				body = trimmedBody
 			}
 			if cleaned, ok := sanitizeTightDescription(result.TightDescription); ok {
@@ -171,7 +172,7 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 
 		if body == "" {
 			var err error
-			body, err = s.summarizer.Summarize(ctx, plan.joinedBody, leafBodyMaxChars)
+			body, err = s.escalate(ctx, plan.joinedBody, leafBodyMaxChars)
 			if err != nil {
 				return created, fmt.Errorf("summarize leaf body: %w", err)
 			}
@@ -186,6 +187,7 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 		summary := &core.Summary{
 			ID:               generateID("sum_"),
 			Kind:             "leaf",
+			Depth:            0,
 			Scope:            scope,
 			ProjectID:        projectID,
 			Title:            fmt.Sprintf("Events %s to %s", plan.firstTime, plan.lastTime),
@@ -320,6 +322,7 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 		summary := &core.Summary{
 			ID:               generateID("sum_"),
 			Kind:             "session",
+			Depth:            0,
 			Scope:            scope,
 			ProjectID:        projectID,
 			SessionID:        sessionID,
@@ -468,7 +471,7 @@ func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
 		body := ""
 		tightDesc := extractTightDescription(plan.mergedBody, 100)
 		if result, ok := batchResults[plan.index]; ok {
-			if trimmedBody := strings.TrimSpace(result.Body); trimmedBody != "" {
+			if trimmedBody := strings.TrimSpace(result.Body); trimmedBody != "" && len(trimmedBody) < len(plan.mergedBody) {
 				body = trimmedBody
 			}
 			if cleaned, ok := sanitizeTightDescription(result.TightDescription); ok {
@@ -488,6 +491,7 @@ func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
 		topicSummary := &core.Summary{
 			ID:               generateID("sum_"),
 			Kind:             "topic",
+			Depth:            1,
 			Scope:            scope,
 			ProjectID:        projectID,
 			Title:            plan.title,
@@ -539,20 +543,64 @@ func (s *AMMService) summarizeTopicGroup(ctx context.Context, mergedBody string)
 	body := strings.TrimSpace(mergedBody)
 	tightDesc := extractTightDescription(mergedBody, 100)
 
-	summaryBody, err := s.summarizer.Summarize(ctx, mergedBody, topicBodyMaxChars)
+	summaryBody, err := s.escalate(ctx, mergedBody, topicBodyMaxChars)
 	if err != nil {
 		return "", "", fmt.Errorf("summarize topic body: %w", err)
 	}
 	if strings.TrimSpace(summaryBody) != "" {
 		body = summaryBody
 	}
-	if tight, err := s.summarizer.Summarize(ctx, mergedBody, 100); err == nil {
+	if tight, err := s.escalate(ctx, mergedBody, 100); err == nil {
 		if cleaned, ok := sanitizeTightDescription(tight); ok {
 			tightDesc = cleaned
 		}
 	}
 
 	return body, tightDesc, nil
+}
+
+func (s *AMMService) escalate(ctx context.Context, text string, maxChars int) (string, error) {
+	deterministicMax := s.escalationDeterministicMaxChars
+	if deterministicMax <= 0 {
+		deterministicMax = defaultEscalationDeterministicMaxChars
+	}
+	return summarizeWithEscalation(ctx, s.summarizer, text, maxChars, deterministicMax)
+}
+
+func summarizeWithEscalation(ctx context.Context, summarizer core.Summarizer, text string, maxChars int, deterministicMax int) (string, error) {
+	if text == "" {
+		return "", nil
+	}
+
+	if summary, err := summarizer.Summarize(ctx, text, maxChars); err == nil && summary != "" && len(summary) < len(text) {
+		return summary, nil
+	}
+
+	aggressiveMax := maxChars / 2
+	if aggressiveMax <= 0 {
+		aggressiveMax = 1
+	}
+	if summary, err := summarizer.Summarize(ctx, text, aggressiveMax); err == nil && summary != "" && len(summary) < len(text) {
+		return summary, nil
+	}
+
+	truncateLen := len(text)
+	if maxChars > 0 && maxChars < truncateLen {
+		truncateLen = maxChars
+	}
+	if deterministicMax > 0 && truncateLen > deterministicMax {
+		truncateLen = deterministicMax
+	}
+
+	fallback := text[:truncateLen] + fmt.Sprintf(" [Truncated from %d chars]", len(text))
+	if len(fallback) >= len(text) {
+		if len(text) <= 1 {
+			return "", nil
+		}
+		return fallback[:len(text)-1], nil
+	}
+
+	return fallback, nil
 }
 
 func groupLeafSummariesByEntities(leafSummaries []core.Summary) [][]core.Summary {
@@ -660,6 +708,12 @@ func (s *AMMService) buildSessionNarrative(
 			if body == "" {
 				body = joinedContent
 			}
+			if len(body) > sessionBodyMaxChars {
+				body, err = s.escalate(ctx, body, sessionBodyMaxChars)
+				if err != nil {
+					return "", "", nil, false, fmt.Errorf("escalate session body: %w", err)
+				}
+			}
 			tightDesc := fallbackSessionTightDesc(evts)
 			if cleaned, ok := sanitizeTightDescription(result.TightDesc); ok {
 				tightDesc = cleaned
@@ -668,7 +722,7 @@ func (s *AMMService) buildSessionNarrative(
 		}
 	}
 
-	body, err := s.summarizer.Summarize(ctx, joinedContent, sessionBodyMaxChars)
+	body, err := s.escalate(ctx, joinedContent, sessionBodyMaxChars)
 	if err != nil {
 		return "", "", nil, false, fmt.Errorf("summarize session body: %w", err)
 	}

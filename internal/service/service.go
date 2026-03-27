@@ -39,10 +39,11 @@ type AMMService struct {
 	reflectBatchSize                int
 	reflectLLMBatchSize             int
 	lifecycleReviewBatchSize        int
-	compressChunkSize               int
-	compressMaxEvents               int
-	compressBatchSize               int
-	topicBatchSize                  int
+	compressChunkSize                    int
+	compressMaxEvents                    int
+	compressBatchSize                    int
+	topicBatchSize                       int
+	escalationDeterministicMaxChars      int
 	embeddingBatchSize              int
 	crossProjectSimilarityThreshold float64
 	scoringWeights                  ScoringWeights
@@ -73,10 +74,11 @@ func New(repo core.Repository, dbPath string, summarizer core.Summarizer, embedd
 		reflectBatchSize:                defaultReflectBatchSize,
 		reflectLLMBatchSize:             defaultReflectLLMBatchSize,
 		lifecycleReviewBatchSize:        defaultLifecycleReviewBatchSize,
-		compressChunkSize:               defaultCompressChunkSize,
-		compressMaxEvents:               defaultCompressMaxEvents,
-		compressBatchSize:               defaultCompressBatchSize,
-		topicBatchSize:                  defaultTopicBatchSize,
+		compressChunkSize:                    defaultCompressChunkSize,
+		compressMaxEvents:                    defaultCompressMaxEvents,
+		compressBatchSize:                    defaultCompressBatchSize,
+		topicBatchSize:                       defaultTopicBatchSize,
+		escalationDeterministicMaxChars:      defaultEscalationDeterministicMaxChars,
 		embeddingBatchSize:              defaultEmbeddingBatchSize,
 		crossProjectSimilarityThreshold: defaultCrossProjectSimilarityThreshold,
 		scoringWeights:                  DefaultScoringWeights(),
@@ -147,6 +149,17 @@ func (s *AMMService) SetTopicBatchSize(batchSize int) {
 		return
 	}
 	s.topicBatchSize = batchSize
+}
+
+// SetEscalationDeterministicMaxChars configures the maximum character length
+// used by the Level-3 deterministic truncation fallback in summarizeWithEscalation.
+// Non-positive values restore the default (2048).
+func (s *AMMService) SetEscalationDeterministicMaxChars(n int) {
+	if n <= 0 {
+		s.escalationDeterministicMaxChars = defaultEscalationDeterministicMaxChars
+		return
+	}
+	s.escalationDeterministicMaxChars = n
 }
 
 func (s *AMMService) SetEmbeddingBatchSize(batchSize int) {
@@ -858,6 +871,35 @@ func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error)
 		jobErr = err
 		if jobErr == nil {
 			job.Result = map[string]string{"action": "archive_session_traces", "memories_archived": fmt.Sprintf("%d", count)}
+		}
+	case "purge_old_events":
+		deleted, err := s.PurgeOldEvents(ctx, 30)
+		jobErr = err
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "purge_old_events", "deleted": fmt.Sprintf("%d", deleted)}
+		}
+	case "purge_old_jobs":
+		deleted, err := s.PurgeOldJobs(ctx, 30)
+		jobErr = err
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "purge_old_jobs", "deleted": fmt.Sprintf("%d", deleted)}
+		}
+	case "expire_retrieval_cache":
+		deleted, err := s.ExpireRetrievalCache(ctx)
+		jobErr = err
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "expire_retrieval_cache", "deleted": fmt.Sprintf("%d", deleted)}
+		}
+	case "purge_relevance_feedback":
+		deleted, err := s.PurgeOldRelevanceFeedback(ctx, 30)
+		jobErr = err
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "purge_relevance_feedback", "deleted": fmt.Sprintf("%d", deleted)}
+		}
+	case "vacuum_analyze":
+		jobErr = s.VacuumAnalyze(ctx)
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "vacuum_analyze", "status": "completed"}
 		}
 	case "update_ranking_weights":
 		count, err := s.UpdateRankingWeights(ctx)

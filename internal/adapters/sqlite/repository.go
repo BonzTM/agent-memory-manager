@@ -452,13 +452,13 @@ func (r *SQLiteRepository) InsertSummary(ctx context.Context, summary *core.Summ
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO summaries (id, kind, scope, project_id, session_id, agent_id,
 			title, body, tight_description, privacy_level, source_span_json,
-			metadata_json, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			metadata_json, depth, condensed_kind, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		summary.ID, summary.Kind, string(summary.Scope),
 		nullStr(summary.ProjectID), nullStr(summary.SessionID), nullStr(summary.AgentID),
 		nullStr(summary.Title), summary.Body, summary.TightDescription,
 		string(summary.PrivacyLevel), marshalJSON(summary.SourceSpan),
-		marshalMapJSON(summary.Metadata),
+		marshalMapJSON(summary.Metadata), summary.Depth, summary.CondensedKind,
 		timeToStr(summary.CreatedAt), timeToStr(summary.UpdatedAt),
 	)
 	return err
@@ -468,14 +468,14 @@ func (r *SQLiteRepository) GetSummary(ctx context.Context, id string) (*core.Sum
 	row := r.QueryRowContext(ctx, `
 		SELECT id, kind, scope, COALESCE(project_id,''), COALESCE(session_id,''),
 			COALESCE(agent_id,''), COALESCE(title,''), body, tight_description,
-			privacy_level, source_span_json, metadata_json, created_at, updated_at
+			privacy_level, source_span_json, metadata_json, depth, COALESCE(condensed_kind,''), created_at, updated_at
 		FROM summaries WHERE id = ?`, id)
 
 	var s core.Summary
 	var spanJSON, metaJSON, createdAt, updatedAt string
 	err := row.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID,
 		&s.AgentID, &s.Title, &s.Body, &s.TightDescription,
-		&s.PrivacyLevel, &spanJSON, &metaJSON, &createdAt, &updatedAt)
+		&s.PrivacyLevel, &spanJSON, &metaJSON, &s.Depth, &s.CondensedKind, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("summary not found: %s", id)
@@ -492,7 +492,7 @@ func (r *SQLiteRepository) GetSummary(ctx context.Context, id string) (*core.Sum
 func (r *SQLiteRepository) ListSummaries(ctx context.Context, opts core.ListSummariesOptions) ([]core.Summary, error) {
 	query := `SELECT id, kind, scope, COALESCE(project_id,''), COALESCE(session_id,''),
 		COALESCE(agent_id,''), COALESCE(title,''), body, tight_description,
-		privacy_level, source_span_json, metadata_json, created_at, updated_at
+		privacy_level, source_span_json, metadata_json, depth, COALESCE(condensed_kind,''), created_at, updated_at
 		FROM summaries WHERE 1=1`
 	var args []interface{}
 
@@ -527,7 +527,7 @@ func (r *SQLiteRepository) ListSummaries(ctx context.Context, opts core.ListSumm
 		var spanJSON, metaJSON, createdAt, updatedAt string
 		if err := rows.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID,
 			&s.AgentID, &s.Title, &s.Body, &s.TightDescription,
-			&s.PrivacyLevel, &spanJSON, &metaJSON, &createdAt, &updatedAt); err != nil {
+			&s.PrivacyLevel, &spanJSON, &metaJSON, &s.Depth, &s.CondensedKind, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(spanJSON), &s.SourceSpan)
@@ -547,7 +547,7 @@ func (r *SQLiteRepository) SearchSummaries(ctx context.Context, query string, li
 	rows, err := r.QueryContext(ctx, `
 		SELECT s.id, s.kind, s.scope, COALESCE(s.project_id,''), COALESCE(s.session_id,''),
 			COALESCE(s.agent_id,''), COALESCE(s.title,''), s.body, s.tight_description,
-			s.privacy_level, s.source_span_json, s.metadata_json, s.created_at, s.updated_at
+			s.privacy_level, s.source_span_json, s.metadata_json, s.depth, COALESCE(s.condensed_kind,''), s.created_at, s.updated_at
 		FROM summaries_fts f JOIN summaries s ON f.id = s.id
 		WHERE summaries_fts MATCH ?
 		ORDER BY rank
@@ -563,7 +563,7 @@ func (r *SQLiteRepository) SearchSummaries(ctx context.Context, query string, li
 		var spanJSON, metaJSON, createdAt, updatedAt string
 		if err := rows.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID,
 			&s.AgentID, &s.Title, &s.Body, &s.TightDescription,
-			&s.PrivacyLevel, &spanJSON, &metaJSON, &createdAt, &updatedAt); err != nil {
+			&s.PrivacyLevel, &spanJSON, &metaJSON, &s.Depth, &s.CondensedKind, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(spanJSON), &s.SourceSpan)
@@ -2388,6 +2388,73 @@ func (r *SQLiteRepository) CleanupRecallHistory(ctx context.Context, olderThanDa
 	return result.RowsAffected()
 }
 
+func (r *SQLiteRepository) PurgeOldEvents(ctx context.Context, olderThanDays int) (int64, error) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -olderThanDays).Format(time.RFC3339)
+	result, err := r.ExecContext(ctx, `
+		DELETE FROM events
+		WHERE occurred_at < ? AND reflected_at IS NOT NULL`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func (r *SQLiteRepository) PurgeOldJobs(ctx context.Context, olderThanDays int) (int64, error) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -olderThanDays).Format(time.RFC3339)
+	result, err := r.ExecContext(ctx, `
+		DELETE FROM jobs
+		WHERE created_at < ? AND status IN ('completed', 'failed')`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func (r *SQLiteRepository) ExpireRetrievalCache(ctx context.Context) (int64, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := r.ExecContext(ctx, `
+		DELETE FROM retrieval_cache
+		WHERE expires_at < ?`, now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func (r *SQLiteRepository) PurgeOldRelevanceFeedback(ctx context.Context, olderThanDays int) (int64, error) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -olderThanDays).Format(time.RFC3339)
+	result, err := r.ExecContext(ctx, `
+		DELETE FROM relevance_feedback
+		WHERE created_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func (r *SQLiteRepository) VacuumAnalyze(ctx context.Context) error {
+	var firstErr error
+	if _, err := r.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		slog.Warn("SQLite vacuum/analyze maintenance step failed", "step", "wal_checkpoint", "error", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if _, err := r.ExecContext(ctx, `ANALYZE`); err != nil {
+		slog.Warn("SQLite vacuum/analyze maintenance step failed", "step", "analyze", "error", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if _, err := r.ExecContext(ctx, `VACUUM`); err != nil {
+		slog.Warn("SQLite vacuum/analyze maintenance step failed", "step", "vacuum", "error", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 func (r *SQLiteRepository) InsertRelevanceFeedback(ctx context.Context, sessionID, itemID, itemKind, action string) error {
 	_, err := r.ExecContext(ctx, `
 		INSERT OR IGNORE INTO relevance_feedback (session_id, item_id, item_kind, action, created_at)
@@ -2597,7 +2664,7 @@ func (r *SQLiteRepository) ListUnembeddedMemories(ctx context.Context, model str
 func (r *SQLiteRepository) ListUnembeddedSummaries(ctx context.Context, model string, limit int) ([]core.Summary, error) {
 	query := `SELECT id, kind, scope, COALESCE(project_id,''), COALESCE(session_id,''),
 		COALESCE(agent_id,''), COALESCE(title,''), body, tight_description,
-		privacy_level, source_span_json, metadata_json, created_at, updated_at
+		privacy_level, source_span_json, metadata_json, depth, COALESCE(condensed_kind,''), created_at, updated_at
 		FROM summaries s
 		WHERE NOT EXISTS (
 			SELECT 1 FROM embeddings e
@@ -2616,7 +2683,7 @@ func (r *SQLiteRepository) ListUnembeddedSummaries(ctx context.Context, model st
 		var spanJSON, metaJSON, createdAt, updatedAt string
 		if err := rows.Scan(&sm.ID, &sm.Kind, &sm.Scope, &sm.ProjectID, &sm.SessionID,
 			&sm.AgentID, &sm.Title, &sm.Body, &sm.TightDescription,
-			&sm.PrivacyLevel, &spanJSON, &metaJSON, &createdAt, &updatedAt); err != nil {
+			&sm.PrivacyLevel, &spanJSON, &metaJSON, &sm.Depth, &sm.CondensedKind, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(spanJSON), &sm.SourceSpan)
