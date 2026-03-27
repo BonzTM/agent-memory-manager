@@ -40,7 +40,7 @@ Completed.
 
 ### Decay and promotion automation
 Completed.
-- `promote_high_value` and `archive_session_traces` jobs are implemented.
+- `archive_session_traces` job is implemented.
 
 ## Remaining Priorities
 

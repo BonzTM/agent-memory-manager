@@ -32,12 +32,7 @@ Where in the AMM pipeline does LLM involvement produce meaningfully better outco
 
 **Problem**: A memory's value isn't just recency. "We tried X and it failed catastrophically" is permanently valuable regardless of age. Heuristic decay can't assess semantic durability.
 
-### 4. Promotion (`promote_high_value`)
-**What it does**: Promotes high-value memories. Heuristic-only.
-
-**Problem**: Similar to decay — heuristic signals (confidence, importance scores, access patterns) are proxies for value, not direct measures. An LLM could assess whether a memory is genuinely reusable knowledge vs. stale context.
-
-### 5. Summary Generation (compress_history / consolidate_sessions)
+### 4. Summary Generation (compress_history / consolidate_sessions)
 **What it does**: Builds summaries over event spans and sessions. Already has LLM path via Summarizer interface.
 
 **Status**: This one already works well with LLM when available.
@@ -52,7 +47,7 @@ Instead of binary "full / read_only / ignore", add an LLM triage step for events
 This collapses noise filtering + extraction guidance into one LLM call. Events clearly noisy by heuristics skip the LLM entirely. Events clearly valuable skip it too. Only the "maybe" bucket gets triaged.
 
 **Point 2: Periodic Quality Review**  
-A batch job that reviews N oldest/least-accessed memories and assesses: "Is this still valuable? Should it be promoted, archived, or merged with another memory?" This collapses decay + promotion + quality assessment into one periodic LLM call.
+A batch job that reviews N oldest/least-accessed memories and assesses: "Is this still valuable? Should it be archived or merged with another memory?" This collapses decay + quality assessment into one periodic LLM call.
 
 **Cost model**: Point 1 fires per-borderline-event (amortized by heuristic pre-filter). Point 2 fires as a batch job on a schedule. Neither is per-event for all events.
 
@@ -63,7 +58,7 @@ A batch job that reviews N oldest/least-accessed memories and assesses: "Is this
 - Quality tags ("durable", "ephemeral", "context-dependent")
 - Suggested importance/confidence overrides
 
-Then downstream jobs (decay, promotion) use these LLM-assigned tags instead of heuristics. Cost: one LLM call per event during reflect/reprocess, but no additional LLM calls elsewhere.
+Then downstream jobs (decay) use these LLM-assigned tags instead of heuristics. Cost: one LLM call per event during reflect/reprocess, but no additional LLM calls elsewhere.
 
 **Downside**: No LLM involvement in lifecycle management. Tags assigned at extraction time become stale.
 
@@ -119,7 +114,7 @@ If the extraction improvements don't sufficiently reduce over-production or impr
 ## Related Work
 
 - Ingestion noise filtering: implemented (heuristic + LLM bypass when configured)
-- Decay/promotion automation: `promote_high_value` and `archive_session_traces` jobs (heuristic-only, potential future LLM enrichment)
+- Decay/archive automation: `archive_session_traces` job (heuristic-only, potential future LLM enrichment)
 - LLM extraction: `LLMSummarizer` in `internal/service/llm_summarizer.go` (prompt improved)
 - Memory dedup: pre-insert dedup in Remember, Reflect, and scaled MergeDuplicates
 - Embeddings: API-based provider implemented, separate config from summarizer

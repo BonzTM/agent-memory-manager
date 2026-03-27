@@ -491,11 +491,10 @@ CREATE TABLE IF NOT EXISTS entity_graph_projection (
 
 ### 4A. Consolidated Lifecycle Review Job ✅ COMPLETE
 
-**Goal:** Replace three separate heuristic jobs (decay, promote, detect_contradictions) with one LLM-powered batch review.
+**Goal:** Replace two separate heuristic jobs (decay, detect_contradictions) with one LLM-powered batch review.
 
 **Current state:**
 - `decay_stale_memory`: age-based exponential decay, archives when importance < 0.1
-- `promote_high_value`: **stub — returns 0, nil** (completely unimplemented)
 - `detect_contradictions`: claim-based string matching, auto-supersedes older memory
 
 **New job: `lifecycle_review`**
@@ -519,11 +518,8 @@ Return a JSON object with: promote (IDs), decay (IDs), archive (IDs), merge (pai
 
 **Heuristic decay/archive jobs remain as fallback** when LLM is unconfigured. The existing logic is fine as a safety net.
 
-**`promote_high_value` gets a real implementation** — the LLM identifies memories worth boosting, but also: memories with high recall frequency (from `recall_history`) but low importance get auto-promoted as a heuristic signal.
-
 **Files changed:**
 - `internal/service/lifecycle_review.go` — new file
-- `internal/service/promote.go` — real implementation using recall_history
 - `internal/core/intelligence.go` — ReviewMemories method
 - `internal/service/llm_intelligence.go` — implement ReviewMemories prompt
 - `internal/service/service.go` — new job kind

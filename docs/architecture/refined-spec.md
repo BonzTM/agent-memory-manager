@@ -842,7 +842,6 @@ Memory needs housekeeping.
 - `refresh_summaries`
 - `rebuild_indexes`
 - `repair_links`
-- `promote_high_value_memories`
 - `archive_low_salience_session_traces`
 
 ---
