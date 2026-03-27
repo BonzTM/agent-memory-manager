@@ -85,13 +85,7 @@ echo "--- Step 11: Decay Stale Memories ---"
 $AMM jobs run decay_stale_memory | parse_field '"  Memories decayed:", d["result"]["result"].get("memories_decayed", "0")'
 echo ""
 
-# 12. Promote high-value memories
-echo "--- Step 12: Promote High-Value Memories ---"
-$AMM jobs run promote_high_value | parse_field '"  Memories promoted:", d["result"]["result"].get("memories_promoted", "0")'
-echo ""
-
-# 13. Archive session traces
-echo "--- Step 13: Archive Session Traces ---"
+echo "--- Step 12: Archive Session Traces ---"
 $AMM jobs run archive_session_traces | parse_field '"  Memories archived:", d["result"]["result"].get("memories_archived", "0")'
 echo ""
 

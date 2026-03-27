@@ -61,7 +61,6 @@ $AMM jobs run form_episodes >/dev/null 2>&1 || true
 # Phase 5: Quality and lifecycle.
 $AMM jobs run detect_contradictions >/dev/null 2>&1 || true
 $AMM jobs run decay_stale_memory >/dev/null 2>&1 || true
-$AMM jobs run promote_high_value >/dev/null 2>&1 || true
 $AMM jobs run lifecycle_review >/dev/null 2>&1 || true
 $AMM jobs run cross_project_transfer >/dev/null 2>&1 || true
 $AMM jobs run archive_session_traces >/dev/null 2>&1 || true
