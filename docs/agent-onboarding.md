@@ -26,57 +26,71 @@ Once amm is installed, the agent should follow the same durable-memory rules reg
 ## Prerequisites Check
 
 ```bash
-# Verify Go is installed (1.21+ required)
-go version
-
-# Verify CGO is available (required for SQLite with FTS5)
-CGO_ENABLED=1 go env CGO_ENABLED
-# Expected output: 1
-
 # Verify jq is available (used by hook scripts)
 jq --version
 ```
 
-If `CGO_ENABLED` does not print `1`, the user needs a C compiler installed (e.g., `gcc` or `clang`). On Debian/Ubuntu: `sudo apt install build-essential`. On macOS: `xcode-select --install`.
+If the user wants to build from source, they also need Go 1.21+ plus CGO prerequisites. Use [Getting Started](getting-started.md) for full install instructions.
 
 ---
 
-## Step 1: Build amm
+## Step 1: Install amm (Release Binary or Docker)
 
 ```bash
-cd /path/to/agent-memory-manager
+# Recommended: install release binaries (amm, amm-mcp, amm-http)
+# Follow docs/getting-started.md for exact platform download and PATH setup.
 
-mkdir -p /tmp/amm-build
-
-# Build the CLI binary
-CGO_ENABLED=1 go build -tags fts5 -o /tmp/amm-build/amm ./cmd/amm
-
-# Build the MCP server binary
-CGO_ENABLED=1 go build -tags fts5 -o /tmp/amm-build/amm-mcp ./cmd/amm-mcp
-
-# Install both binaries globally
-sudo install -m 755 /tmp/amm-build/amm /usr/local/bin/amm
-sudo install -m 755 /tmp/amm-build/amm-mcp /usr/local/bin/amm-mcp
-
-# Verify both binaries exist
-ls -la /usr/local/bin/amm /usr/local/bin/amm-mcp
+# Alternative: pull the official Docker image
+docker pull ghcr.io/bonztm/agent-memory-manager:latest
 ```
 
-The `-tags fts5` flag enables SQLite full-text search, which amm requires for retrieval.
+Install details (including build-from-source fallback) are documented in [Getting Started](getting-started.md).
 
 ---
 
 ## Step 2: Initialize the Database
 
 ```bash
-# Create the database directory and run migrations
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm init
+# SQLite (default): create database and run migrations
+AMM_DB_PATH=~/.amm/amm.db amm init
 
 # Verify initialization
-AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm status
+AMM_DB_PATH=~/.amm/amm.db amm status
 ```
 
 Expected output from `status` should show `initialized: true` with all counts at 0.
+
+For PostgreSQL-backed deployments:
+
+```bash
+export AMM_STORAGE_BACKEND=postgres
+export AMM_POSTGRES_DSN='postgres://postgres:postgres@localhost:5432/amm?sslmode=disable'
+amm init
+amm status
+```
+
+Use PostgreSQL when you want a shared/networked backend for multiple agents.
+
+---
+
+## Step 2a: (Optional) Run as HTTP API
+
+If the runtime cannot execute local binaries directly, deploy `amm-http` and call AMM over REST:
+
+```bash
+amm-http
+# Listens on :8080 by default
+```
+
+Example recall request:
+
+```bash
+curl -s -X POST "http://localhost:8080/v1/recall" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"project decisions","opts":{"mode":"ambient"}}'
+```
+
+For Kubernetes deployments, use the Helm chart at `deploy/helm/amm/`.
 
 ---
 

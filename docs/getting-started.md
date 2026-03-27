@@ -1,349 +1,133 @@
 # Getting Started with AMM
 
-This guide walks you through installing, configuring, and using AMM (Agent Memory Manager) from scratch.
+AMM (Agent Memory Manager) provides durable, structured memory for AI agents. This guide walks you through installation, configuration, and basic usage.
 
-## Prerequisites
+## Installation
 
+### 1. Release Binary (Recommended)
+The fastest way to get started is by downloading a pre-compiled binary:
+1. Go to the [Releases](https://github.com/bonztm/agent-memory-manager/releases) page.
+2. Download the archive for your operating system and architecture.
+3. Extract the `amm`, `amm-mcp`, and `amm-http` binaries.
+4. Move them to a directory in your system PATH (e.g., `/usr/local/bin` or `~/.local/bin`).
+
+### 2. Docker
+AMM is available as a Docker image on GitHub Container Registry:
+```bash
+docker pull ghcr.io/bonztm/agent-memory-manager:latest
+```
+
+To run AMM with a persistent SQLite database:
+```bash
+docker run -it \
+  -v ~/.amm:/data \
+  -e AMM_DB_PATH=/data/amm.db \
+  ghcr.io/bonztm/agent-memory-manager:latest \
+  amm init
+```
+
+For production deployments, see the [PostgreSQL Backend](postgres.md) guide and the Helm charts in `deploy/helm/amm`.
+
+### 3. Build from Source
+If you prefer to build locally, you need:
 - Go 1.21 or later
-- C compiler (gcc or clang) for CGO
+- A C compiler (gcc or clang) for CGO support
 - SQLite development headers
 
-On Ubuntu/Debian:
+**On Ubuntu/Debian:**
 ```bash
 sudo apt-get install build-essential libsqlite3-dev
 ```
 
-On macOS:
-```bash
-xcode-select --install
-```
-
-## Installation
-
-### From Source
-
+**Build Commands:**
 ```bash
 # Clone the repository
 git clone https://github.com/bonztm/agent-memory-manager.git
 cd agent-memory-manager
 
-# Build both binaries
-CGO_ENABLED=1 go build -tags fts5 -o amm ./cmd/amm
-CGO_ENABLED=1 go build -tags fts5 -o amm-mcp ./cmd/amm-mcp
-
-# Install to your PATH
-mv amm amm-mcp ~/.local/bin/
+# Build all three binaries with FTS5 support
+CGO_ENABLED=1 go build -tags fts5 ./cmd/amm ./cmd/amm-mcp ./cmd/amm-http
 ```
 
-### Using go install
-
-```bash
-CGO_ENABLED=1 go install -tags fts5 github.com/bonztm/agent-memory-manager/cmd/amm@latest
-CGO_ENABLED=1 go install -tags fts5 github.com/bonztm/agent-memory-manager/cmd/amm-mcp@latest
-```
+---
 
 ## Initial Setup
 
 ### 1. Initialize the Database
+Before using AMM, initialize one of the supported backends:
 
+**SQLite (default):**
 ```bash
 amm init
 ```
+By default, this creates a SQLite database at `~/.amm/amm.db`. You can override this with the `AMM_DB_PATH` environment variable.
 
-This creates a SQLite database at `~/.amm/amm.db` with all necessary tables and indexes.
-
-To use a custom location:
+**PostgreSQL:**
 ```bash
-AMM_DB_PATH=/path/to/custom.db amm init
+export AMM_STORAGE_BACKEND=postgres
+export AMM_POSTGRES_DSN='postgres://postgres:postgres@localhost:5432/amm?sslmode=disable'
+amm init
 ```
 
-### 2. Verify Installation
+When `AMM_STORAGE_BACKEND=postgres` is set, AMM uses PostgreSQL instead of SQLite.
 
+### 2. Verify Installation
+Check the system status:
 ```bash
 amm status
 ```
+You should see `initialized: true` in the output.
 
-You should see output like:
-```json
-{
-  "ok": true,
-  "command": "status",
-  "timestamp": "2026-03-25T12:00:00Z",
-  "result": {
-    "db_path": "/home/user/.amm/amm.db",
-    "initialized": true,
-    "event_count": 0,
-    "memory_count": 0
-  }
-}
+Verify all three binaries are installed:
+```bash
+amm --help
+amm-mcp --help
+amm-http --help
 ```
+
+---
 
 ## Basic Usage
 
-### Storing Your First Memory
-
+### Storing a Memory
+Add a preference or fact explicitly:
 ```bash
 amm remember \
   --type preference \
   --scope global \
-  --subject "editor" \
-  --body "I prefer using Neovim with a dark color scheme" \
-  --tight "Prefers Neovim dark theme"
+  --body "I prefer using Go for systems programming" \
+  --tight "Prefers Go for systems"
 ```
 
-This creates a durable memory that will be available across all sessions.
-
-### Recalling Memories
-
+### Recalling Context
+Retrieve relevant memories based on a query:
 ```bash
-# General recall (hybrid mode by default)
-amm recall "editor preferences"
-
-# Facts-only mode
-amm recall "color scheme" --mode facts
-
-# Ambient mode (fast, for real-time context)
-amm recall "what editor do I use" --mode ambient
+amm recall "programming language preferences"
 ```
 
-### Ingesting Events
-
-AMM can ingest raw events from agent interactions:
-
+### Starting the HTTP Server
+If you want to use the REST API, start the HTTP adapter:
 ```bash
-echo '{
-  "kind": "message_user",
-  "source_system": "cli",
-  "content": "Set up the database schema",
-  "session_id": "sess_001",
-  "project_id": "myproject"
-}' | amm ingest event
+amm-http
+# Server starts on :8080 by default
 ```
-
-Or bulk ingest a transcript:
-
+Test status with curl:
 ```bash
-amm ingest transcript --in session-transcript.json
+curl http://localhost:8080/v1/status
 ```
 
-## Memory Types
-
-AMM supports 16 memory types. Here are the most common:
-
-| Type | Use Case |
-|------|----------|
-| `preference` | User likes/dislikes |
-| `fact` | Verified information |
-| `decision` | Choices and rationale |
-| `procedure` | How-to steps |
-| `constraint` | Hard requirements |
-
-Example of each:
-
+Test recall with curl:
 ```bash
-# Preference
-amm remember --type preference --scope global \
-  --body "User prefers concise replies" \
-  --tight "Prefers concise communication"
-
-# Fact
-amm remember --type fact --scope project --project myapp \
-  --body "The API uses JWT for authentication" \
-  --tight "API uses JWT auth"
-
-# Decision
-amm remember --type decision --scope project --project myapp \
-  --body "Chose PostgreSQL over MySQL for JSON support" \
-  --tight "Using PostgreSQL for JSON features"
+curl -s -X POST "http://localhost:8080/v1/recall" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"user preferences","opts":{"mode":"ambient"}}'
 ```
 
-## Retrieval Modes
-
-Different modes for different use cases:
-
-```bash
-# Ambient - fast, general purpose
-amm recall "current context" --mode ambient
-
-# Facts - factual information
-amm recall "database" --mode facts
-
-# Episodes - narrative accounts
-amm recall "deployment" --mode episodes
-
-# Timeline - chronological
-amm recall "yesterday" --mode timeline
-
-# Project-scoped
-amm recall "api design" --mode project --project myapp
-
-# Entity-focused
-amm recall "postgres" --mode entity
-
-# Active items
-amm recall "open items" --mode active
-
-# Raw history
-amm recall "error" --mode history
-```
-
-## Working with the Memory System
-
-### Describing Items
-
-Get thin descriptions of memories without full expansion:
-
-```bash
-amm describe mem_abc123 mem_def456
-```
-
-### Expanding Items
-
-Get full details including linked claims and events:
-
-```bash
-amm expand mem_abc123
-```
-
-### Updating Memories
-
-```bash
-amm memory update mem_abc123 --status superseded
-```
-
-## Maintenance Jobs
-
-Run background jobs to maintain memory quality:
-
-```bash
-# Extract memories from recent events
-amm jobs run reflect
-
-# Compress history into summaries
-amm jobs run compress_history
-
-# Detect contradictions
-amm jobs run detect_contradictions
-
-# Merge duplicates
-amm jobs run merge_duplicates
-
-# Rebuild search indexes
-amm jobs run rebuild_indexes
-```
-
-## Ingestion Policies
-
-Control how events are processed:
-
-```bash
-# List current policies
-amm policy list
-
-# Add a policy to ignore test sessions
-amm policy add \
-  --pattern-type session \
-  --pattern "test_*" \
-  --mode ignore
-
-# Add read-only policy for sensitive sources
-amm policy add \
-  --pattern-type source \
-  --pattern "production-logs" \
-  --mode read_only
-```
-
-## MCP Integration
-
-For agent runtimes that support MCP (Model Context Protocol):
-
-### Start the MCP Server
-
-```bash
-amm-mcp
-```
-
-The server reads JSON-RPC requests from stdin and writes responses to stdout.
-
-### Example MCP Tool Call
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "amm_recall",
-    "arguments": {
-      "query": "editor preferences",
-      "opts": {"mode": "facts"}
-    }
-  }
-}
-```
-
-See [MCP Reference](mcp-reference.md) for complete tool documentation.
-
-## Advanced: Full JSON Envelopes
-
-For scripting and CI/CD, use the `run` command with full envelopes:
-
-```bash
-amm run --in request.json
-```
-
-Example `request.json`:
-```json
-{
-  "version": "amm.v1",
-  "command": "remember",
-  "request_id": "req-001",
-  "payload": {
-    "type": "preference",
-    "scope": "global",
-    "body": "User prefers dark mode",
-    "tight_description": "Prefers dark mode"
-  }
-}
-```
-
-Validate without executing:
-
-```bash
-amm validate --in request.json
-```
-
-## Troubleshooting
-
-### "database is locked" errors
-
-This happens with concurrent access. Solutions:
-- Use a single amm process at a time
-- For high concurrency, consider WAL mode (enabled by default)
-
-### FTS5 not available
-
-If you see FTS5 errors, rebuild with the fts5 tag:
-```bash
-CGO_ENABLED=1 go build -tags fts5 ./cmd/amm
-```
-
-### Empty recall results
-
-1. Check if memories exist: `amm status`
-2. Try different recall modes: `--mode facts`, `--mode history`
-3. Verify scope filters aren't too restrictive
-4. Run `amm jobs run rebuild_indexes`
+---
 
 ## Next Steps
-
-- Read the [Architecture Overview](architecture.md) to understand how AMM works
-- Review the [CLI Reference](cli-reference.md) for all commands
-- Check [Integration Guide](integration.md) for connecting your agent runtime
-- See runtime-specific guides: [Codex](codex-integration.md), [OpenCode](opencode-integration.md)
-
-## Getting Help
-
-- Run `amm --help` for command help
-- Run `amm <command> --help` for specific command flags
-- Check [GitHub Issues](https://github.com/bonztm/agent-memory-manager/issues)
+- [HTTP API Reference](http-api-reference.md)
+- [CLI Reference](cli-reference.md)
+- [MCP Reference](mcp-reference.md)
+- [Configuration Guide](configuration.md)
+- [Architecture Overview](architecture.md)
