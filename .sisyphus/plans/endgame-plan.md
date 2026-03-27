@@ -847,14 +847,14 @@ Phase 2D (Processing Ledger) should be implemented early in Phase 2 since all su
 
 ## What's Still Missing (Beyond This Plan)
 
-1. **Postgres support** (spec Phase 3) — for multi-user/team deployments. Not critical for single-user.
+1. **Postgres support** (spec Phase 3) — ✅ COMPLETE. New `internal/adapters/postgres/` package implements `core.Repository` via `lib/pq`. Backend selectable via `AMM_STORAGE_BACKEND=postgres` + `AMM_POSTGRES_DSN`. SQLite remains default.
 2. **HTTP API adapter** — spec section 29.1 lists REST endpoints. Currently only CLI + MCP.
-3. **Anti-hub logic** (spec section 21.2) — common entities dominating recall. Could be a scoring signal or a graph-based dampening factor. Natural extension of Phase 3 (entity graph).
-4. **Source trust weighting** (spec section 32.3) — not all events are equally trustworthy. Could tie into the processing ledger.
-5. **User-controlled forgetting** — `amm forget <id>` with proper cascading (supersede, not delete).
-6. **Explain-recall improvements** — surface the signal breakdown in recall results (the `SignalBreakdown` struct exists but isn't returned to callers).
+3. **Anti-hub logic** (spec section 21.2) — ✅ COMPLETE. IDF-like anti-hub dampening implemented in `scoring.go` and `recall.go`. Common entities are downweighted based on inverse document frequency.
+4. **Source trust weighting** (spec section 32.3) — ✅ COMPLETE. New `signalSourceTrust` scoring signal in `scoring.go`. Trust hierarchy: explicit remember (1.0) > agent interaction (0.9) > LLM-extracted (0.8) > hooks (0.7) > unknown (0.6) > heuristic (0.5). Weight: 0.05.
+5. **User-controlled forgetting** — ✅ COMPLETE. `amm forget <id>` implemented in CLI + MCP (`amm_forget`). Retracts memory (status → retracted, metadata records `retracted_at`/`retracted_reason`). Anti-resurfacing: `matchesRetractedMemory` in reflect + reprocess prevents re-extraction of forgotten content.
+6. **Explain-recall improvements** — ✅ COMPLETE. `SignalBreakdown.ToMap()` surfaces all scoring signals. `RecallItem.Signals` populated when `Explain: true` in recall options. CLI `--explain` flag and MCP `explain` parameter wired through.
 7. **Workspace scope** (spec section 7.7, deferred) — for multi-team deployments.
-8. **Full transcript capture** — OpenCode plugin currently captures tool results and session events but NOT full user/assistant messages. This limits what reflect can extract from.
+8. **Full transcript capture** — ✅ COMPLETE. Implemented for all 5 runtimes: OpenCode (plugin), Claude Code (hooks), Codex (hooks), OpenClaw (handler), Hermes (hooks). Full user/assistant messages + tool calls captured.
 
 ---
 
