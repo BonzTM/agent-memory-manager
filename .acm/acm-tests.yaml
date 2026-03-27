@@ -17,9 +17,8 @@ tests:
   - id: go-build
     summary: Ensure both CLI entrypoints build
     command:
-      argv: ["/usr/local/go/bin/go", "build", "-tags", "fts5", "./cmd/amm", "./cmd/amm-mcp"]
+      argv: ["/usr/local/go/bin/go", "build", "./cmd/amm", "./cmd/amm-mcp"]
       env:
-        CGO_ENABLED: "1"
         GOCACHE: "/tmp/agent-memory-manager-gocache"
         GOMODCACHE: "/tmp/agent-memory-manager-gomodcache"
     select:
@@ -31,9 +30,8 @@ tests:
   - id: go-test-smoke
     summary: Run core and runtime tests on every verification pass
     command:
-      argv: ["/usr/local/go/bin/go", "test", "-tags", "fts5", "./internal/core/...", "./internal/runtime/...", "-count=1"]
+      argv: ["/usr/local/go/bin/go", "test", "./internal/core/...", "./internal/runtime/...", "-count=1"]
       env:
-        CGO_ENABLED: "1"
         GOCACHE: "/tmp/agent-memory-manager-gocache"
         GOMODCACHE: "/tmp/agent-memory-manager-gomodcache"
     select:
@@ -44,9 +42,8 @@ tests:
   - id: go-test-changed
     summary: Run go test for packages touched by the current verify diff
     command:
-      argv: ["/usr/local/go/bin/go", "test", "-tags", "fts5", "./...", "-count=1", "-short"]
+      argv: ["/usr/local/go/bin/go", "test", "./...", "-count=1", "-short"]
       env:
-        CGO_ENABLED: "1"
         GOCACHE: "/tmp/agent-memory-manager-gocache"
         GOMODCACHE: "/tmp/agent-memory-manager-gomodcache"
     select:
@@ -58,9 +55,8 @@ tests:
   - id: go-test-full
     summary: Run the full Go test suite for product changes
     command:
-      argv: ["/usr/local/go/bin/go", "test", "-tags", "fts5", "./..."]
+      argv: ["/usr/local/go/bin/go", "test", "./..."]
       env:
-        CGO_ENABLED: "1"
         GOFLAGS: "-count=1"
         GOCACHE: "/tmp/agent-memory-manager-gocache"
         GOMODCACHE: "/tmp/agent-memory-manager-gomodcache"
@@ -95,7 +91,6 @@ tests:
     command:
       argv: ["bash", "-c", "scripts/coverage-gate.sh"]
       env:
-        CGO_ENABLED: "1"
         GOCACHE: "/tmp/agent-memory-manager-gocache"
         GOMODCACHE: "/tmp/agent-memory-manager-gomodcache"
     select:
