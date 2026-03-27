@@ -4,29 +4,63 @@ AMM gives AI agents durable, structured memory that persists across sessions and
 
 ## Quick Start
 
-1. **Build**
-   ```bash
-   CGO_ENABLED=1 go build -tags fts5 -o amm ./cmd/amm
-   ```
-2. **Initialize**
+1. **Initialize**
    ```bash
    AMM_DB_PATH=~/.amm/amm.db ./amm init
    ```
-3. **Configure (Optional)**
+2. **Configure (Optional)**
    ```bash
    export AMM_SUMMARIZER_ENDPOINT=https://api.openai.com/v1
    export AMM_SUMMARIZER_API_KEY=sk-...
    ```
-4. **Ingest an Event**
+3. **Ingest an Event**
    ```bash
    echo '{"kind":"message_user","source_system":"cli","content":"User prefers Go"}' | ./amm ingest event --in -
    ```
-5. **Recall**
+4. **Recall**
    ```bash
    ./amm recall "user preferences"
    ```
 
 For detailed setup, see [Getting Started](docs/getting-started.md).
+
+## Installation
+
+### 1. Release Binary (Recommended)
+Download the latest pre-compiled binary for your platform from the [Releases](https://github.com/bonztm/agent-memory-manager/releases) page. Extract `amm`, `amm-mcp`, and `amm-http`, then add them to your system PATH.
+
+### 2. Docker
+Pull the official image from GitHub Container Registry:
+```bash
+docker pull ghcr.io/bonztm/agent-memory-manager:latest
+```
+Run with a persistent volume:
+```bash
+docker run -v ~/.amm:/data -e AMM_DB_PATH=/data/amm.db ghcr.io/bonztm/agent-memory-manager:latest amm init
+```
+
+### 3. Build from Source
+If you prefer building locally, ensure you have Go 1.21+ and a C compiler (CGO is required for SQLite).
+```bash
+CGO_ENABLED=1 go build -tags fts5 ./cmd/amm ./cmd/amm-mcp ./cmd/amm-http
+```
+See [Getting Started](docs/getting-started.md) for more build options.
+
+## Deployment Modes
+
+### CLI Mode
+Run `amm` directly for interactive use or shell-based scripts.
+
+### MCP Mode
+Run `amm-mcp` to use AMM as a Model Context Protocol server. This is the primary way to integrate with tools like Claude Code and IDEs.
+
+### HTTP API Mode
+Run `amm-http` to start a persistent HTTP server. This is ideal for shared memory backends or integration with web-based agent runtimes.
+```bash
+./amm-http
+# Server starts on :8080 by default
+```
+See the [HTTP API Reference](docs/http-api-reference.md) for details.
 
 ## What AMM Does
 
@@ -64,25 +98,26 @@ AMM uses a five-layer model to manage information from raw history to durable tr
 ```
 cmd/amm/         CLI entrypoint
 cmd/amm-mcp/     MCP adapter (JSON-RPC over stdio)
+cmd/amm-http/    HTTP API adapter (RESTful server)
 internal/
   core/          Service + repository interfaces, domain types
   service/       Business logic, recall, scoring, workers
-  adapters/      CLI, MCP, and SQLite implementations
+  adapters/
+    cli/         CLI JSON envelope adapter
+    mcp/         MCP adapter
+    http/        HTTP API adapter
+    sqlite/      SQLite backend (default)
+    postgres/    PostgreSQL backend
   contracts/v1/  Typed payloads and validation
+  buildinfo/     Version + commit injection via ldflags
   runtime/       Config, service factory, logger
+deploy/
+  helm/amm/      Helm chart for Kubernetes deployment
 ```
 
 Full details in [Architecture Documentation](docs/architecture.md).
 
-## Integrations
-
-- **Claude Code**: Native MCP wiring and event hooks — see [examples/claude-code](examples/claude-code/).
-- **Codex**: Integrated via [Codex Integration](docs/codex-integration.md).
-- **OpenCode**: Dogfooding runtime with [OpenCode Integration](docs/opencode-integration.md).
-- **OpenClaw**: Worker-based memory capture in [OpenClaw Integration](docs/openclaw-integration.md).
-- **Hermes**: Sidecar model for [Hermes Integration](docs/hermes-agent-integration.md).
-
-AMM pairs with [ACM](https://github.com/bonztm/agent-context-manager) for repositories requiring governed task workflows and durable state.
+AMM keeps adapter parity across CLI (`amm`), MCP (`amm-mcp`), and HTTP (`amm-http`) and storage parity across SQLite and PostgreSQL backends.
 
 ## Configuration
 
@@ -92,68 +127,21 @@ Set these environment variables to enable LLM-backed extraction and semantic sea
 - `AMM_SUMMARIZER_API_KEY`: API key for the summarizer.
 - `AMM_EMBEDDINGS_ENABLED`: Set to `true` for vector-based recall.
 - `AMM_EMBEDDINGS_API_KEY`: API key for embedding generation.
+- `AMM_STORAGE_BACKEND`: Set to `postgres` to use a PostgreSQL database.
 
 Full reference in [Configuration Documentation](docs/configuration.md).
-
-## Reference Tables
-
-<details>
-<summary>Retrieval Modes</summary>
-
-| Mode | Description |
-|------|-------------|
-| `ambient` | Default associative recall for every turn. |
-| `facts` | Retrieve only durable factual memories. |
-| `episodes` | Retrieve narrative episode records. |
-| `timeline` | Chronological event and memory retrieval. |
-| `project` | Scoped retrieval within a specific project. |
-| `entity` | Focus on memories related to specific entities. |
-| `active` | Surface context for open loops and in-flight items. |
-| `history` | Direct search across raw event history. |
-| `hybrid` | Combined multi-strategy retrieval. |
-</details>
-
-<details>
-<summary>Maintenance Jobs</summary>
-
-| Job | Description |
-|-----|-------------|
-| `reflect` | Extract candidate memories from recent events. |
-| `rebuild_indexes` | Incremental FTS5 and embedding rebuild (runs after reflect). |
-| `compress_history` | Build leaf summaries over event spans. |
-| `consolidate_sessions` | Build session and episode summaries. |
-| `build_topic_summaries` | Build topic-level hierarchical summaries. |
-| `merge_duplicates` | Consolidate overlapping memories. |
-| `extract_claims` | Extract structured assertions from memories. |
-| `enrich_memories` | Entity-link explicitly remembered memories. |
-| `rebuild_entity_graph` | Rebuild pre-computed entity graph neighborhoods. |
-| `form_episodes` | Group related events into narrative episodes. |
-| `detect_contradictions` | Find conflicting claims or stale truths. |
-| `decay_stale_memory` | Downrank stale assumptions and open loops. |
-| `lifecycle_review` | LLM-powered review for memory decay and promotion. |
-| `cross_project_transfer` | Promote reusable memories to global scope. |
-| `archive_session_traces` | Archive low-salience session memories. |
-| `update_ranking_weights` | Update scoring weights from relevance feedback. |
-| `rebuild_indexes_full` | Full FTS5 and embedding rebuild from scratch. |
-| `cleanup_recall_history` | Prune old recall history rows. |
-| `reprocess` | Re-extract from events, skipping LLM-processed. |
-| `reprocess_all` | Re-extract from all events unconditionally. |
-</details>
 
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [HTTP API Reference](docs/http-api-reference.md)
 - [CLI Reference](docs/cli-reference.md)
 - [MCP Reference](docs/mcp-reference.md)
-- [Integration Guide](docs/integration.md)
 - [Configuration](docs/configuration.md)
+- [PostgreSQL Backend](docs/postgres.md)
+- [Getting Started](docs/getting-started.md)
 - [Agent Onboarding](docs/agent-onboarding.md)
-
-## Build & Test
-
-- **Prerequisites**: Go 1.21+, CGO enabled.
-- **Build**: `CGO_ENABLED=1 go build -tags fts5 ./cmd/amm`
-- **Test**: `CGO_ENABLED=1 go test -tags fts5 ./...`
+- [Integration Guide](docs/integration.md)
 
 ## License
 

@@ -19,31 +19,49 @@ Operating contract for **amm (Agent Memory Manager)** — a Go, API-first, CLI/M
 amm is:
 - **Go** — single binary, minimal dependencies, standard library where possible
 - **API-first** — core service interface in `internal/core/service.go` is the single entry point for all logic
-- **CLI/MCP-driven** — `cmd/amm` (convenience CLI), `cmd/amm-mcp` (MCP adapter), both call the service
-- **SQLite-backed** — canonical store in SQLite, derived indexes (FTS5, embeddings) are rebuildable
+- **CLI/MCP/HTTP-driven** — `cmd/amm` (CLI), `cmd/amm-mcp` (MCP adapter), `cmd/amm-http` (REST API server) — all call the service
+- **Dual-backend** — SQLite (default, local) and PostgreSQL (networked, high-concurrency). Derived indexes (FTS5/tsvector, embeddings) are rebuildable.
 - **Framework-agnostic** — designed for integration with Claude Code, Codex, OpenClaw, Hermes, or any agent runtime
 
 ### Module Layout
 ```
 cmd/amm/         CLI entrypoint
 cmd/amm-mcp/     MCP adapter
+cmd/amm-http/    HTTP REST API server
 internal/
   core/          Service + repository interfaces, errors
   service/       Business logic implementation
   adapters/
     cli/         JSON envelope runner
     mcp/         MCP tool invocation
+    http/        REST API handlers + middleware
     sqlite/      SQLite repository + migrations
+    postgres/    PostgreSQL repository + migrations
   contracts/v1/  Typed payloads, validation, command catalog
-  commands/      Command dispatch
+  buildinfo/     Version + commit injection via ldflags
   runtime/       Config, service factory, logger
+deploy/
+  helm/amm/      Helm chart for Kubernetes deployment
 ```
 
 ### Key Invariants
 - **Service layer is the only entry point.** CLI, MCP, and HTTP are adapters. They must not contain business logic or direct SQL.
 - **Canonical tables are truth.** Events, summaries, memories, claims, entities, episodes, artifacts, jobs. Derived tables (FTS5, embeddings, caches) are disposable and rebuildable.
 - **Contracts and schema stay in lockstep.** Changes to payloads or commands must update `internal/contracts/v1`, `spec/v1` schemas, and tests together.
-- **CLI and MCP expose the same commands.** Parity is mandatory.
+
+### Parity Requirements (MANDATORY)
+
+**Adapter parity — CLI, MCP, and HTTP must expose the same service methods.**
+- When a new service method is added, ALL THREE adapters must be updated in the same change.
+- Every service method must be callable from every adapter. No adapter-exclusive functionality.
+- Test coverage must verify each adapter can exercise the method.
+
+**Storage parity — SQLite and PostgreSQL must implement the full Repository interface identically.**
+- When a new Repository method is added, BOTH adapters must be implemented in the same change.
+- No TODO stubs in either adapter. If a method is in the interface, both adapters must have a working implementation.
+- Schema migrations must be added to both `internal/adapters/sqlite/migrations.go` and `internal/adapters/postgres/migrations.go`.
+- Behavioral differences (e.g., FTS5 vs tsvector) are acceptable as long as the result semantics match.
+- Tests should verify equivalent behavior across both backends where practical.
 
 ## Prerequisites
 
@@ -55,8 +73,8 @@ internal/
 ## Build & Test
 
 ```bash
-# Build both binaries (CGO + FTS5 required)
-CGO_ENABLED=1 go build -tags fts5 ./cmd/amm ./cmd/amm-mcp
+# Build all three binaries (CGO + FTS5 required)
+CGO_ENABLED=1 go build -tags fts5 ./cmd/amm ./cmd/amm-mcp ./cmd/amm-http
 
 # Run targeted package tests (prefer this first)
 CGO_ENABLED=1 go test -tags fts5 ./internal/core/... ./internal/runtime/... -count=1
@@ -89,13 +107,14 @@ See `golang/AGENTS.md` in the coding-handbook for the full fast-path contract.
 - If verification fails, fix the issue or report clearly. Do not claim the task is complete.
 - Implementation must stay aligned with `refined-spec.md` and `technical-blueprint.md`. Flag divergence.
 - Go behavior changes need test coverage or explicit exemption.
-- Schema changes must go through the migration system in `internal/adapters/sqlite/migrations.go`.
+- Schema changes must go through the migration systems in both `internal/adapters/sqlite/migrations.go` and `internal/adapters/postgres/migrations.go`.
 
 ## Protected Areas
 
 Changes to these areas require extra care — verify thoroughly and flag in PR descriptions:
 
 - **`internal/adapters/sqlite/migrations.go`** — migration sequence is append-only and forward-only. Never reorder, edit, or remove existing migrations.
+- **`internal/adapters/postgres/migrations.go`** — same rules as SQLite migrations. Both must be updated in lockstep.
 - **`internal/contracts/v1` + `spec/v1`** — backward compatibility constraints apply. Changes must update both in lockstep with tests.
 - **`.acm/` config files** — edits require `acm sync` and `acm health` before closing. See [.acm/AGENTS-ACM.md](.acm/AGENTS-ACM.md).
 - **`refined-spec.md` / `technical-blueprint.md`** — design authority documents. Update only when implementation intentionally diverges.

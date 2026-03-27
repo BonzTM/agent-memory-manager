@@ -1,256 +1,171 @@
-# AMM Architecture
+# AMM Architecture Diagrams
 
-## System Overview
+## System Context
 
 ```mermaid
 flowchart TB
     subgraph Client["Client Layer"]
         CLI["amm CLI"]
         MCP["amm-mcp
-(JSON-RPC)"]
+        (JSON-RPC)"]
+        HTTP["amm-http
+        (REST API)"]
     end
 
     subgraph Adapter["Adapter Layer"]
-        CLIRunner["CLI Runner
-(JSON envelope)"]
-        MCPServer["MCP Server
-(JSON-RPC 2.0)"]
+        CLIRunner["CLI Runner"]
+        MCPServer["MCP Server"]
+        HTTPServer["HTTP Server"]
     end
 
     subgraph Core["Core Layer"]
         Service["Service Interface
-(Business Logic)"]
-        Types["Domain Types
-& Interfaces"]
-    end
-
-    subgraph ServiceImpl["Service Implementation"]
-        Logic["Command Dispatch"]
-        Recall["Recall Engine"]
-        Scoring["Multi-signal Scoring"]
-        Workers["Background Workers"]
+        (Business Logic)"]
     end
 
     subgraph Storage["Storage Layer"]
-        SQLite[("SQLite
-Canonical Store")]
-        FTS5[("FTS5 Index")]
-        Migrations[("Migrations")]
+        Repo["Repository Interface"]
+        SQLite[("SQLite")]
+        Postgres[("PostgreSQL")]
     end
 
     CLI --> CLIRunner
     MCP --> MCPServer
+    HTTP --> HTTPServer
+    
     CLIRunner --> Service
     MCPServer --> Service
-    Service --> Logic
-    Logic --> Recall
-    Recall --> Scoring
-    Logic --> SQLite
-    Workers --> SQLite
-    SQLite --> FTS5
-    Migrations --> SQLite
+    HTTPServer --> Service
+
+    Service --> Repo
+    Repo --> SQLite
+    Repo --> Postgres
 ```
 
-## Data Flow
+## Request Flow (HTTP Example)
 
 ```mermaid
 sequenceDiagram
-    participant User as User/Agent
-    participant CLI as amm CLI
+    participant Client as HTTP Client
+    participant Server as HTTP Adapter
     participant Service as Service Layer
-    participant SQLite as SQLite DB
-    participant FTS as FTS5 Index
+    participant Repo as Repository
+    participant DB as Database
 
-    User->>CLI: amm remember ...
-    CLI->>CLI: Parse flags
-    CLI->>CLI: Build JSON envelope
-    CLI->>Service: Remember(memory)
-    Service->>Service: Validate input
-    Service->>SQLite: INSERT memory
-    SQLite->>FTS: Update index
-    SQLite-->>Service: ID + Timestamp
-    Service-->>CLI: Memory object
-    CLI->>CLI: Wrap in envelope
-    CLI-->>User: JSON result
+    Client->>Server: POST /v1/recall {query: "..."}
+    Server->>Server: Decode JSON
+    Server->>Service: Recall(query, opts)
+    Service->>Service: Calculate scoring signals
+    Service->>Repo: Search(query, filters)
+    Repo->>DB: SQL Query (FTS5/PG)
+    DB-->>Repo: Row Results
+    Repo-->>Service: Domain Objects
+    Service-->>Server: RecallResult
+    Server->>Server: Wrap in {"data": ...}
+    Server-->>Client: 200 OK (JSON)
 ```
 
-## Memory Layer Architecture
-
-```mermaid
-flowchart TB
-    subgraph LayerA["Layer A: Working Memory"]
-        A["Runtime-only ephemeral state"]
-    end
-
-    subgraph LayerB["Layer B: History Layer"]
-        B1["Raw Events"]
-        B2["Transcripts"]
-        B3["Complete archive
-append-only"]
-    end
-
-    subgraph LayerC["Layer C: Compression Layer"]
-        C1["Summaries"]
-        C2["Linked to source spans"]
-    end
-
-    subgraph LayerD["Layer D: Canonical Memory"]
-        D1["Typed Memories"]
-        D2["16 memory types"]
-        D3["Claims & Episodes"]
-        D4["Authoritative truth"]
-    end
-
-    subgraph LayerE["Layer E: Derived Indexes"]
-        E1["FTS5 Search"]
-        E2["Embeddings (optional)"]
-        E3["Retrieval Cache"]
-        E4["Disposable & rebuildable"]
-    end
-
-    A -.->|ingest| B1
-    B1 -->|compress| C1
-    C1 -->|extract| D1
-    B1 -->|direct extract| D1
-    D1 -->|index| E1
-
-    style LayerD fill:#e1f5e1,stroke:#4caf50,stroke-width:2px
-    style LayerB fill:#fff3e0,stroke:#ff9800,stroke-width:2px
-```
-
-## Service Layer Detail
+## Data Lifecycle
 
 ```mermaid
 flowchart LR
-    subgraph Service["Core Service"]
-        direction TB
-        Init["Init()"]
-        Ingest["IngestEvent()
-IngestTranscript()"]
-        Remember["Remember()"]
-        Recall["Recall()"]
-        Describe["Describe()"]
-        Expand["Expand()"]
-        History["History()"]
-        Jobs["RunJob()"]
-        Repair["Repair()"]
+    subgraph Input["Input"]
+        E["Raw Events"]
     end
 
-    subgraph Repository["Repository Interface"]
-        R1["Create Memory"]
-        R2["Query Memories"]
-        R3["Update Memory"]
-        R4["Search FTS"]
+    subgraph Processing["Processing Pipeline"]
+        Reflect["Reflect
+        (Extraction)"]
+        Compress["Compress
+        (Summarization)"]
+        Consolidate["Consolidate
+        (Episodes)"]
     end
 
-    subgraph Scoring["Scoring Engine"]
-        S1["Text Match"]
-        S2["Recency"]
-        S3["Importance"]
-        S4["Confidence"]
-        S5["Combined Score"]
+    subgraph Storage["Authoritative Memory"]
+        M["Typed Memories"]
+        S["Summaries"]
+        Ep["Episodes"]
     end
 
-    Recall --> Scoring
-    Recall --> Repository
-    Remember --> Repository
-    Ingest --> Repository
-    Describe --> Repository
-    Expand --> Repository
+    subgraph Search["Derived Indexes"]
+        FTS["Full-Text Index"]
+        Vec["Embeddings"]
+    end
+
+    E --> Reflect
+    E --> Compress
+    
+    Reflect --> M
+    Compress --> S
+    S --> Consolidate
+    Consolidate --> Ep
+    
+    M --> FTS
+    S --> FTS
+    M --> Vec
+    S --> Vec
 ```
 
-## Command Dispatch Flow
+## Scoring Pipeline
 
 ```mermaid
-flowchart TB
-    Input["User Input"] --> Parse["Parse Arguments"]
-    Parse --> Route{"Command?"}
+flowchart TD
+    Q["Query Input"] --> Signals["Signal Generation"]
     
-    Route -->|init| Init["Initialize DB"]
-    Route -->|ingest| Ingest["Ingest Event/Transcript"]
-    Route -->|remember| Remember["Store Memory"]
-    Route -->|recall| Recall["Retrieve Memories"]
-    Route -->|describe| Describe["Get Descriptions"]
-    Route -->|expand| Expand["Get Full Detail"]
-    Route -->|history| History["Query History"]
-    Route -->|jobs| Jobs["Run Maintenance"]
-    Route -->|repair| Repair["Run Checks"]
-    Route -->|status| Status["Get Status"]
-    Route -->|run| Envelope["Execute Envelope"]
-    Route -->|validate| Validate["Validate Envelope"]
-    
-    Init --> Service["Call Service"]
-    Ingest --> Service
-    Remember --> Service
-    Recall --> Service
-    Describe --> Service
-    Expand --> Service
-    History --> Service
-    Jobs --> Service
-    Repair --> Service
-    Status --> Service
-    Envelope --> Dispatch["Dispatch Envelope"]
-    Validate --> ValidateLogic["Validate JSON"]
-    
-    Service --> Repo["Repository"]
-    Dispatch --> Service
-    
-    Repo --> SQLite[(SQLite)]
-    
-    Service --> Response["JSON Response"]
-    ValidateLogic --> Response
-    
-    Response --> Output["Output Result"]
+    subgraph Scoring["Weighted Sum"]
+        Lex["Lexical (FTS)"]
+        Sem["Semantic (Vector)"]
+        Ent["Entity Overlap"]
+        Rec["Recency"]
+        Imp["Importance"]
+        Trust["Source Trust"]
+        Boost["Kind Boost"]
+        Hub["Anti-Hub Dampening"]
+        Rep["Repetition Penalty"]
+    end
+
+    Signals --> Lex
+    Signals --> Sem
+    Signals --> Ent
+    Signals --> Rec
+    Signals --> Imp
+    Signals --> Trust
+    Signals --> Boost
+    Signals --> Hub
+    Signals --> Rep
+
+    Lex & Sem & Ent & Rec & Imp & Trust & Boost & Hub & Rep --> Sum["Final Score [0, 1]"]
+    Sum --> Rank["Ranked Results"]
 ```
 
-## MCP Protocol Flow
+## Module Layout
 
 ```mermaid
-sequenceDiagram
-    participant Client as MCP Client
-    participant Server as amm-mcp
-    participant Service as Service Layer
-    participant DB as SQLite
-
-    Client->>Server: initialize request
-    Server-->>Client: capabilities
-
-    Client->>Server: tools/list request
-    Server-->>Client: tool definitions
-
-    Client->>Server: tools/call (amm_recall)
-    Server->>Server: Parse arguments
-    Server->>Service: Recall(query, opts)
-    Service->>Service: Multi-signal scoring
-    Service->>DB: Execute query
-    DB-->>Service: Results
-    Service-->>Server: RecallResult
-    Server->>Server: Format as MCP content
-    Server-->>Client: JSON-RPC response
-```
-
-## Component Relationships
-
-```mermaid
-graph TB
-    CLI["cmd/amm/main.go"] -->|calls| CLIRunner["internal/adapters/cli/runner.go"]
-    MCP["cmd/amm-mcp/main.go"] -->|calls| MCPServer["internal/adapters/mcp/server.go"]
-    
-    CLIRunner -->|uses| Service["internal/core/service.go"]
-    MCPServer -->|uses| Service
-    
-    Service -->|implemented by| ServiceImpl["internal/service/*.go"]
-    Service -->|uses| Repository["internal/core/repository.go"]
-    
-    ServiceImpl -->|uses| SQLiteRepo["internal/adapters/sqlite/repository.go"]
-    ServiceImpl -->|uses| Scoring["internal/service/scoring.go"]
-    
-    SQLiteRepo -->|implements| Repository
-    SQLiteRepo -->|uses| Migrations["internal/adapters/sqlite/migrations.go"]
-    
-    CLIRunner -->|validates| Contracts["internal/contracts/v1/*.go"]
-    MCPServer -->|validates| Contracts
-    
-    style Service fill:#e3f2fd,stroke:#2196f3,stroke-width:2px
-    style Repository fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+mindmap
+  root((amm))
+    cmd
+      amm (CLI)
+      amm-mcp (MCP)
+      amm-http (HTTP)
+    internal
+      core
+        Service
+        Types
+        Repository
+      service
+        Business Logic
+        Scoring
+        Workers
+      adapters
+        cli
+        mcp
+        http
+        sqlite
+        postgres
+      contracts
+        v1 (Payloads)
+      runtime
+        Config
+        Factory
 ```
