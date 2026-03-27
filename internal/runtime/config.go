@@ -33,6 +33,12 @@ type Config struct {
 	Maintenance MaintenanceConfig `json:"maintenance"`
 	Summarizer  SummarizerConfig  `json:"summarizer"`
 	Embeddings  EmbeddingsConfig  `json:"embeddings"`
+	HTTP        HTTPConfig        `json:"http"`
+}
+
+type HTTPConfig struct {
+	Addr        string `json:"addr"`
+	CORSOrigins string `json:"cors_origins"`
 }
 
 type SummarizerConfig struct {
@@ -64,7 +70,9 @@ type EmbeddingsConfig struct {
 
 // StorageConfig controls where amm persists data.
 type StorageConfig struct {
-	DBPath string `json:"db_path"`
+	DBPath      string `json:"db_path"`
+	Backend     string `json:"backend"`
+	PostgresDSN string `json:"postgres_dsn"`
 }
 
 // RetrievalConfig tunes recall behavior.
@@ -96,7 +104,9 @@ func DefaultConfig() Config {
 	}
 	return Config{
 		Storage: StorageConfig{
-			DBPath: filepath.Join(home, ".amm", "amm.db"),
+			DBPath:      filepath.Join(home, ".amm", "amm.db"),
+			Backend:     "sqlite",
+			PostgresDSN: "",
 		},
 		Retrieval: RetrievalConfig{
 			DefaultLimit:   10,
@@ -128,6 +138,9 @@ func DefaultConfig() Config {
 		Embeddings: EmbeddingsConfig{
 			Enabled: false,
 		},
+		HTTP: HTTPConfig{
+			Addr: ":8080",
+		},
 	}
 }
 
@@ -152,6 +165,7 @@ func LoadConfig(path string) (Config, error) {
 		if err := json.Unmarshal(data, &cfg); err != nil {
 			return DefaultConfig(), err
 		}
+		applyConfigDefaults(&cfg)
 		return cfg, nil
 	}
 
@@ -192,6 +206,10 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 		switch fqKey {
 		case "storage.db_path":
 			cfg.Storage.DBPath = val
+		case "storage.backend":
+			cfg.Storage.Backend = val
+		case "storage.postgres_dsn":
+			cfg.Storage.PostgresDSN = val
 		case "retrieval.default_limit":
 			if n, err := strconv.Atoi(val); err == nil {
 				cfg.Retrieval.DefaultLimit = n
@@ -290,8 +308,13 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			cfg.Embeddings.APIKey = val
 		case "embeddings.model":
 			cfg.Embeddings.Model = val
+		case "http.addr":
+			cfg.HTTP.Addr = val
+		case "http.cors_origins":
+			cfg.HTTP.CORSOrigins = val
 		}
 	}
+	applyConfigDefaults(cfg)
 	return scanner.Err()
 }
 
@@ -313,6 +336,7 @@ func LoadConfigWithEnv() Config {
 	}
 
 	cfg = ConfigFromEnv(cfg)
+	applyConfigDefaults(&cfg)
 	return cfg
 }
 
@@ -320,6 +344,8 @@ func LoadConfigWithEnv() Config {
 // Supported variables:
 //
 //	AMM_DB_PATH           -> Storage.DBPath
+//	AMM_STORAGE_BACKEND   -> Storage.Backend
+//	AMM_POSTGRES_DSN      -> Storage.PostgresDSN
 //	AMM_DEFAULT_LIMIT     -> Retrieval.DefaultLimit
 //	AMM_AMBIENT_LIMIT     -> Retrieval.AmbientLimit
 //	AMM_ENABLE_SEMANTIC   -> Retrieval.EnableSemantic (true/false)
@@ -344,9 +370,20 @@ func LoadConfigWithEnv() Config {
 //	AMM_EMBEDDINGS_ENDPOINT -> Embeddings.Endpoint
 //	AMM_EMBEDDINGS_API_KEY -> Embeddings.APIKey
 //	AMM_EMBEDDINGS_MODEL -> Embeddings.Model
+//	AMM_HTTP_ADDR -> HTTP.Addr
+//	AMM_HTTP_CORS_ORIGINS -> HTTP.CORSOrigins
 func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_DB_PATH"); v != "" {
 		base.Storage.DBPath = v
+	}
+	if v := os.Getenv("AMM_STORAGE_BACKEND"); v != "" {
+		base.Storage.Backend = strings.ToLower(strings.TrimSpace(v))
+	}
+	if strings.TrimSpace(base.Storage.Backend) == "" {
+		base.Storage.Backend = "sqlite"
+	}
+	if v := os.Getenv("AMM_POSTGRES_DSN"); v != "" {
+		base.Storage.PostgresDSN = v
 	}
 	if v := os.Getenv("AMM_DEFAULT_LIMIT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -476,5 +513,18 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_EMBEDDINGS_MODEL"); v != "" {
 		base.Embeddings.Model = v
 	}
+	if v := os.Getenv("AMM_HTTP_ADDR"); v != "" {
+		base.HTTP.Addr = v
+	}
+	if v := os.Getenv("AMM_HTTP_CORS_ORIGINS"); v != "" {
+		base.HTTP.CORSOrigins = v
+	}
+	applyConfigDefaults(&base)
 	return base
+}
+
+func applyConfigDefaults(cfg *Config) {
+	if strings.TrimSpace(cfg.HTTP.Addr) == "" {
+		cfg.HTTP.Addr = ":8080"
+	}
 }

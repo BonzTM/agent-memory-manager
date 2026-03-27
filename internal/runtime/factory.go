@@ -3,9 +3,12 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/bonztm/agent-memory-manager/internal/adapters/postgres"
 	"github.com/bonztm/agent-memory-manager/internal/adapters/sqlite"
 	"github.com/bonztm/agent-memory-manager/internal/core"
 	"github.com/bonztm/agent-memory-manager/internal/service"
@@ -52,26 +55,55 @@ func buildEmbeddingProvider(cfg Config) core.EmbeddingProvider {
 // Returns the Service interface, a cleanup function, and any error.
 // The caller must invoke the cleanup function when done (typically via defer).
 func NewService(cfg Config) (core.Service, func(), error) {
-	dbDir := filepath.Dir(cfg.Storage.DBPath)
-	if err := os.MkdirAll(dbDir, 0o755); err != nil {
-		return nil, nil, fmt.Errorf("create db directory %s: %w", dbDir, err)
-	}
-
 	ctx := context.Background()
-
-	db, err := sqlite.Open(ctx, cfg.Storage.DBPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("open database: %w", err)
+	backend := strings.ToLower(strings.TrimSpace(cfg.Storage.Backend))
+	if backend == "" {
+		backend = "sqlite"
 	}
 
-	if err := sqlite.Migrate(ctx, db); err != nil {
-		db.Close()
-		return nil, nil, fmt.Errorf("run migrations: %w", err)
+	var repo core.Repository
+	var storagePath string
+	var cleanup func()
+
+	switch backend {
+	case "sqlite":
+		dbDir := filepath.Dir(cfg.Storage.DBPath)
+		if err := os.MkdirAll(dbDir, 0o755); err != nil {
+			return nil, nil, fmt.Errorf("create db directory %s: %w", dbDir, err)
+		}
+		db, err := sqlite.Open(ctx, cfg.Storage.DBPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("open sqlite database: %w", err)
+		}
+		if err := sqlite.Migrate(ctx, db); err != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("run sqlite migrations: %w", err)
+		}
+		repo = &sqlite.SQLiteRepository{DB: db}
+		storagePath = cfg.Storage.DBPath
+		cleanup = func() { _ = db.Close() }
+	case "postgres":
+		if strings.TrimSpace(cfg.Storage.PostgresDSN) == "" {
+			return nil, nil, fmt.Errorf("postgres backend requires AMM_POSTGRES_DSN")
+		}
+		pgRepo := postgres.NewRepository()
+		if err := pgRepo.Open(ctx, cfg.Storage.PostgresDSN); err != nil {
+			return nil, nil, fmt.Errorf("open postgres database: %w", err)
+		}
+		if err := pgRepo.Migrate(ctx); err != nil {
+			_ = pgRepo.Close()
+			return nil, nil, fmt.Errorf("run postgres migrations: %w", err)
+		}
+		repo = pgRepo
+		storagePath = maskDSN(cfg.Storage.PostgresDSN)
+		cleanup = func() { _ = pgRepo.Close() }
+		slog.Warn("postgres backend is experimental; some repository methods may return incomplete results")
+	default:
+		return nil, nil, fmt.Errorf("unsupported storage backend %q", backend)
 	}
 
-	repo := &sqlite.SQLiteRepository{DB: db}
 	summarizer := buildSummarizer(cfg)
-	svc := service.New(repo, cfg.Storage.DBPath, summarizer, buildEmbeddingProvider(cfg))
+	svc := service.New(repo, storagePath, summarizer, buildEmbeddingProvider(cfg))
 	svc.SetIntelligenceProvider(buildIntelligenceProvider(cfg, summarizer))
 	svc.SetReprocessBatchSize(cfg.Summarizer.BatchSize)
 	svc.SetReflectBatchSize(cfg.Summarizer.ReflectBatchSize)
@@ -84,9 +116,15 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	svc.SetEmbeddingBatchSize(cfg.Summarizer.EmbeddingBatchSize)
 	svc.SetCrossProjectSimilarityThreshold(cfg.Summarizer.CrossProjectSimilarityThreshold)
 
-	cleanup := func() {
-		db.Close()
-	}
-
 	return svc, cleanup, nil
+}
+
+func maskDSN(dsn string) string {
+	if dsn == "" {
+		return ""
+	}
+	if idx := strings.Index(dsn, "@"); idx >= 0 {
+		return "postgres://***@" + dsn[idx+1:]
+	}
+	return "postgres://***"
 }

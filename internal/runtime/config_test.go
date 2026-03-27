@@ -1,11 +1,21 @@
 package runtime
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestDefaultConfig_SetsSummarizerBatchSize(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Summarizer.BatchSize != defaultSummarizerBatchSize {
 		t.Fatalf("expected default batch size %d, got %d", defaultSummarizerBatchSize, cfg.Summarizer.BatchSize)
+	}
+}
+
+func TestDefaultConfig_SetsDefaultHTTPAddr(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.HTTP.Addr != ":8080" {
+		t.Fatalf("expected default HTTP addr :8080, got %q", cfg.HTTP.Addr)
 	}
 }
 
@@ -15,6 +25,46 @@ func TestConfigFromEnv_OverridesSummarizerBatchSize(t *testing.T) {
 	cfg := ConfigFromEnv(DefaultConfig())
 	if cfg.Summarizer.BatchSize != 30 {
 		t.Fatalf("expected env override batch size 30, got %d", cfg.Summarizer.BatchSize)
+	}
+}
+
+func TestConfigFromEnv_OverridesHTTPConfig(t *testing.T) {
+	t.Setenv("AMM_HTTP_ADDR", "127.0.0.1:9090")
+	t.Setenv("AMM_HTTP_CORS_ORIGINS", "https://example.com,https://app.example.com")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.HTTP.Addr != "127.0.0.1:9090" {
+		t.Fatalf("expected HTTP addr override, got %q", cfg.HTTP.Addr)
+	}
+	if cfg.HTTP.CORSOrigins != "https://example.com,https://app.example.com" {
+		t.Fatalf("expected HTTP CORS origins override, got %q", cfg.HTTP.CORSOrigins)
+	}
+}
+
+func TestConfigFromEnv_IgnoresEmptyHTTPAddr(t *testing.T) {
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.HTTP.Addr != ":8080" {
+		t.Fatalf("expected default HTTP addr :8080, got %q", cfg.HTTP.Addr)
+	}
+}
+
+func TestLoadConfig_ParsesHTTPToml(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	content := []byte("[http]\naddr = \"0.0.0.0:9090\"\ncors_origins = \"https://example.com\"\n")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("expected TOML config to load, got error: %v", err)
+	}
+	if cfg.HTTP.Addr != "0.0.0.0:9090" {
+		t.Fatalf("expected TOML HTTP addr 0.0.0.0:9090, got %q", cfg.HTTP.Addr)
+	}
+	if cfg.HTTP.CORSOrigins != "https://example.com" {
+		t.Fatalf("expected TOML HTTP CORS origins https://example.com, got %q", cfg.HTTP.CORSOrigins)
 	}
 }
 
