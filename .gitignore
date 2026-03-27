@@ -9,8 +9,15 @@
 # Go build artifacts
 /amm
 /amm-mcp
+/amm-http
 /bin/
 *.exe
+
+# Local-only planning/docs artifacts
+.sisyphus/
+docs/architecture/refined-spec.md
+docs/architecture/technical-blueprint.md
+docs/design/llm-pipeline-design.md
 
 # AMM local database
 .amm/
