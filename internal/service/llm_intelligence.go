@@ -417,8 +417,15 @@ func parseCompressionResults(raw string, requiredIndexes []int) ([]core.Compress
 			continue
 		}
 		item.Body = strings.TrimSpace(item.Body)
-		item.TightDescription = strings.TrimSpace(item.TightDescription)
-		if item.Body == "" || item.TightDescription == "" {
+		if item.Body == "" {
+			continue
+		}
+		if cleaned, ok := sanitizeTightDescription(item.TightDescription); !ok {
+			item.TightDescription = ""
+		} else {
+			item.TightDescription = cleaned
+		}
+		if item.TightDescription == "" {
 			continue
 		}
 		byIndex[item.Index] = item
