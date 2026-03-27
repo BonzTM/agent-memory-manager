@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "onSessionStart": "./on-session-start.sh",
+    "onSessionEnd": "./on-session-end.sh"
+  },
+  "mcpServers": {
+    "amm-http": {
+      "url": "http://localhost:8080/v1/mcp"
+    }
+  }
+}
