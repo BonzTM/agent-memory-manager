@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -165,8 +166,10 @@ func LoadConfig(path string) (Config, error) {
 // [section] headers and key = "value" / key = number / key = bool lines.
 func parseFlatTOML(data []byte, cfg *Config) error {
 	section := ""
+	lineNum := 0
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
+		lineNum++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -177,6 +180,7 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 		}
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
+			slog.Warn("ignoring malformed config line", "line", lineNum, "content", line)
 			continue
 		}
 		key := strings.TrimSpace(parts[0])
