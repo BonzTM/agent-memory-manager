@@ -435,6 +435,36 @@ func (s *AMMService) ShareMemory(ctx context.Context, id string, privacy core.Pr
 	return memory, nil
 }
 
+func (s *AMMService) ForgetMemory(ctx context.Context, id string) (*core.Memory, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, fmt.Errorf("%w: id is required", core.ErrInvalidInput)
+	}
+
+	memory, err := s.repo.GetMemory(ctx, id)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			err = fmt.Errorf("%w: memory %q", core.ErrNotFound, id)
+		}
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	memory.Status = core.MemoryStatusRetracted
+	memory.UpdatedAt = now
+	if memory.Metadata == nil {
+		memory.Metadata = map[string]string{}
+	}
+	memory.Metadata["retracted_at"] = now.Format(time.RFC3339)
+	memory.Metadata["retracted_reason"] = "user_forget"
+
+	if err := s.repo.UpdateMemory(ctx, memory); err != nil {
+		return nil, fmt.Errorf("update memory: %w", err)
+	}
+
+	slog.Info("memory forgotten", "id", id)
+	return memory, nil
+}
+
 // GetSummary returns the summary with the given ID.
 func (s *AMMService) GetSummary(ctx context.Context, id string) (*core.Summary, error) {
 	slog.Debug("GetSummary called", "id", id)
