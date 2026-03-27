@@ -182,6 +182,16 @@ type Repository interface {
 	// RebuildFTSIndexes rebuilds any full-text search indexes.
 	RebuildFTSIndexes(ctx context.Context) error
 	ResetDerived(ctx context.Context) (*ResetDerivedResult, error)
+	// PurgeOldEvents deletes reflected events older than olderThanDays days.
+	PurgeOldEvents(ctx context.Context, olderThanDays int) (int64, error)
+	// PurgeOldJobs deletes completed or failed jobs older than olderThanDays days.
+	PurgeOldJobs(ctx context.Context, olderThanDays int) (int64, error)
+	// ExpireRetrievalCache deletes retrieval_cache rows whose expires_at is in the past.
+	ExpireRetrievalCache(ctx context.Context) (int64, error)
+	// PurgeOldRelevanceFeedback deletes relevance_feedback rows older than olderThanDays days.
+	PurgeOldRelevanceFeedback(ctx context.Context, olderThanDays int) (int64, error)
+	// VacuumAnalyze runs database-level maintenance (WAL checkpoint, ANALYZE, VACUUM for SQLite; ANALYZE for Postgres).
+	VacuumAnalyze(ctx context.Context) error
 }
 
 // SummaryEdge represents a parent-child relationship in the summary hierarchy.

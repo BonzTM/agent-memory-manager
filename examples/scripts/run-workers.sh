@@ -69,3 +69,10 @@ $AMM jobs run archive_session_traces >/dev/null 2>&1 || true
 $AMM jobs run rebuild_indexes >/dev/null 2>&1 || true
 $AMM jobs run cleanup_recall_history >/dev/null 2>&1 || true
 $AMM jobs run update_ranking_weights >/dev/null 2>&1 || true
+
+# Phase 7: DB trim and compaction (runs last, after all writes are done).
+$AMM jobs run purge_old_events >/dev/null 2>&1 || true
+$AMM jobs run purge_old_jobs >/dev/null 2>&1 || true
+$AMM jobs run expire_retrieval_cache >/dev/null 2>&1 || true
+$AMM jobs run purge_relevance_feedback >/dev/null 2>&1 || true
+$AMM jobs run vacuum_analyze >/dev/null 2>&1 || true
