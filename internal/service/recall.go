@@ -482,7 +482,7 @@ func (s *AMMService) recallAmbient(ctx context.Context, query string, opts core.
 	s.attachCandidateEmbeddings(ctx, candidates)
 	s.attachCandidateEntities(ctx, candidates)
 
-	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
+	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions(), opts.Explain), nil
 }
 
 // recallFacts searches only memories with full scoring.
@@ -517,7 +517,7 @@ func (s *AMMService) recallFacts(ctx context.Context, query string, opts core.Re
 	}
 	s.attachCandidateEmbeddings(ctx, candidates)
 	s.attachCandidateEntities(ctx, candidates)
-	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
+	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions(), opts.Explain), nil
 }
 
 // recallEpisodes searches only episodes with full scoring.
@@ -532,7 +532,7 @@ func (s *AMMService) recallEpisodes(ctx context.Context, query string, opts core
 	}
 	s.attachCandidateEmbeddings(ctx, candidates)
 	s.attachCandidateEntities(ctx, candidates)
-	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
+	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions(), opts.Explain), nil
 }
 
 // recallProject searches memories filtered by project_id with full scoring.
@@ -579,7 +579,7 @@ func (s *AMMService) recallProject(ctx context.Context, query string, opts core.
 	}
 	s.attachCandidateEmbeddings(ctx, candidates)
 	s.attachCandidateEntities(ctx, candidates)
-	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions()), nil
+	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions(), opts.Explain), nil
 }
 
 // recallEntity searches memories and entities with full scoring.
@@ -616,7 +616,7 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 	s.attachCandidateEmbeddings(ctx, candidates)
 	s.attachCandidateEntities(ctx, candidates)
 
-	items := scoreAndConvert(candidates, sctx, defaultRecallFilterOptions())
+	items := scoreAndConvert(candidates, sctx, defaultRecallFilterOptions(), opts.Explain)
 	entities, err := s.repo.SearchEntities(ctx, query, opts.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("search entities: %w", err)
@@ -652,7 +652,7 @@ func (s *AMMService) recallHistory(ctx context.Context, query string, opts core.
 	}
 	s.attachCandidateEmbeddings(ctx, candidates)
 	s.attachCandidateEntities(ctx, candidates)
-	return scoreAndConvert(candidates, sctx, historyRecallFilterOptions()), nil
+	return scoreAndConvert(candidates, sctx, historyRecallFilterOptions(), opts.Explain), nil
 }
 
 // recallHybrid searches all types with full scoring.
@@ -747,7 +747,7 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 	s.attachCandidateEmbeddings(ctx, candidates)
 	s.attachCandidateEntities(ctx, candidates)
 
-	return scoreAndConvert(candidates, sctx, hybridRecallFilterOptions()), nil
+	return scoreAndConvert(candidates, sctx, hybridRecallFilterOptions(), opts.Explain), nil
 }
 
 func (s *AMMService) buildQueryEmbedding(ctx context.Context, query string) []float32 {
@@ -895,7 +895,7 @@ func embeddingObjectKind(candidateKind string) string {
 }
 
 // scoreAndConvert scores candidates and converts to RecallItems sorted by score.
-func scoreAndConvert(candidates []ScoringCandidate, sctx ScoringContext, opts recallFilterOptions) []core.RecallItem {
+func scoreAndConvert(candidates []ScoringCandidate, sctx ScoringContext, opts recallFilterOptions, explain bool) []core.RecallItem {
 	type scored struct {
 		candidate ScoringCandidate
 		breakdown SignalBreakdown
@@ -929,6 +929,9 @@ func scoreAndConvert(candidates []ScoringCandidate, sctx ScoringContext, opts re
 		}
 		if c.ObservedAt != nil {
 			item.ObservedAt = c.ObservedAt.Format(time.RFC3339)
+		}
+		if explain {
+			item.Signals = si.breakdown.ToMap()
 		}
 		items = append(items, item)
 	}

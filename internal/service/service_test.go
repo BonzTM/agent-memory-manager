@@ -379,6 +379,63 @@ func TestShareMemory_SharedCrossesAgentBoundary(t *testing.T) {
 	}
 }
 
+func TestForgetMemory_RetractsMemory(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		AgentID:          "agent-a",
+		Body:             "phase7c forget me memory",
+		TightDescription: "phase7c forget me memory",
+	})
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+
+	forgotten, err := svc.ForgetMemory(ctx, mem.ID)
+	if err != nil {
+		t.Fatalf("ForgetMemory: %v", err)
+	}
+	if forgotten.Status != core.MemoryStatusRetracted {
+		t.Fatalf("expected status %q, got %q", core.MemoryStatusRetracted, forgotten.Status)
+	}
+	if forgotten.Metadata["retracted_at"] == "" {
+		t.Fatalf("expected retracted_at metadata to be set")
+	}
+	if forgotten.Metadata["retracted_reason"] != "user_forget" {
+		t.Fatalf("expected retracted_reason user_forget, got %q", forgotten.Metadata["retracted_reason"])
+	}
+
+	stored, err := svc.GetMemory(ctx, mem.ID)
+	if err != nil {
+		t.Fatalf("GetMemory: %v", err)
+	}
+	if stored.Status != core.MemoryStatusRetracted {
+		t.Fatalf("expected stored status %q, got %q", core.MemoryStatusRetracted, stored.Status)
+	}
+
+	recalled, err := svc.Recall(ctx, "phase7c forget me memory", core.RecallOptions{Mode: core.RecallModeFacts, Limit: 10})
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+	for _, item := range recalled.Items {
+		if item.ID == mem.ID {
+			t.Fatalf("expected retracted memory to be excluded from recall")
+		}
+	}
+}
+
+func TestForgetMemory_NotFound(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	_, err := svc.ForgetMemory(ctx, "mem_missing")
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
 func TestRecall_NoAgentID_ReturnsAll(t *testing.T) {
 	svc := testService(t)
 	ctx := context.Background()
@@ -470,7 +527,7 @@ func TestRecallDefaultsToHybrid(t *testing.T) {
 
 	_, err := svc.IngestEvent(ctx, &core.Event{
 		Kind:         "message",
-		SourceSystem: "test",
+		SourceSystem: "codex",
 		PrivacyLevel: core.PrivacyPrivate,
 		Content:      "event-only hybrid default signal",
 		OccurredAt:   time.Now().UTC(),
@@ -632,6 +689,100 @@ func TestRecallFacts(t *testing.T) {
 	for _, item := range result.Items {
 		if item.Kind != "memory" {
 			t.Errorf("expected all items to be kind=memory in facts mode, got %s", item.Kind)
+		}
+	}
+}
+
+func TestRecall_WithExplain_IncludesSignals(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "explain recall signal test memory",
+		TightDescription: "explain recall signal test",
+	})
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+
+	result, err := svc.Recall(ctx, "explain recall signal test", core.RecallOptions{
+		Mode:    core.RecallModeFacts,
+		Limit:   10,
+		Explain: true,
+	})
+	if err != nil {
+		t.Fatalf("Recall with explain: %v", err)
+	}
+	if len(result.Items) == 0 {
+		t.Fatal("expected recall results with explain enabled")
+	}
+
+	expectedSignalKeys := []string{
+		"lexical",
+		"extraction_quality",
+		"semantic",
+		"entity_overlap",
+		"scope_fit",
+		"recency",
+		"importance",
+		"temporal_validity",
+		"structural_proximity",
+		"freshness",
+		"source_trust",
+		"repetition_penalty",
+		"final_score",
+	}
+
+	foundTarget := false
+	for _, item := range result.Items {
+		if item.Signals == nil || len(item.Signals) == 0 {
+			t.Fatalf("expected non-empty signals when explain=true for item %s", item.ID)
+		}
+		for _, key := range expectedSignalKeys {
+			if _, ok := item.Signals[key]; !ok {
+				t.Fatalf("expected signals[%q] for item %s, got %#v", key, item.ID, item.Signals)
+			}
+		}
+		if item.Signals["final_score"] != item.Score {
+			t.Fatalf("expected final_score (%v) to match item score (%v)", item.Signals["final_score"], item.Score)
+		}
+		if item.ID == mem.ID {
+			foundTarget = true
+		}
+	}
+	if !foundTarget {
+		t.Fatalf("expected recall result to include remembered memory %s", mem.ID)
+	}
+}
+
+func TestRecall_WithoutExplain_NoSignals(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	_, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "default recall no explain signal test memory",
+		TightDescription: "default recall no explain signal test",
+	})
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+
+	result, err := svc.Recall(ctx, "default recall no explain signal test", core.RecallOptions{
+		Mode:  core.RecallModeFacts,
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("Recall without explain: %v", err)
+	}
+	if len(result.Items) == 0 {
+		t.Fatal("expected recall results")
+	}
+
+	for _, item := range result.Items {
+		if item.Signals != nil && len(item.Signals) > 0 {
+			t.Fatalf("expected signals to be nil/empty when explain=false, got %#v", item.Signals)
 		}
 	}
 }

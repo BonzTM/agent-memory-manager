@@ -292,6 +292,60 @@ func TestScoreItem_RepetitionPenalty(t *testing.T) {
 	})
 }
 
+func TestSourceTrust_ExplicitRememberHighest(t *testing.T) {
+	item := ScoringCandidate{SourceSystem: "remember"}
+	got := signalSourceTrust(item)
+	if got != 1.0 {
+		t.Fatalf("expected source trust 1.0 for remember, got %f", got)
+	}
+}
+
+func TestSourceTrust_HeuristicLowest(t *testing.T) {
+	item := ScoringCandidate{SourceSystem: "heuristic"}
+	got := signalSourceTrust(item)
+	if got != 0.5 {
+		t.Fatalf("expected source trust 0.5 for heuristic, got %f", got)
+	}
+}
+
+func TestSourceTrust_AgentSourceHigh(t *testing.T) {
+	item := ScoringCandidate{SourceSystem: "codex"}
+	got := signalSourceTrust(item)
+	if got != 0.9 {
+		t.Fatalf("expected source trust 0.9 for agent source, got %f", got)
+	}
+}
+
+func TestScoreItem_SourceTrustIntegration(t *testing.T) {
+	now := time.Now().UTC()
+	weights := ScoringWeights{SourceTrust: 1.0}
+	sctx := ScoringContext{Now: now, Weights: &weights}
+
+	remember := ScoringCandidate{
+		ID:           "remember",
+		Kind:         "memory",
+		SourceSystem: "remember",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	heuristic := remember
+	heuristic.ID = "heuristic"
+	heuristic.SourceSystem = "heuristic"
+
+	bRemember := ScoreItem(remember, sctx)
+	bHeuristic := ScoreItem(heuristic, sctx)
+
+	if bRemember.SourceTrust != 1.0 {
+		t.Fatalf("expected source_trust signal 1.0, got %f", bRemember.SourceTrust)
+	}
+	if bHeuristic.SourceTrust != 0.5 {
+		t.Fatalf("expected source_trust signal 0.5, got %f", bHeuristic.SourceTrust)
+	}
+	if bRemember.FinalScore <= bHeuristic.FinalScore {
+		t.Fatalf("expected higher final score for trusted source: remember=%f heuristic=%f", bRemember.FinalScore, bHeuristic.FinalScore)
+	}
+}
+
 func TestCosineSimilarity(t *testing.T) {
 	t.Run("identical vectors", func(t *testing.T) {
 		got, ok := cosineSimilarity([]float32{1, 2, 3}, []float32{1, 2, 3})

@@ -27,6 +27,7 @@ type ScoringWeights struct {
 	TemporalValidity    float64 `json:"temporal_validity"`
 	StructuralProximity float64 `json:"structural_proximity"`
 	Freshness           float64 `json:"freshness"`
+	SourceTrust         float64 `json:"source_trust"`
 	KindBoost           float64 `json:"kind_boost"`
 	RepetitionPenalty   float64 `json:"repetition_penalty"`
 }
@@ -34,16 +35,17 @@ type ScoringWeights struct {
 // DefaultScoringWeights returns the historical hardcoded scoring constants.
 func DefaultScoringWeights() ScoringWeights {
 	return ScoringWeights{
-		Lexical:             0.17 * scoringNormalizationFactor,
+		Lexical:             0.14 * scoringNormalizationFactor,
 		ExtractionQuality:   0.08 * scoringNormalizationFactor,
 		Semantic:            0.18 * scoringNormalizationFactor,
 		EntityOverlap:       0.18 * scoringNormalizationFactor,
 		ScopeFit:            0.10 * scoringNormalizationFactor,
-		Recency:             0.08 * scoringNormalizationFactor,
+		Recency:             0.06 * scoringNormalizationFactor,
 		Importance:          0.07 * scoringNormalizationFactor,
 		TemporalValidity:    0.05 * scoringNormalizationFactor,
 		StructuralProximity: 0.05 * scoringNormalizationFactor,
 		Freshness:           0.04 * scoringNormalizationFactor,
+		SourceTrust:         0.05 * scoringNormalizationFactor,
 		KindBoost:           0.15,
 		RepetitionPenalty:   0.10,
 	}
@@ -79,8 +81,27 @@ type SignalBreakdown struct {
 	TemporalValidity    float64 `json:"temporal_validity"`
 	StructuralProximity float64 `json:"structural_proximity"`
 	Freshness           float64 `json:"freshness"`
+	SourceTrust         float64 `json:"source_trust"`
 	RepetitionPenalty   float64 `json:"repetition_penalty"`
 	FinalScore          float64 `json:"final_score"`
+}
+
+func (b SignalBreakdown) ToMap() map[string]float64 {
+	return map[string]float64{
+		"lexical":              b.Lexical,
+		"extraction_quality":   b.ExtractionQuality,
+		"semantic":             b.Semantic,
+		"entity_overlap":       b.EntityOverlap,
+		"scope_fit":            b.ScopeFit,
+		"recency":              b.Recency,
+		"importance":           b.Importance,
+		"temporal_validity":    b.TemporalValidity,
+		"structural_proximity": b.StructuralProximity,
+		"freshness":            b.Freshness,
+		"source_trust":         b.SourceTrust,
+		"repetition_penalty":   b.RepetitionPenalty,
+		"final_score":          b.FinalScore,
+	}
 }
 
 // ScoringCandidate is the normalized representation of a memory-like item used
@@ -110,6 +131,7 @@ type ScoringCandidate struct {
 	EntityAliases     []string
 	Embedding         []float32
 	ExtractionQuality string
+	SourceSystem      string
 	FTSPosition       int // position in FTS results (0-based)
 }
 
@@ -132,9 +154,10 @@ func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 	b.TemporalValidity = signalTemporalValidity(item, sctx.Now)
 	b.StructuralProximity = signalStructuralProximity(item)
 	b.Freshness = signalFreshness(item, sctx.Now)
+	b.SourceTrust = signalSourceTrust(item)
 	b.RepetitionPenalty = signalRepetitionPenalty(item, sctx)
 
-	totalPositive := weights.Lexical + weights.ExtractionQuality + weights.EntityOverlap + weights.ScopeFit + weights.Recency + weights.Importance + weights.TemporalValidity + weights.StructuralProximity + weights.Freshness
+	totalPositive := weights.Lexical + weights.ExtractionQuality + weights.EntityOverlap + weights.ScopeFit + weights.Recency + weights.Importance + weights.TemporalValidity + weights.StructuralProximity + weights.Freshness + weights.SourceTrust
 	activePositive := totalPositive
 	if semanticSignalAvailable(item, sctx) {
 		activePositive += weights.Semantic
@@ -154,7 +177,8 @@ func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 		weights.Importance*b.Importance+
 		weights.TemporalValidity*b.TemporalValidity+
 		weights.StructuralProximity*b.StructuralProximity+
-		weights.Freshness*b.Freshness) - weights.RepetitionPenalty*b.RepetitionPenalty
+		weights.Freshness*b.Freshness+
+		weights.SourceTrust*b.SourceTrust) - weights.RepetitionPenalty*b.RepetitionPenalty
 
 	kindMultiplier := signalKindBoost(item.Kind)
 	b.FinalScore *= (1 - weights.KindBoost) + (weights.KindBoost * kindMultiplier)
@@ -376,6 +400,26 @@ func signalFreshness(item ScoringCandidate, now time.Time) float64 {
 	return math.Exp(-0.693 * days / recencyHalfLifeDays)
 }
 
+func signalSourceTrust(item ScoringCandidate) float64 {
+	source := strings.ToLower(strings.TrimSpace(item.SourceSystem))
+	switch {
+	case source == "remember" || source == "explicit":
+		return 1.0
+	case source == "":
+		return 0.6
+	case source == "claude-code" || source == "opencode" || source == "codex":
+		return 0.9
+	case source == "reflect" || source == "reprocess":
+		return 0.8
+	case strings.Contains(source, "hook") || strings.Contains(source, "webhook"):
+		return 0.7
+	case source == "heuristic":
+		return 0.5
+	default:
+		return 0.6
+	}
+}
+
 // signalRepetitionPenalty returns 1.0 if the item was recently shown.
 func signalRepetitionPenalty(item ScoringCandidate, sctx ScoringContext) float64 {
 	if sctx.RecentRecalls != nil && sctx.RecentRecalls[item.ID] {
@@ -415,6 +459,13 @@ func lastTouchTimestamp(item ScoringCandidate) time.Time {
 // MemoryToCandidate converts a memory into a scoring candidate using ftsPos as
 // its lexical rank.
 func MemoryToCandidate(m core.Memory, ftsPos int) ScoringCandidate {
+	sourceSystem := strings.TrimSpace(m.Metadata["source_system"])
+	if strings.EqualFold(strings.TrimSpace(m.Metadata["extraction_method"]), "heuristic") {
+		sourceSystem = "heuristic"
+	} else if sourceSystem == "" && len(m.SourceEventIDs) == 0 {
+		sourceSystem = "remember"
+	}
+
 	return ScoringCandidate{
 		ID:                m.ID,
 		Kind:              "memory",
@@ -437,6 +488,7 @@ func MemoryToCandidate(m core.Memory, ftsPos int) ScoringCandidate {
 		SupersededBy:      m.SupersededBy,
 		SourceEventIDs:    m.SourceEventIDs,
 		ExtractionQuality: m.Metadata["extraction_quality"],
+		SourceSystem:      sourceSystem,
 		FTSPosition:       ftsPos,
 	}
 }
@@ -456,6 +508,7 @@ func SummaryToCandidate(s core.Summary, ftsPos int) ScoringCandidate {
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 		SourceEventIDs:   s.SourceSpan.EventIDs,
+		SourceSystem:     "reflect",
 		FTSPosition:      ftsPos,
 	}
 }
@@ -475,6 +528,7 @@ func EpisodeToCandidate(e core.Episode, ftsPos int) ScoringCandidate {
 		CreatedAt:        e.CreatedAt,
 		UpdatedAt:        e.UpdatedAt,
 		SourceEventIDs:   e.SourceSpan.EventIDs,
+		SourceSystem:     "reflect",
 		FTSPosition:      ftsPos,
 	}
 }
@@ -491,6 +545,7 @@ func EventToCandidate(e core.Event, ftsPos int) ScoringCandidate {
 		ProjectID:        e.ProjectID,
 		CreatedAt:        e.OccurredAt,
 		UpdatedAt:        e.IngestedAt,
+		SourceSystem:     e.SourceSystem,
 		FTSPosition:      ftsPos,
 	}
 }
