@@ -54,6 +54,8 @@ type Repository interface {
 	GetMemoriesByIDs(ctx context.Context, ids []string) (map[string]*Memory, error)
 	// UpdateMemory persists changes to an existing memory.
 	UpdateMemory(ctx context.Context, memory *Memory) error
+	// UpdateMemoriesBatch atomically updates multiple memories in a single transaction.
+	UpdateMemoriesBatch(ctx context.Context, memories []*Memory) error
 	// ListMemories returns memories matching the supplied options.
 	ListMemories(ctx context.Context, opts ListMemoriesOptions) ([]Memory, error)
 	// SearchMemories searches memories by text query.

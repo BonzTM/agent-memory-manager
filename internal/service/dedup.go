@@ -18,6 +18,11 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 
 	totalMerged := 0
 	for iteration := 1; iteration <= maxIterations; iteration++ {
+		if err := ctx.Err(); err != nil {
+			return totalMerged, fmt.Errorf("merge_duplicates cancelled: %w", err)
+		}
+
+		iterStart := time.Now()
 		memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
 			Status: core.MemoryStatusActive,
 			Limit:  10000,
@@ -31,6 +36,13 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 			groups[mem.Type] = append(groups[mem.Type], mem)
 		}
 
+		// Pre-compute word sets for all memories to avoid redundant allocations
+		// during pairwise Jaccard comparisons.
+		wordSets := make(map[string]map[string]bool, len(memories))
+		for i := range memories {
+			wordSets[memories[i].ID] = wordSet(memories[i].Body)
+		}
+
 		merged := 0
 		mergedIDs := make(map[string]bool)
 		stopIteration := false
@@ -40,7 +52,38 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 			for i := range group {
 				activeByType = append(activeByType, &group[i])
 			}
+
+			// Build subject-keyed index for cheap fallback candidate lookup
+			// when FTS returns too few results.
+			bySubject := make(map[string][]*core.Memory)
 			for i := range group {
+				key := normalizeMemoryText(group[i].Subject)
+				bySubject[key] = append(bySubject[key], &group[i])
+			}
+
+			// Batch-load embeddings for this type group so the embedding
+			// dedup path avoids per-memory DB queries.
+			var embeddingCache map[string][]float32
+			if s.embeddingProvider != nil {
+				embeddingCache = make(map[string][]float32, len(group))
+				ids := make([]string, len(group))
+				for i := range group {
+					ids[i] = group[i].ID
+				}
+				model := s.embeddingProvider.Model()
+				if batch, err := s.repo.GetEmbeddingsBatch(ctx, ids, "memory", model); err == nil {
+					for id, rec := range batch {
+						if len(rec.Vector) > 0 {
+							embeddingCache[id] = rec.Vector
+						}
+					}
+				}
+			}
+
+			for i := range group {
+				if err := ctx.Err(); err != nil {
+					return totalMerged + merged, fmt.Errorf("merge_duplicates cancelled: %w", err)
+				}
 				if merged >= maxMergesPerIteration {
 					stopIteration = true
 					break
@@ -56,12 +99,36 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 					continue
 				}
 
-				candidates, err := s.repo.SearchMemories(ctx, query, core.ListMemoriesOptions{Limit: 10})
+				candidates, err := s.repo.SearchMemories(ctx, query, core.ListMemoriesOptions{
+						Status: core.MemoryStatusActive,
+						Limit:  10,
+					})
 				if err != nil {
 					continue
 				}
+				// If FTS returned too few results, fall back to same-subject
+				// peers. For memories with no subject, use a bounded slice
+				// of the type group to avoid O(N²) over thousands of memories.
 				if len(candidates) <= 1 {
-					candidates = group
+					subjectKey := normalizeMemoryText(memA.Subject)
+					var peers []*core.Memory
+					if subjectKey != "" {
+						peers = bySubject[subjectKey]
+					} else {
+						peers = activeByType
+					}
+					const maxFallbackCandidates = 50
+					cap := len(peers)
+					if cap > maxFallbackCandidates {
+						cap = maxFallbackCandidates
+					}
+					candidates = make([]core.Memory, 0, cap)
+					for _, p := range peers {
+						if len(candidates) >= maxFallbackCandidates {
+							break
+						}
+						candidates = append(candidates, *p)
+					}
 				}
 
 				mergePair := func(memA, candB *core.Memory) bool {
@@ -75,6 +142,9 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 						return false
 					}
 					if candB.Scope != memA.Scope {
+						return false
+					}
+					if candB.ProjectID != memA.ProjectID {
 						return false
 					}
 					if candB.Status != core.MemoryStatusActive {
@@ -100,10 +170,7 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 						keeper.Supersedes = superseded.ID
 					}
 
-					if err := s.repo.UpdateMemory(ctx, superseded); err != nil {
-						return false
-					}
-					if err := s.repo.UpdateMemory(ctx, keeper); err != nil {
+					if err := s.repo.UpdateMemoriesBatch(ctx, []*core.Memory{superseded, keeper}); err != nil {
 						return false
 					}
 
@@ -114,10 +181,17 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 
 				jaccardMerged := false
 
+				wsA := wordSets[memA.ID]
 				for j := range candidates {
 					candB := &candidates[j]
 
-					sim := jaccardSimilarity(memA.Body, candB.Body)
+					wsB := wordSets[candB.ID]
+					if wsB == nil {
+						// Candidate may have come from FTS and not be in the
+						// pre-computed set (different iteration or new).
+						wsB = wordSet(candB.Body)
+					}
+					sim := jaccardSimilarityFromSets(wsA, wsB)
 					if sim <= 0.7 {
 						continue
 					}
@@ -135,8 +209,8 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 					break
 				}
 
-			if !jaccardMerged && s.embeddingProvider != nil {
-				embCandidates := s.findDuplicatesByStoredEmbedding(ctx, *memA, activeByType)
+				if !jaccardMerged && s.embeddingProvider != nil {
+					embCandidates := s.findDuplicatesByStoredEmbeddingWithCache(ctx, *memA, activeByType, embeddingCache)
 					for _, candB := range embCandidates {
 						if !mergePair(memA, candB) {
 							continue
@@ -156,7 +230,12 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 			}
 		}
 
-		slog.Debug("merge_duplicates iteration complete", "iteration", iteration, "merged", merged)
+		slog.Info("merge_duplicates iteration complete",
+			"iteration", iteration,
+			"merged", merged,
+			"active_memories", len(memories),
+			"duration_ms", time.Since(iterStart).Milliseconds(),
+		)
 		totalMerged += merged
 		if merged == 0 {
 			break
@@ -168,9 +247,11 @@ func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
 // jaccardSimilarity computes the Jaccard similarity between the word sets of two texts.
 // Words are split on whitespace and lowercased.
 func jaccardSimilarity(textA, textB string) float64 {
-	wordsA := wordSet(textA)
-	wordsB := wordSet(textB)
+	return jaccardSimilarityFromSets(wordSet(textA), wordSet(textB))
+}
 
+// jaccardSimilarityFromSets computes Jaccard similarity from pre-computed word sets.
+func jaccardSimilarityFromSets(wordsA, wordsB map[string]bool) float64 {
 	if len(wordsA) == 0 && len(wordsB) == 0 {
 		return 1.0
 	}

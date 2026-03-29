@@ -132,18 +132,42 @@ func (s *AMMService) findDuplicatesByEmbedding(ctx context.Context, candidate co
 }
 
 func (s *AMMService) findDuplicatesByStoredEmbedding(ctx context.Context, candidate core.Memory, activeMemories []*core.Memory) []*core.Memory {
+	return s.findDuplicatesByStoredEmbeddingWithCache(ctx, candidate, activeMemories, nil)
+}
+
+func (s *AMMService) findDuplicatesByStoredEmbeddingWithCache(ctx context.Context, candidate core.Memory, activeMemories []*core.Memory, embeddingCache map[string][]float32) []*core.Memory {
 	if s.embeddingProvider == nil {
 		return nil
 	}
 
 	model := s.embeddingProvider.Model()
-	candidateRecord, err := s.repo.GetEmbedding(ctx, candidate.ID, "memory", model)
-	if err != nil || candidateRecord == nil || len(candidateRecord.Vector) == 0 {
+
+	getVector := func(id string) []float32 {
+		if embeddingCache != nil {
+			if v, ok := embeddingCache[id]; ok {
+				return v
+			}
+		}
+		record, err := s.repo.GetEmbedding(ctx, id, "memory", model)
+		if err != nil || record == nil || len(record.Vector) == 0 {
+			return nil
+		}
+		if embeddingCache != nil {
+			embeddingCache[id] = record.Vector
+		}
+		return record.Vector
+	}
+
+	candidateVector := getVector(candidate.ID)
+	if candidateVector == nil {
 		return nil
 	}
 
 	duplicates := make([]*core.Memory, 0, 4)
 	for _, existing := range activeMemories {
+		if ctx.Err() != nil {
+			return duplicates
+		}
 		if existing == nil || existing.Status != core.MemoryStatusActive {
 			continue
 		}
@@ -154,12 +178,12 @@ func (s *AMMService) findDuplicatesByStoredEmbedding(ctx context.Context, candid
 			continue
 		}
 
-		record, err := s.repo.GetEmbedding(ctx, existing.ID, "memory", model)
-		if err != nil || record == nil || len(record.Vector) == 0 {
+		existingVector := getVector(existing.ID)
+		if existingVector == nil {
 			continue
 		}
 
-		cosine, ok := cosineSimilarity(candidateRecord.Vector, record.Vector)
+		cosine, ok := cosineSimilarity(candidateVector, existingVector)
 		if !ok {
 			continue
 		}

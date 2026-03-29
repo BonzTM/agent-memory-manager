@@ -778,6 +778,56 @@ func (r *SQLiteRepository) UpdateMemory(ctx context.Context, memory *core.Memory
 	return err
 }
 
+func (r *SQLiteRepository) UpdateMemoriesBatch(ctx context.Context, memories []*core.Memory) error {
+	if len(memories) == 0 {
+		return nil
+	}
+	tx, err := r.Conn().BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin update memories batch: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		UPDATE memories SET type=?, scope=?, project_id=?, session_id=?, agent_id=?,
+			subject=?, body=?, tight_description=?, confidence=?, importance=?,
+			privacy_level=?, status=?, observed_at=?, updated_at=?,
+			valid_from=?, valid_to=?, last_confirmed_at=?,
+			supersedes=?, superseded_by=?, superseded_at=?,
+			source_event_ids_json=?, source_summary_ids_json=?, source_artifact_ids_json=?,
+			tags_json=?, metadata_json=?
+		WHERE id=?`)
+	if err != nil {
+		return fmt.Errorf("prepare update memories batch: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, memory := range memories {
+		if _, err := stmt.ExecContext(ctx,
+			string(memory.Type), string(memory.Scope),
+			nullStr(memory.ProjectID), nullStr(memory.SessionID), nullStr(memory.AgentID),
+			nullStr(memory.Subject), memory.Body, memory.TightDescription,
+			memory.Confidence, memory.Importance, string(memory.PrivacyLevel),
+			string(memory.Status),
+			ptrTimeToStr(memory.ObservedAt), timeToStr(memory.UpdatedAt),
+			ptrTimeToStr(memory.ValidFrom), ptrTimeToStr(memory.ValidTo),
+			ptrTimeToStr(memory.LastConfirmedAt),
+			nullStr(memory.Supersedes), nullStr(memory.SupersededBy),
+			ptrTimeToStr(memory.SupersededAt),
+			marshalSliceJSON(memory.SourceEventIDs),
+			marshalSliceJSON(memory.SourceSummaryIDs),
+			marshalSliceJSON(memory.SourceArtifactIDs),
+			marshalSliceJSON(memory.Tags),
+			marshalMapJSON(memory.Metadata),
+			memory.ID,
+		); err != nil {
+			return fmt.Errorf("update memory %s in batch: %w", memory.ID, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (r *SQLiteRepository) ListMemories(ctx context.Context, opts core.ListMemoriesOptions) ([]core.Memory, error) {
 	query := "SELECT " + memoryCols + " FROM memories WHERE 1=1"
 	var args []interface{}
@@ -831,6 +881,22 @@ func (r *SQLiteRepository) SearchMemories(ctx context.Context, query string, opt
 		FROM memories_fts f JOIN memories m ON f.id = m.id
 		WHERE memories_fts MATCH ?`
 	args := []interface{}{sq}
+	if opts.Status != "" {
+		q += " AND m.status = ?"
+		args = append(args, string(opts.Status))
+	}
+	if opts.Type != "" {
+		q += " AND m.type = ?"
+		args = append(args, string(opts.Type))
+	}
+	if opts.Scope != "" {
+		q += " AND m.scope = ?"
+		args = append(args, string(opts.Scope))
+	}
+	if opts.ProjectID != "" {
+		q += " AND m.project_id = ?"
+		args = append(args, opts.ProjectID)
+	}
 	if opts.AgentID != "" {
 		q += " AND (m.agent_id = ? OR m.agent_id = '' OR m.agent_id IS NULL OR m.privacy_level IN ('shared', 'public_safe'))"
 		args = append(args, opts.AgentID)

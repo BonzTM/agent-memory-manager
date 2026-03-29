@@ -721,6 +721,48 @@ func (r *Repository) UpdateMemory(ctx context.Context, memory *core.Memory) erro
 	return wrapErr("update memory", err)
 }
 
+func (r *Repository) UpdateMemoriesBatch(ctx context.Context, memories []*core.Memory) error {
+	if len(memories) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return wrapErr("begin update memories batch", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		UPDATE memories SET
+			type = $1, scope = $2, project_id = NULLIF($3,''), session_id = NULLIF($4,''), agent_id = NULLIF($5,''),
+			subject = NULLIF($6,''), body = $7, tight_description = $8, confidence = $9, importance = $10,
+			privacy_level = $11, status = $12, observed_at = $13, updated_at = $14,
+			valid_from = $15, valid_to = $16, last_confirmed_at = $17,
+			supersedes = NULLIF($18,''), superseded_by = NULLIF($19,''), superseded_at = $20,
+			source_event_ids = $21, source_summary_ids = $22, source_artifact_ids = $23,
+			tags = $24, metadata_json = $25::jsonb
+		WHERE id = $26`)
+	if err != nil {
+		return wrapErr("prepare update memories batch", err)
+	}
+	defer stmt.Close()
+
+	for _, memory := range memories {
+		if _, err := stmt.ExecContext(ctx,
+			string(memory.Type), string(memory.Scope), memory.ProjectID, memory.SessionID, memory.AgentID,
+			memory.Subject, memory.Body, memory.TightDescription, memory.Confidence, memory.Importance,
+			string(memory.PrivacyLevel), string(memory.Status), memory.ObservedAt, memory.UpdatedAt.UTC(),
+			memory.ValidFrom, memory.ValidTo, memory.LastConfirmedAt,
+			memory.Supersedes, memory.SupersededBy, memory.SupersededAt,
+			pq.Array(memory.SourceEventIDs), pq.Array(memory.SourceSummaryIDs), pq.Array(memory.SourceArtifactIDs),
+			pq.Array(memory.Tags), marshalMapJSON(memory.Metadata), memory.ID,
+		); err != nil {
+			return wrapErr(fmt.Sprintf("update memory %s in batch", memory.ID), err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (r *Repository) ListMemories(ctx context.Context, opts core.ListMemoriesOptions) ([]core.Memory, error) {
 	query := `SELECT ` + memoryCols + ` FROM memories WHERE 1=1`
 	args := make([]any, 0)
@@ -775,6 +817,26 @@ func (r *Repository) SearchMemories(ctx context.Context, query string, opts core
 	q := `SELECT ` + memoryCols + ` FROM memories WHERE memories_fts @@ plainto_tsquery('simple', $1)`
 	args := []any{query}
 	i := 2
+	if opts.Status != "" {
+		q += fmt.Sprintf(" AND status = $%d", i)
+		args = append(args, string(opts.Status))
+		i++
+	}
+	if opts.Type != "" {
+		q += fmt.Sprintf(" AND type = $%d", i)
+		args = append(args, string(opts.Type))
+		i++
+	}
+	if opts.Scope != "" {
+		q += fmt.Sprintf(" AND scope = $%d", i)
+		args = append(args, string(opts.Scope))
+		i++
+	}
+	if opts.ProjectID != "" {
+		q += fmt.Sprintf(" AND project_id = $%d", i)
+		args = append(args, opts.ProjectID)
+		i++
+	}
 	if opts.AgentID != "" {
 		q += fmt.Sprintf(" AND (agent_id = $%d OR agent_id IS NULL OR privacy_level IN ('shared','public_safe'))", i)
 		args = append(args, opts.AgentID)
