@@ -49,12 +49,13 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 	}
 
 	var toProcess []core.Event
+	isLLMBacked := s.intelligence != nil && s.intelligence.IsLLMBacked()
 	for _, evt := range events {
 		if mode, ok := evt.Metadata["ingestion_mode"]; ok {
 			if mode == "ignore" {
 				continue
 			}
-			if mode == "read_only" && !s.hasLLMSummarizer {
+			if mode == "read_only" && !isLLMBacked {
 				continue
 			}
 		}
@@ -97,7 +98,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 		}
 
 		filtered := batch
-		if s.hasLLMSummarizer && s.intelligence != nil {
+		if s.intelligence != nil && s.intelligence.IsLLMBacked() {
 			triaged, triageErr := s.filterReflectEventsByTriage(ctx, batch)
 			if triageErr == nil {
 				filtered = triaged
@@ -115,7 +116,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 		candidates := make([]core.MemoryCandidate, 0)
 		analysisEntities := make([]core.EntityCandidate, 0)
 		analysisRelationships := make([]core.RelationshipCandidate, 0)
-		if s.intelligence != nil && s.hasLLMSummarizer {
+		if s.intelligence != nil && s.intelligence.IsLLMBacked() {
 			analysisInputs := make([]core.EventContent, 0, len(filtered))
 			for idx, evt := range filtered {
 				analysisInputs = append(analysisInputs, core.EventContent{
@@ -135,7 +136,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 				analysisRelationships = append(analysisRelationships, analysis.Relationships...)
 			}
 		} else {
-			extracted, err := s.summarizer.ExtractMemoryCandidateBatch(ctx, contents)
+			extracted, err := s.intelligence.ExtractMemoryCandidateBatch(ctx, contents)
 			if err != nil {
 				return created, superseded, fmt.Errorf("batch extract (batch %d): %w", i/batchSize, err)
 			}
@@ -327,18 +328,17 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 }
 
 func (s *AMMService) extractionMethod() string {
-	if _, ok := s.summarizer.(*LLMSummarizer); ok {
+	if s.intelligence != nil && s.intelligence.IsLLMBacked() {
 		return MethodLLM
 	}
 	return MethodHeuristic
 }
 
 func (s *AMMService) extractionModelName() string {
-	llm, ok := s.summarizer.(*LLMSummarizer)
-	if !ok || llm == nil {
+	if s.intelligence == nil {
 		return ""
 	}
-	return llm.model
+	return s.intelligence.ModelName()
 }
 
 func shouldMarkAsUpgraded(mem *core.Memory, method string) bool {

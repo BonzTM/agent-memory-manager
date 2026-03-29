@@ -31,9 +31,8 @@ func generateID(prefix string) string {
 type AMMService struct {
 	repo                            core.Repository
 	dbPath                          string
-	summarizer                      core.Summarizer
 	intelligence                    core.IntelligenceProvider
-	hasLLMSummarizer                bool
+	defaultIntelligence             core.IntelligenceProvider
 	embeddingProvider               core.EmbeddingProvider
 	reprocessBatchSize              int
 	reflectBatchSize                int
@@ -54,21 +53,12 @@ type AMMService struct {
 var _ core.Service = (*AMMService)(nil)
 
 func New(repo core.Repository, dbPath string, summarizer core.Summarizer, embeddingProvider core.EmbeddingProvider) *AMMService {
-	selected := core.Summarizer(&HeuristicSummarizer{})
-	hasLLM := false
-	if summarizer != nil {
-		_, hasLLM = summarizer.(*LLMSummarizer)
-	}
-	if summarizer != nil {
-		selected = summarizer
-	}
-	intelligence := NewSummarizerIntelligenceAdapter(selected)
+	intelligence := NewSummarizerIntelligenceAdapter(summarizer)
 	svc := &AMMService{
 		repo:                            repo,
 		dbPath:                          dbPath,
-		summarizer:                      selected,
 		intelligence:                    intelligence,
-		hasLLMSummarizer:                hasLLM,
+		defaultIntelligence:             intelligence,
 		embeddingProvider:               embeddingProvider,
 		reprocessBatchSize:              defaultBatchSize,
 		reflectBatchSize:                defaultReflectBatchSize,
@@ -180,7 +170,7 @@ func (s *AMMService) SetCrossProjectSimilarityThreshold(threshold float64) {
 
 func (s *AMMService) SetIntelligenceProvider(provider core.IntelligenceProvider) {
 	if provider == nil {
-		s.intelligence = NewSummarizerIntelligenceAdapter(s.summarizer)
+		s.intelligence = s.defaultIntelligence
 		return
 	}
 	s.intelligence = provider
@@ -737,6 +727,8 @@ func (s *AMMService) History(ctx context.Context, query string, opts core.Histor
 
 // RunJob creates, executes, and records a maintenance job for the requested
 // kind.
+const defaultJobTimeout = 10 * time.Minute
+
 func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error) {
 	slog.Debug("RunJob called", "kind", kind)
 
@@ -751,6 +743,13 @@ func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error)
 	if err := s.repo.InsertJob(ctx, job); err != nil {
 		slog.Error("RunJob failed", "kind", kind, "jobID", job.ID, "error", err)
 		return nil, fmt.Errorf("insert job: %w", err)
+	}
+
+	bookkeepingCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultJobTimeout)
+		defer cancel()
 	}
 
 	var jobErr error
@@ -923,7 +922,7 @@ func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error)
 	} else {
 		job.Status = "completed"
 	}
-	if err := s.repo.UpdateJob(ctx, job); err != nil {
+	if err := s.repo.UpdateJob(bookkeepingCtx, job); err != nil {
 		slog.Error("RunJob failed", "kind", kind, "jobID", job.ID, "status", job.Status, "error", err)
 		return job, fmt.Errorf("update job: %w", err)
 	}

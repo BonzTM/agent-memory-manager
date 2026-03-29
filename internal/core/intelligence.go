@@ -4,6 +4,8 @@ import "context"
 
 type IntelligenceProvider interface {
 	Summarizer
+	IsLLMBacked() bool
+	ModelName() string
 
 	AnalyzeEvents(ctx context.Context, events []EventContent) (*AnalysisResult, error)
 	TriageEvents(ctx context.Context, events []EventContent) (map[int]TriageDecision, error)

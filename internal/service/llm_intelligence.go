@@ -59,6 +59,17 @@ func NewLLMIntelligenceProviderWithReviewConfig(summarizer *LLMSummarizer, revie
 	return NewLLMIntelligenceProvider(summarizer, reviewSummarizer.chatComplete)
 }
 
+func (p *LLMIntelligenceProvider) IsLLMBacked() bool {
+	return p.LLMSummarizer != nil
+}
+
+func (p *LLMIntelligenceProvider) ModelName() string {
+	if p.LLMSummarizer == nil {
+		return ""
+	}
+	return p.LLMSummarizer.model
+}
+
 func (p *LLMIntelligenceProvider) AnalyzeEvents(ctx context.Context, events []core.EventContent) (*core.AnalysisResult, error) {
 	if len(events) == 0 {
 		return &core.AnalysisResult{

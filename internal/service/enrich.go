@@ -21,22 +21,33 @@ func (s *AMMService) EnrichMemories(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("list memories for enrichment: %w", err)
 	}
 
+	pending := make([]core.Memory, 0, len(memories))
+	for _, mem := range memories {
+		if !hasProcessingStep(&mem, MetaEntitiesExtracted) {
+			pending = append(pending, mem)
+		}
+	}
+
+	if len(pending) == 0 {
+		return 0, nil
+	}
+
 	enriched := 0
 	batchSize := s.reflectLLMBatchSize
 	if batchSize <= 0 {
 		batchSize = defaultReflectLLMBatchSize
 	}
 
-	for i := 0; i < len(memories); i += batchSize {
+	for i := 0; i < len(pending); i += batchSize {
 		end := i + batchSize
-		if end > len(memories) {
-			end = len(memories)
+		if end > len(pending) {
+			end = len(pending)
 		}
-		batch := memories[i:end]
+		batch := pending[i:end]
 
 		analysisEntities := make([]core.EntityCandidate, 0)
 		usedAnalysis := false
-		if s.intelligence != nil && s.hasLLMSummarizer {
+		if s.intelligence != nil && s.intelligence.IsLLMBacked() {
 			analysisInputs := make([]core.EventContent, 0, len(batch))
 			for idx := range batch {
 				analysisInputs = append(analysisInputs, core.EventContent{
@@ -57,9 +68,6 @@ func (s *AMMService) EnrichMemories(ctx context.Context) (int, error) {
 
 		for j := range batch {
 			mem := &batch[j]
-			if hasProcessingStep(mem, MetaEntitiesExtracted) {
-				continue
-			}
 
 			method := MethodHeuristic
 			if usedAnalysis {

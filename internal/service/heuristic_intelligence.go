@@ -64,6 +64,14 @@ func (s *summarizerIntelligenceAdapter) AnalyzeEvents(ctx context.Context, event
 	}, nil
 }
 
+func (s *summarizerIntelligenceAdapter) IsLLMBacked() bool {
+	return false
+}
+
+func (s *summarizerIntelligenceAdapter) ModelName() string {
+	return ""
+}
+
 func (s *summarizerIntelligenceAdapter) TriageEvents(_ context.Context, events []core.EventContent) (map[int]core.TriageDecision, error) {
 	return heuristicTriageEvents(events), nil
 }
@@ -176,6 +184,14 @@ func (h *HeuristicIntelligenceProvider) AnalyzeEvents(ctx context.Context, event
 		Relationships: []core.RelationshipCandidate{},
 		EventQuality:  map[int]string{},
 	}, nil
+}
+
+func (h *HeuristicIntelligenceProvider) IsLLMBacked() bool {
+	return false
+}
+
+func (h *HeuristicIntelligenceProvider) ModelName() string {
+	return ""
 }
 
 func (h *HeuristicIntelligenceProvider) TriageEvents(_ context.Context, events []core.EventContent) (map[int]core.TriageDecision, error) {

@@ -3,11 +3,55 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
+
+// jobFrontierSequenceID returns the max_sequence_id stored in the Result map
+// of the most recently completed job of the given kind.  Returns 0 if no
+// completed job exists or the key is absent.
+func (s *AMMService) jobFrontierSequenceID(ctx context.Context, kind string) int64 {
+	jobs, err := s.repo.ListJobs(ctx, core.ListJobsOptions{
+		Kind:   kind,
+		Status: "completed",
+		Limit:  1,
+	})
+	if err != nil || len(jobs) == 0 {
+		return 0
+	}
+	raw, ok := jobs[0].Result["max_sequence_id"]
+	if !ok {
+		return 0
+	}
+	v, _ := strconv.ParseInt(raw, 10, 64)
+	return v
+}
+
+func (s *AMMService) legacyCompressWatermark(ctx context.Context) string {
+	jobs, err := s.repo.ListJobs(ctx, core.ListJobsOptions{
+		Kind:   "compress",
+		Status: "completed",
+		Limit:  1,
+	})
+	if err != nil || len(jobs) == 0 || jobs[0].FinishedAt == nil {
+		return ""
+	}
+	return jobs[0].FinishedAt.Format(time.RFC3339Nano)
+}
+
+// maxEventSequenceID returns the highest SequenceID in a slice of events.
+func maxEventSequenceID(events []core.Event) int64 {
+	var max int64
+	for _, evt := range events {
+		if evt.SequenceID > max {
+			max = evt.SequenceID
+		}
+	}
+	return max
+}
 
 const (
 	defaultCompressChunkSize              = 10
@@ -42,33 +86,19 @@ type topicSummaryPlan struct {
 // CompressHistory summarizes recent event chunks into leaf summaries and
 // returns the number created.
 func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
-	// Determine watermark from last compress job.
-	var afterTime string
-	jobs, err := s.repo.ListJobs(ctx, core.ListJobsOptions{
-		Kind:   "compress",
-		Status: "completed",
-		Limit:  1,
-	})
-	if err == nil && len(jobs) > 0 && jobs[0].FinishedAt != nil {
-		afterTime = jobs[0].FinishedAt.Format(time.RFC3339Nano)
-	}
+	frontier := s.jobFrontierSequenceID(ctx, "compress")
 
-	// List events to compress.
-	var events []core.Event
 	maxEvents := s.compressMaxEvents
 	if maxEvents <= 0 {
 		maxEvents = defaultCompressMaxEvents
 	}
-	if afterTime != "" {
-		events, err = s.repo.ListEvents(ctx, core.ListEventsOptions{
-			After: afterTime,
-			Limit: maxEvents,
-		})
-	} else {
-		events, err = s.repo.ListEvents(ctx, core.ListEventsOptions{
-			Limit: maxEvents,
-		})
+	opts := core.ListEventsOptions{Limit: maxEvents}
+	if frontier > 0 {
+		opts.AfterSequenceID = frontier
+	} else if afterTime := s.legacyCompressWatermark(ctx); afterTime != "" {
+		opts.After = afterTime
 	}
+	events, err := s.repo.ListEvents(ctx, opts)
 	if err != nil {
 		return 0, fmt.Errorf("list events for compress: %w", err)
 	}
@@ -176,7 +206,7 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 			if err != nil {
 				return created, fmt.Errorf("summarize leaf body: %w", err)
 			}
-			if tightResult, err := s.summarizer.Summarize(ctx, body, 100); err == nil {
+			if tightResult, err := s.intelligence.Summarize(ctx, body, 100); err == nil {
 				if cleaned, ok := sanitizeTightDescription(tightResult); ok {
 					tightDesc = cleaned
 				}
@@ -221,7 +251,6 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 		created++
 	}
 
-	// Record job for watermarking.
 	now := time.Now().UTC()
 	job := &core.Job{
 		ID:         generateID("job_"),
@@ -229,8 +258,11 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 		Status:     "completed",
 		StartedAt:  &now,
 		FinishedAt: &now,
-		Result:     map[string]string{"created": fmt.Sprintf("%d", created)},
-		CreatedAt:  now,
+		Result: map[string]string{
+			"created":         fmt.Sprintf("%d", created),
+			"max_sequence_id": fmt.Sprintf("%d", maxEventSequenceID(events)),
+		},
+		CreatedAt: now,
 	}
 	if err := s.repo.InsertJob(ctx, job); err != nil {
 		return created, fmt.Errorf("record compress job: %w", err)
@@ -242,31 +274,56 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 // ConsolidateSessions creates session-level summaries from grouped session
 // events and returns the number created.
 func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
-	// List recent events (up to 500) and group by session_id.
-	events, err := s.repo.ListEvents(ctx, core.ListEventsOptions{
-		Limit: 500,
-	})
+	frontier := s.jobFrontierSequenceID(ctx, "consolidate_sessions")
+
+	opts := core.ListEventsOptions{Limit: 500}
+	if frontier > 0 {
+		opts.AfterSequenceID = frontier
+	}
+	newEvents, err := s.repo.ListEvents(ctx, opts)
 	if err != nil {
 		return 0, fmt.Errorf("list events for consolidate: %w", err)
 	}
 
-	// Group by session_id.
-	sessionEvents := make(map[string][]core.Event)
-	for _, evt := range events {
-		if evt.SessionID == "" {
-			continue
-		}
-		sessionEvents[evt.SessionID] = append(sessionEvents[evt.SessionID], evt)
+	if len(newEvents) == 0 {
+		return 0, nil
 	}
 
-	if len(sessionEvents) == 0 {
+	candidateSessionIDs := make(map[string]bool)
+	for _, evt := range newEvents {
+		if evt.SessionID != "" {
+			candidateSessionIDs[evt.SessionID] = true
+		}
+	}
+
+	recordFrontier := func(created int) error {
+		maxSeq := maxEventSequenceID(newEvents)
+		now := time.Now().UTC()
+		job := &core.Job{
+			ID:         generateID("job_"),
+			Kind:       "consolidate_sessions",
+			Status:     "completed",
+			StartedAt:  &now,
+			FinishedAt: &now,
+			Result: map[string]string{
+				"created":         fmt.Sprintf("%d", created),
+				"max_sequence_id": fmt.Sprintf("%d", maxSeq),
+			},
+			CreatedAt: now,
+		}
+		return s.repo.InsertJob(ctx, job)
+	}
+
+	if len(candidateSessionIDs) == 0 {
+		if err := recordFrontier(0); err != nil {
+			return 0, fmt.Errorf("record consolidate_sessions job: %w", err)
+		}
 		return 0, nil
 	}
 
 	created := 0
 
-	for sessionID, evts := range sessionEvents {
-		// Check if a session summary already exists.
+	for sessionID := range candidateSessionIDs {
 		existing, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{
 			Kind:      "session",
 			SessionID: sessionID,
@@ -276,7 +333,17 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 			continue
 		}
 
-		// Collect event IDs and build body.
+		evts, err := s.repo.ListEvents(ctx, core.ListEventsOptions{
+			SessionID: sessionID,
+			Limit:     500,
+		})
+		if err != nil {
+			return created, fmt.Errorf("list session events for consolidate %s: %w", sessionID, err)
+		}
+		if len(evts) == 0 {
+			continue
+		}
+
 		eventIDs := make([]string, 0, len(evts))
 		var bodyBuilder strings.Builder
 		eventContents := make([]core.EventContent, 0, len(evts))
@@ -341,7 +408,6 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 			return created, fmt.Errorf("insert session summary: %w", err)
 		}
 
-		// Create edges.
 		for order, eid := range eventIDs {
 			edge := &core.SummaryEdge{
 				ParentSummaryID: summary.ID,
@@ -361,10 +427,22 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 		created++
 	}
 
+	if err := recordFrontier(created); err != nil {
+		return created, fmt.Errorf("record consolidate_sessions job: %w", err)
+	}
+
 	return created, nil
 }
 
 func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
+	hasWork, err := s.hasNewLeafSummariesSinceLastTopicJob(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("check for new leaf summaries: %w", err)
+	}
+	if !hasWork {
+		return 0, nil
+	}
+
 	allLeafSummaries, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{
 		Kind:  "leaf",
 		Limit: 50000,
@@ -374,6 +452,20 @@ func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
 	}
 	if len(allLeafSummaries) == 0 {
 		return 0, nil
+	}
+
+	recordTopicJob := func(created int) error {
+		now := time.Now().UTC()
+		topicJob := &core.Job{
+			ID:         generateID("job_"),
+			Kind:       "build_topic_summaries",
+			Status:     "completed",
+			StartedAt:  &now,
+			FinishedAt: &now,
+			Result:     map[string]string{"created": fmt.Sprintf("%d", created)},
+			CreatedAt:  now,
+		}
+		return s.repo.InsertJob(ctx, topicJob)
 	}
 
 	parentedLeafIDs, err := s.collectParentedLeafSummaryIDs(ctx)
@@ -394,6 +486,9 @@ func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
 
 	groups := groupLeafSummariesByEntities(unparentedLeafs)
 	if len(groups) == 0 {
+		if err := recordTopicJob(0); err != nil {
+			return 0, fmt.Errorf("record build_topic_summaries job: %w", err)
+		}
 		return 0, nil
 	}
 
@@ -523,7 +618,37 @@ func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
 		created++
 	}
 
+	if err := recordTopicJob(created); err != nil {
+		return created, fmt.Errorf("record build_topic_summaries job: %w", err)
+	}
+
 	return created, nil
+}
+
+func (s *AMMService) hasNewLeafSummariesSinceLastTopicJob(ctx context.Context) (bool, error) {
+	allLeaves, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{
+		Kind:  "leaf",
+		Limit: 50000,
+	})
+	if err != nil {
+		return false, fmt.Errorf("list leaf summaries for topic gate: %w", err)
+	}
+	if len(allLeaves) == 0 {
+		return false, nil
+	}
+
+	parented, err := s.collectParentedLeafSummaryIDs(ctx)
+	if err != nil {
+		return false, fmt.Errorf("collect parented leaf IDs for topic gate: %w", err)
+	}
+
+	for _, leaf := range allLeaves {
+		if _, ok := parented[leaf.ID]; !ok {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (s *AMMService) collectParentedLeafSummaryIDs(ctx context.Context) (map[string]struct{}, error) {
@@ -564,7 +689,7 @@ func (s *AMMService) escalate(ctx context.Context, text string, maxChars int) (s
 	if deterministicMax <= 0 {
 		deterministicMax = defaultEscalationDeterministicMaxChars
 	}
-	return summarizeWithEscalation(ctx, s.summarizer, text, maxChars, deterministicMax)
+	return summarizeWithEscalation(ctx, s.intelligence, text, maxChars, deterministicMax)
 }
 
 func summarizeWithEscalation(ctx context.Context, summarizer core.Summarizer, text string, maxChars int, deterministicMax int) (string, error) {
@@ -728,7 +853,7 @@ func (s *AMMService) buildSessionNarrative(
 	}
 
 	tightDesc := fallbackSessionTightDesc(evts)
-	if tightResult, err := s.summarizer.Summarize(ctx, body, 100); err == nil {
+	if tightResult, err := s.intelligence.Summarize(ctx, body, 100); err == nil {
 		if cleaned, ok := sanitizeTightDescription(tightResult); ok {
 			tightDesc = cleaned
 		}

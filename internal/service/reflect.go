@@ -37,8 +37,9 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 		}
 		processedCount += len(events)
 
-		filtered := filterReflectEventsByMetadata(events, s.hasLLMSummarizer)
-		if s.hasLLMSummarizer && s.intelligence != nil {
+		isLLMBacked := s.intelligence != nil && s.intelligence.IsLLMBacked()
+		filtered := filterReflectEventsByMetadata(events, isLLMBacked)
+		if isLLMBacked {
 			triaged, triageErr := s.filterReflectEventsByTriage(ctx, events)
 			if triageErr == nil {
 				filtered = triaged
@@ -65,7 +66,7 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 			analysisRelationships := make([]core.RelationshipCandidate, 0)
 			usedAnalysis := false
 
-			if s.intelligence != nil && s.hasLLMSummarizer {
+			if s.intelligence != nil && s.intelligence.IsLLMBacked() {
 				analysisInputs := make([]core.EventContent, 0, len(batch))
 				for idx, evt := range batch {
 					analysisInputs = append(analysisInputs, core.EventContent{
@@ -85,21 +86,21 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 					}
 					usedAnalysis = len(candidates) > 0
 					if len(candidates) == 0 {
-						extracted, err := s.summarizer.ExtractMemoryCandidateBatch(ctx, contents)
+						extracted, err := s.intelligence.ExtractMemoryCandidateBatch(ctx, contents)
 						if err != nil {
 							return created, fmt.Errorf("extract memory candidate batch: %w", err)
 						}
 						candidates = append(candidates, extracted...)
 					}
 				} else {
-					extracted, err := s.summarizer.ExtractMemoryCandidateBatch(ctx, contents)
+					extracted, err := s.intelligence.ExtractMemoryCandidateBatch(ctx, contents)
 					if err != nil {
 						return created, fmt.Errorf("extract memory candidate batch: %w", err)
 					}
 					candidates = append(candidates, extracted...)
 				}
 			} else {
-				extracted, err := s.summarizer.ExtractMemoryCandidateBatch(ctx, contents)
+				extracted, err := s.intelligence.ExtractMemoryCandidateBatch(ctx, contents)
 				if err != nil {
 					return created, fmt.Errorf("extract memory candidate batch: %w", err)
 				}
@@ -290,14 +291,14 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 	return created, nil
 }
 
-func filterReflectEventsByMetadata(events []core.Event, hasLLMSummarizer bool) []core.Event {
+func filterReflectEventsByMetadata(events []core.Event, isLLMBacked bool) []core.Event {
 	filtered := make([]core.Event, 0, len(events))
 	for _, evt := range events {
 		if mode, ok := evt.Metadata["ingestion_mode"]; ok {
 			if mode == "ignore" {
 				continue
 			}
-			if mode == "read_only" && !hasLLMSummarizer {
+			if mode == "read_only" && !isLLMBacked {
 				continue
 			}
 		}
