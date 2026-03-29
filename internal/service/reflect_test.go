@@ -25,6 +25,7 @@ func TestReflect_UsesAnalyzeEventsAndCreatesRelationships(t *testing.T) {
 	}
 
 	intel := &reprocessIntelligenceStub{
+		isLLM: true,
 		analysisResult: &core.AnalysisResult{
 			Memories: []core.MemoryCandidate{{
 				Type:             core.MemoryTypeDecision,
@@ -143,7 +144,7 @@ func TestReflect_FallsBackToSummarizerWhenAnalyzeEventsFails(t *testing.T) {
 	if !ok {
 		t.Fatal("expected concrete AMMService")
 	}
-	intel := &reprocessIntelligenceStub{analyzeErr: errors.New("analysis unavailable")}
+	intel := &reprocessIntelligenceStub{isLLM: true, analyzeErr: errors.New("analysis unavailable"), extractFallback: llm}
 	concreteSvc.SetIntelligenceProvider(intel)
 
 	now := time.Now().UTC()

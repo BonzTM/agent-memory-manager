@@ -126,6 +126,8 @@ type consolidateTestIntelligence struct {
 	compressEventBatches      func(chunks []core.EventChunk) ([]core.CompressionResult, error)
 	summarizeTopicBatches     func(topics []core.TopicChunk) ([]core.CompressionResult, error)
 	triage                    func(events []core.EventContent) (map[int]core.TriageDecision, error)
+	extractBatch              func([]string) ([]core.MemoryCandidate, error)
+	isLLM                     bool
 	callCountPtr              *int32
 	compressBatchCallCountPtr *int32
 	topicBatchCallCountPtr    *int32
@@ -153,11 +155,22 @@ func (m consolidateTestIntelligence) Summarize(_ context.Context, content string
 	return content, nil
 }
 
+func (m consolidateTestIntelligence) IsLLMBacked() bool {
+	return m.isLLM
+}
+
+func (consolidateTestIntelligence) ModelName() string {
+	return ""
+}
+
 func (consolidateTestIntelligence) ExtractMemoryCandidate(context.Context, string) ([]core.MemoryCandidate, error) {
 	return nil, nil
 }
 
-func (consolidateTestIntelligence) ExtractMemoryCandidateBatch(context.Context, []string) ([]core.MemoryCandidate, error) {
+func (m consolidateTestIntelligence) ExtractMemoryCandidateBatch(_ context.Context, contents []string) ([]core.MemoryCandidate, error) {
+	if m.extractBatch != nil {
+		return m.extractBatch(contents)
+	}
 	return nil, nil
 }
 
@@ -1313,7 +1326,7 @@ func TestCompressHistory_FallsBackWhenBatchCompressionFails(t *testing.T) {
 	var bodyCalls int32
 	var tightCalls int32
 	var batchCalls int32
-	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: func(content string, maxLen int) (string, error) {
+	fallbackSummarize := func(content string, maxLen int) (string, error) {
 		switch maxLen {
 		case leafBodyMaxChars:
 			atomic.AddInt32(&bodyCalls, 1)
@@ -1324,10 +1337,12 @@ func TestCompressHistory_FallsBackWhenBatchCompressionFails(t *testing.T) {
 		default:
 			return content, nil
 		}
-	}})
+	}
+	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: fallbackSummarize})
 	ctx := context.Background()
 
 	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		summarize:                 fallbackSummarize,
 		compressBatchCallCountPtr: &batchCalls,
 		compressEventBatches: func([]core.EventChunk) ([]core.CompressionResult, error) {
 			return nil, fmt.Errorf("batch failed")
@@ -1728,7 +1743,7 @@ func TestConsolidateSessions_AutoExtractsOpenLoops(t *testing.T) {
 func TestConsolidateSessions_FallsBackOnError(t *testing.T) {
 	var summarizeCalls int32
 	var consolidateCalls int32
-	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: func(content string, maxLen int) (string, error) {
+	fallbackSummarize := func(content string, maxLen int) (string, error) {
 		atomic.AddInt32(&summarizeCalls, 1)
 		if maxLen == sessionBodyMaxChars {
 			return "fallback summary body", nil
@@ -1737,10 +1752,12 @@ func TestConsolidateSessions_FallsBackOnError(t *testing.T) {
 			return "fallback tight", nil
 		}
 		return content, nil
-	}})
+	}
+	svc, _ := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: fallbackSummarize})
 	ctx := context.Background()
 
 	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		summarize:    fallbackSummarize,
 		callCountPtr: &consolidateCalls,
 		consolidate: func(_ []core.EventContent, _ []core.MemorySummary) (*core.NarrativeResult, error) {
 			return nil, fmt.Errorf("provider unavailable")
@@ -2086,7 +2103,7 @@ func TestBuildTopicSummaries_FallsBackWhenBatchTopicFails(t *testing.T) {
 	var bodyCalls int32
 	var tightCalls int32
 	var topicBatchCalls int32
-	svc, repo := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: func(content string, maxLen int) (string, error) {
+	fallbackSummarize := func(content string, maxLen int) (string, error) {
 		switch maxLen {
 		case topicBodyMaxChars:
 			atomic.AddInt32(&bodyCalls, 1)
@@ -2097,10 +2114,12 @@ func TestBuildTopicSummaries_FallsBackWhenBatchTopicFails(t *testing.T) {
 		default:
 			return content, nil
 		}
-	}})
+	}
+	svc, repo := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{summarize: fallbackSummarize})
 	ctx := context.Background()
 
 	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		summarize:              fallbackSummarize,
 		topicBatchCallCountPtr: &topicBatchCalls,
 		summarizeTopicBatches: func([]core.TopicChunk) ([]core.CompressionResult, error) {
 			return nil, fmt.Errorf("topic batch failure")
@@ -2271,6 +2290,160 @@ func TestIngestionPolicy_Default(t *testing.T) {
 	if !createMem {
 		t.Error("expected createMemory=true with no policy (default full)")
 	}
+}
+
+func TestIngestionPolicy_Kind(t *testing.T) {
+	t.Run("exact match ignores tool_result only", func(t *testing.T) {
+		svc, repo := testServiceAndRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		err := repo.InsertIngestionPolicy(ctx, &core.IngestionPolicy{
+			ID:          "pol_kind_exact",
+			PatternType: "kind",
+			Pattern:     "tool_result",
+			Mode:        "ignore",
+			MatchMode:   "exact",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ignored, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "tool_result",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      "exact kind should be ignored",
+			OccurredAt:   now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ignored == nil {
+			t.Fatal("expected non-nil event returned")
+		}
+
+		events, err := svc.repo.ListEvents(ctx, core.ListEventsOptions{Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range events {
+			if e.Content == "exact kind should be ignored" {
+				t.Fatal("tool_result event should not be persisted under kind ignore policy")
+			}
+		}
+
+		allowed, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message_user",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      "normal message should persist",
+			OccurredAt:   now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if allowed.ID == "" {
+			t.Fatal("expected non-ignored event to be persisted")
+		}
+
+		events, err = svc.repo.ListEvents(ctx, core.ListEventsOptions{Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		foundAllowed := false
+		for _, e := range events {
+			if e.Content == "normal message should persist" {
+				foundAllowed = true
+				break
+			}
+		}
+		if !foundAllowed {
+			t.Fatal("message_user event should be persisted when kind policy targets tool_result")
+		}
+	})
+
+	t.Run("glob match ignores tool_call and tool_result", func(t *testing.T) {
+		svc, repo := testServiceAndRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		err := repo.InsertIngestionPolicy(ctx, &core.IngestionPolicy{
+			ID:          "pol_kind_glob",
+			PatternType: "kind",
+			Pattern:     "tool_*",
+			Mode:        "ignore",
+			MatchMode:   "glob",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for _, tc := range []struct {
+			kind    string
+			content string
+		}{
+			{kind: "tool_call", content: "glob tool_call should be ignored"},
+			{kind: "tool_result", content: "glob tool_result should be ignored"},
+		} {
+			stored, err := svc.IngestEvent(ctx, &core.Event{
+				Kind:         tc.kind,
+				SourceSystem: "test",
+				PrivacyLevel: core.PrivacyPrivate,
+				Content:      tc.content,
+				OccurredAt:   now,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored == nil {
+				t.Fatalf("expected non-nil event returned for kind=%s", tc.kind)
+			}
+		}
+
+		events, err := svc.repo.ListEvents(ctx, core.ListEventsOptions{Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range events {
+			if e.Content == "glob tool_call should be ignored" || e.Content == "glob tool_result should be ignored" {
+				t.Fatalf("expected %q to be ignored by kind glob policy", e.Content)
+			}
+		}
+
+		allowed, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message_user",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      "glob policy allows non-tool kind",
+			OccurredAt:   now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if allowed.ID == "" {
+			t.Fatal("expected non-tool event to be persisted")
+		}
+
+		events, err = svc.repo.ListEvents(ctx, core.ListEventsOptions{Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		foundAllowed := false
+		for _, e := range events {
+			if e.Content == "glob policy allows non-tool kind" {
+				foundAllowed = true
+				break
+			}
+		}
+		if !foundAllowed {
+			t.Fatal("message_user event should be persisted under tool_* glob kind policy")
+		}
+	})
 }
 
 func TestIngestionPolicy_ExplicitPolicyOverridesNoiseHeuristic(t *testing.T) {
@@ -2490,7 +2663,7 @@ func TestReflect_ProcessesNoiseEventsWithLLMSummarizer(t *testing.T) {
 
 	llm := NewLLMSummarizer(server.URL, "test-key", "test-model")
 	svc, _ := testServiceAndRepoWithSummarizer(t, llm)
-	if !svc.hasLLMSummarizer {
+	if svc.intelligence == nil || !svc.intelligence.IsLLMBacked() {
 		t.Fatal("expected service to detect LLM summarizer")
 	}
 
@@ -2556,17 +2729,32 @@ func TestReflect_SkipsNoiseEventsWithoutLLMSummarizer(t *testing.T) {
 }
 
 func TestReflect_SkipsTriagedNoiseEvents(t *testing.T) {
-	summarizer := reflectTestSummarizer{extract: func(content string) ([]core.MemoryCandidate, error) {
+	extractFn := func(content string) ([]core.MemoryCandidate, error) {
 		return []core.MemoryCandidate{{
 			Type:             core.MemoryTypeFact,
 			Body:             content,
 			TightDescription: content,
 			Confidence:       0.9,
 		}}, nil
-	}}
+	}
+	summarizer := reflectTestSummarizer{extract: extractFn}
 	svc, repo := testServiceAndRepoWithSummarizer(t, summarizer)
-	svc.hasLLMSummarizer = true
 	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		isLLM: true,
+		extractBatch: func(contents []string) ([]core.MemoryCandidate, error) {
+			var all []core.MemoryCandidate
+			for i, c := range contents {
+				candidates, err := extractFn(c)
+				if err != nil {
+					return nil, err
+				}
+				for j := range candidates {
+					candidates[j].SourceEventNums = []int{i + 1}
+				}
+				all = append(all, candidates...)
+			}
+			return all, nil
+		},
 		triage: func(events []core.EventContent) (map[int]core.TriageDecision, error) {
 			decisions := make(map[int]core.TriageDecision, len(events))
 			for _, evt := range events {

@@ -24,6 +24,14 @@ func (s *lifecycleReviewIntelligenceStub) ExtractMemoryCandidateBatch(context.Co
 	return []core.MemoryCandidate{}, nil
 }
 
+func (s *lifecycleReviewIntelligenceStub) IsLLMBacked() bool {
+	return false
+}
+
+func (s *lifecycleReviewIntelligenceStub) ModelName() string {
+	return ""
+}
+
 func (s *lifecycleReviewIntelligenceStub) AnalyzeEvents(context.Context, []core.EventContent) (*core.AnalysisResult, error) {
 	return &core.AnalysisResult{}, nil
 }

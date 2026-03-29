@@ -29,12 +29,14 @@ type recordingBatchSummarizer struct {
 }
 
 type reprocessIntelligenceStub struct {
-	analysisResult   *core.AnalysisResult
-	analyzeErr       error
-	triageDecisions  map[int]core.TriageDecision
-	triageByContains map[string]core.TriageDecision
-	analyzeBatchLens []int
-	triageBatchLens  []int
+	analysisResult    *core.AnalysisResult
+	analyzeErr        error
+	triageDecisions   map[int]core.TriageDecision
+	triageByContains  map[string]core.TriageDecision
+	analyzeBatchLens  []int
+	triageBatchLens   []int
+	extractFallback   core.Summarizer
+	isLLM             bool
 }
 
 func testImportancePtr(v float64) *float64 {
@@ -76,8 +78,19 @@ func (s *reprocessIntelligenceStub) ExtractMemoryCandidate(context.Context, stri
 	return nil, nil
 }
 
-func (s *reprocessIntelligenceStub) ExtractMemoryCandidateBatch(context.Context, []string) ([]core.MemoryCandidate, error) {
+func (s *reprocessIntelligenceStub) ExtractMemoryCandidateBatch(ctx context.Context, contents []string) ([]core.MemoryCandidate, error) {
+	if s.extractFallback != nil {
+		return s.extractFallback.ExtractMemoryCandidateBatch(ctx, contents)
+	}
 	return nil, nil
+}
+
+func (s *reprocessIntelligenceStub) IsLLMBacked() bool {
+	return s.isLLM
+}
+
+func (s *reprocessIntelligenceStub) ModelName() string {
+	return ""
 }
 
 func (s *reprocessIntelligenceStub) AnalyzeEvents(_ context.Context, events []core.EventContent) (*core.AnalysisResult, error) {
@@ -857,6 +870,7 @@ func TestReprocessAll_UsesIntelligenceAnalyzeAfterTriageAndLinksEntities(t *test
 	}
 
 	intel := &reprocessIntelligenceStub{
+		isLLM: true,
 		analysisResult: &core.AnalysisResult{
 			Memories: []core.MemoryCandidate{{
 				Type:             core.MemoryTypeDecision,
@@ -976,6 +990,7 @@ func TestReprocessAll_LinksEntitiesForDuplicateUpdates(t *testing.T) {
 	}
 
 	intel := &reprocessIntelligenceStub{
+		isLLM: true,
 		analysisResult: &core.AnalysisResult{
 			Memories: []core.MemoryCandidate{{
 				Type:             core.MemoryTypeDecision,

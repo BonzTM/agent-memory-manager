@@ -32,6 +32,7 @@ func (a adapterTestSummarizer) ExtractMemoryCandidateBatch(context.Context, []st
 
 type enrichAnalysisStub struct {
 	result *core.AnalysisResult
+	isLLM  bool
 }
 
 func (e enrichAnalysisStub) Summarize(context.Context, string, int) (string, error) {
@@ -44,6 +45,14 @@ func (e enrichAnalysisStub) ExtractMemoryCandidate(context.Context, string) ([]c
 
 func (e enrichAnalysisStub) ExtractMemoryCandidateBatch(context.Context, []string) ([]core.MemoryCandidate, error) {
 	return nil, nil
+}
+
+func (e enrichAnalysisStub) IsLLMBacked() bool {
+	return e.isLLM
+}
+
+func (enrichAnalysisStub) ModelName() string {
+	return ""
 }
 
 func (e enrichAnalysisStub) AnalyzeEvents(context.Context, []core.EventContent) (*core.AnalysisResult, error) {
@@ -197,11 +206,10 @@ func TestSummarizerIntelligenceAdapter_FullSurface(t *testing.T) {
 func TestEnrichMemories_UsesAnalysisEntitiesAndFallbackHeuristic(t *testing.T) {
 	svc, repo := testServiceAndRepoWithSummarizer(t, reflectTestSummarizer{})
 	ctx := context.Background()
-	svc.hasLLMSummarizer = true
 	svc.SetIntelligenceProvider(enrichAnalysisStub{result: &core.AnalysisResult{Entities: []core.EntityCandidate{
 		{CanonicalName: "API Gateway", Type: "service", Aliases: []string{"api"}},
 		{CanonicalName: "Redis Cache", Type: "technology", Aliases: []string{"redis"}},
-	}}})
+	}}, isLLM: true})
 
 	withAliases, err := svc.Remember(ctx, &core.Memory{Type: core.MemoryTypeFact, Scope: core.ScopeGlobal, Body: "API uses redis for request throttling", TightDescription: "api redis"})
 	if err != nil {

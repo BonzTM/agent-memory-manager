@@ -15,8 +15,8 @@ func TestNew_AllowsNilEmbeddingProvider(t *testing.T) {
 	if svc.embeddingProvider != nil {
 		t.Fatalf("expected nil embedding provider, got %#v", svc.embeddingProvider)
 	}
-	if svc.summarizer == nil {
-		t.Fatal("expected default summarizer to be set")
+	if svc.intelligence == nil {
+		t.Fatal("expected default intelligence provider to be set")
 	}
 }
 

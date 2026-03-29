@@ -20,15 +20,6 @@ func runtimeIntField(t *testing.T, svc *service.AMMService, field string) int {
 	return int(v.Int())
 }
 
-func runtimeBoolField(t *testing.T, svc *service.AMMService, field string) bool {
-	t.Helper()
-	v := reflect.ValueOf(svc).Elem().FieldByName(field)
-	if !v.IsValid() {
-		t.Fatalf("missing field %q", field)
-	}
-	return v.Bool()
-}
-
 func runtimeFloatField(t *testing.T, svc *service.AMMService, field string) float64 {
 	t.Helper()
 	v := reflect.ValueOf(svc).Elem().FieldByName(field)
@@ -152,11 +143,9 @@ func TestNewService_SQLiteWiresConfiguredProvidersAndBatchSizes(t *testing.T) {
 		t.Fatalf("expected *service.AMMService, got %T", svc)
 	}
 
-	if !runtimeBoolField(t, impl, "hasLLMSummarizer") {
-		t.Fatal("expected service to be wired with LLM summarizer")
-	}
-	if got := runtimeInterfaceType(t, impl, "summarizer"); got != "service.LLMSummarizer" && got != "*service.LLMSummarizer" {
-		t.Fatalf("expected LLM summarizer type, got %q", got)
+	provider := buildIntelligenceProvider(cfg, buildSummarizer(cfg))
+	if provider == nil || !provider.IsLLMBacked() {
+		t.Fatal("expected configured intelligence provider to report LLM-backed")
 	}
 	if got := runtimeInterfaceType(t, impl, "intelligence"); got != "service.LLMIntelligenceProvider" && got != "*service.LLMIntelligenceProvider" {
 		t.Fatalf("expected LLM intelligence provider type, got %q", got)

@@ -679,8 +679,8 @@ func TestExpand_StillWorksOnFeedbackError(t *testing.T) {
 func TestNewWithCustomSummarizerAndObservedRecallItem(t *testing.T) {
 	_, repo := testServiceAndRepo(t)
 	svc := New(repo, "/tmp/test.db", dummySummarizer{}, nil)
-	if svc.summarizer == nil {
-		t.Fatal("expected custom summarizer to be set")
+	if svc.intelligence == nil {
+		t.Fatal("expected intelligence provider to be set")
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
