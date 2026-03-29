@@ -384,6 +384,15 @@ func TestValidatePolicyAdd(t *testing.T) {
 	}
 }
 
+func TestValidatePolicyAdd_AcceptsKindPatternType(t *testing.T) {
+	if err := ValidatePolicyAdd(&PolicyAddRequest{PatternType: "kind", Pattern: "tool_result", Mode: "ignore"}); err != nil {
+		t.Fatalf("expected kind pattern_type to be valid, got %v", err)
+	}
+	if err := ValidatePolicyAdd(&PolicyAddRequest{PatternType: "kind", Pattern: "tool_*", Mode: "ignore", MatchMode: "glob"}); err != nil {
+		t.Fatalf("expected kind glob pattern_type to be valid, got %v", err)
+	}
+}
+
 func TestValidateResetDerived(t *testing.T) {
 	if err := ValidateResetDerived(&ResetDerivedRequest{Confirm: true}); err != nil {
 		t.Fatalf("expected valid request, got %v", err)

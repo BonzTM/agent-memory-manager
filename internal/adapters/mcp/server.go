@@ -698,7 +698,7 @@ func policyAddSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
-			"pattern_type": map[string]string{"type": "string", "description": "Pattern type: session, source, surface, agent, project, runtime"},
+			"pattern_type": map[string]string{"type": "string", "description": "Pattern type: kind, session, source, surface, agent, project, runtime"},
 			"pattern":      map[string]string{"type": "string", "description": "Policy pattern"},
 			"mode":         map[string]string{"type": "string", "description": "Ingestion mode: full, read_only, ignore"},
 			"priority":     map[string]string{"type": "integer", "description": "Priority ordering (higher wins)"},

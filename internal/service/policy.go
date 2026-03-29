@@ -49,7 +49,8 @@ func (s *AMMService) checkIngestionPolicy(ctx context.Context, event *core.Event
 		return "full", false, nil
 	}
 
-	// Check policies in priority order: session_id, project_id, agent_id, source_system, surface.
+	// Check policies in priority order: session, project, agent, source, surface, kind.
+	// Kind is last so specific session/project/source overrides beat broad kind rules.
 	checks := []struct {
 		patternType string
 		value       string
@@ -59,6 +60,7 @@ func (s *AMMService) checkIngestionPolicy(ctx context.Context, event *core.Event
 		{"agent", event.AgentID},
 		{"source", event.SourceSystem},
 		{"surface", event.Surface},
+		{"kind", strings.TrimSpace(event.Kind)},
 	}
 
 	for _, c := range checks {

@@ -272,7 +272,7 @@ type Job struct {
 // IngestionPolicy defines read/write behavior for a source pattern.
 type IngestionPolicy struct {
 	ID          string            `json:"id"`
-	PatternType string            `json:"pattern_type"` // session, source, surface, agent, project, runtime
+	PatternType string            `json:"pattern_type"` // kind, session, source, surface, agent, project, runtime
 	Pattern     string            `json:"pattern"`
 	Mode        string            `json:"mode"` // full, read_only, ignore
 	Priority    int               `json:"priority,omitempty"`

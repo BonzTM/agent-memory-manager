@@ -86,6 +86,7 @@ var (
 	}
 
 	validPolicyPatternTypes = map[string]bool{
+		"kind":    true,
 		"session": true,
 		"source":  true,
 		"surface": true,
@@ -344,7 +345,7 @@ func ValidatePolicyAdd(req *PolicyAddRequest) error {
 		return fmt.Errorf("pattern_type is required")
 	}
 	if !validPolicyPatternTypes[req.PatternType] {
-		return fmt.Errorf("invalid pattern_type %q: must be one of session, source, surface, agent, project, runtime", req.PatternType)
+		return fmt.Errorf("invalid pattern_type %q: must be one of kind, session, source, surface, agent, project, runtime", req.PatternType)
 	}
 	if strings.TrimSpace(req.Pattern) == "" {
 		return fmt.Errorf("pattern is required")
