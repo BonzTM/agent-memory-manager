@@ -75,22 +75,37 @@ Use PostgreSQL when you want a shared/networked backend for multiple agents.
 
 ## Step 2a: (Optional) Run as HTTP API
 
-If the runtime cannot execute local binaries directly, deploy `amm-http` and call AMM over REST:
+If the runtime cannot execute local binaries directly, or you are running in a containerized environment (e.g., as a Kubernetes sidecar), deploy `amm-http` and call AMM over the network.
+
+AMM supports two network-based integration methods:
+1. **REST API**: Standard JSON endpoints for recall, ingestion, and management.
+2. **MCP-over-HTTP**: Streamable HTTP transport for MCP clients.
 
 ```bash
+# Start the HTTP server
 amm-http
 # Listens on :8080 by default
 ```
 
-Example recall request:
-
+**REST Example (Recall)**
 ```bash
 curl -s -X POST "http://localhost:8080/v1/recall" \
   -H "Content-Type: application/json" \
   -d '{"query":"project decisions","opts":{"mode":"ambient"}}'
 ```
 
-For Kubernetes deployments, use the Helm chart at `deploy/helm/amm/`.
+**MCP-over-HTTP Example (Claude Code Config)**
+```json
+{
+  "mcpServers": {
+    "amm": {
+      "url": "http://localhost:8080/v1/mcp"
+    }
+  }
+}
+```
+
+For Kubernetes deployments, see the sidecar example at `deploy/sidecar/` or use the Helm chart at `deploy/helm/amm/`.
 
 ---
 

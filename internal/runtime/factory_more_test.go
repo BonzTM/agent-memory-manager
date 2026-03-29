@@ -110,7 +110,7 @@ func TestNewService_SQLiteWiresConfiguredProvidersAndBatchSizes(t *testing.T) {
 	cfg.Storage.DBPath = filepath.Join(t.TempDir(), "runtime.db")
 	cfg.Summarizer.Endpoint = "https://summary.example/v1"
 	cfg.Summarizer.APIKey = "summary-key"
-	cfg.Summarizer.BatchSize = 71
+	cfg.Summarizer.ReprocessBatchSize = 71
 	cfg.Summarizer.ReflectBatchSize = 72
 	cfg.Summarizer.ReflectLLMBatchSize = 73
 	cfg.Summarizer.LifecycleReviewBatchSize = 74

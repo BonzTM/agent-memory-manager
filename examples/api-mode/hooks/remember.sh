@@ -6,4 +6,5 @@ BODY="${2:?Usage: $0 <type> <body> [tight_description]}"
 TIGHT="${3:-$BODY}"
 curl -s -X POST "${AMM_API_URL}/v1/memories" \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: ${AMM_API_KEY:-}" \
   -d "{\"type\": \"${TYPE}\", \"body\": \"${BODY}\", \"tight_description\": \"${TIGHT}\"}"

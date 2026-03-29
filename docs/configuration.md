@@ -24,6 +24,8 @@ AMM loads configuration in the following order:
 |----------|-------------|---------|
 | `AMM_HTTP_ADDR` | HTTP server listen address | `:8080` |
 | `AMM_HTTP_CORS_ORIGINS` | Comma-separated list of allowed CORS origins | _(unset)_ |
+| `AMM_API_KEY` | Static API key for HTTP server authentication. When set, all HTTP API requests (except `/healthz`, `/v1/status`, `/openapi.json`, `/swagger/`) must include the key via `Authorization: Bearer <key>` or `X-API-Key: <key>` header. | _(unset)_ |
+| `AMM_API_URL` | Reserved for future use. Currently stored in configuration but not consumed by any binary. | _(unset)_ |
 
 ### Retrieval
 | Variable | Description | Default |
@@ -59,7 +61,7 @@ Set `AMM_SUMMARIZER_ENDPOINT` and `AMM_SUMMARIZER_API_KEY` to enable LLM-backed 
 | `AMM_SUMMARIZER_ENDPOINT` | Base URL for OpenAI-compatible API (e.g. `https://api.openai.com/v1`) | _(unset)_ |
 | `AMM_SUMMARIZER_API_KEY` | API key for the extraction/summarization model | _(unset)_ |
 | `AMM_SUMMARIZER_MODEL` | Model name for extraction and summarization | `gpt-4o-mini` |
-| `AMM_SUMMARIZER_BATCH_SIZE` | Number of events per reprocess/summarization batch | `20` |
+| `AMM_REPROCESS_BATCH_SIZE` | Number of events per reprocess/summarization batch | `20` |
 | `AMM_REFLECT_BATCH_SIZE` | Number of events claimed per reflect iteration | `100` |
 | `AMM_REFLECT_LLM_BATCH_SIZE` | Number of claimed reflect events sent to each LLM analysis call | `20` |
 | `AMM_COMPRESS_CHUNK_SIZE` | Events per chunk for history compression | `10` |
@@ -107,6 +109,10 @@ Full reference — all supported keys shown with their defaults:
     "addr": ":8080",
     "cors_origins": ""
   },
+  "api": {
+    "url": "",
+    "key": ""
+  },
   "retrieval": {
     "default_limit": 10,
     "ambient_limit": 5,
@@ -132,7 +138,7 @@ Full reference — all supported keys shown with their defaults:
     "review_endpoint": "https://api.openai.com/v1",
     "review_api_key": "sk-...",
     "review_model": "gpt-4o",
-    "batch_size": 20,
+    "reprocess_batch_size": 20,
     "reflect_batch_size": 100,
     "reflect_llm_batch_size": 20,
     "lifecycle_review_batch_size": 50,
@@ -169,6 +175,10 @@ db_path = "~/.amm/amm.db"
 addr = ":8080"
 # cors_origins = "*"
 
+[api]
+# key = "your-static-api-key"
+# url = "http://remote-amm:8080"
+
 [retrieval]
 default_limit = 10
 ambient_limit = 5
@@ -196,7 +206,7 @@ model = "gpt-4o-mini"
 # review_endpoint = "https://api.openai.com/v1"
 # review_api_key = "sk-..."
 # review_model = "gpt-4o"
-batch_size = 20
+reprocess_batch_size = 20
 reflect_batch_size = 100
 reflect_llm_batch_size = 20
 lifecycle_review_batch_size = 50

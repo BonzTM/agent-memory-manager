@@ -1,22 +1,24 @@
 # Integration Guide
 
-AMM (Agent Memory Manager) integrates with agent runtimes through three primary mechanisms:
+AMM (Agent Memory Manager) integrates with agent runtimes through four primary mechanisms:
 
 1. **Hooks**: Automatic capture of interactions (events in, ambient recall out).
 2. **MCP Tools**: Explicit agent-initiated memory management for MCP-compatible runtimes.
-3. **HTTP API**: RESTful integration for networked or web-based agents.
+3. **MCP-over-HTTP**: Streamable HTTP transport for remote or containerized MCP clients.
+4. **HTTP API**: RESTful integration for networked or web-based agents.
 
 ## Integration Modes
 
-### 1. HTTP API (Networked/Cloud)
-For runtimes that prefer network communication or are not local to the AMM binary, use the HTTP API.
+### 1. HTTP API (REST / MCP-over-HTTP)
+For runtimes that prefer network communication or are not local to the AMM binary.
 
 - **Start Server**: `amm-http`
 - **When to use**: Web-based agents, multi-agent shared memory, or remote backends.
-- **Reference**: [HTTP API Reference](http-api-reference.md)
-- **Examples**: See `examples/api-mode/`.
+- **REST Endpoints**: [HTTP API Reference](http-api-reference.md)
+- **MCP Endpoint**: `/v1/mcp` (Streamable HTTP)
+- **Examples**: See `examples/api-mode/` and `deploy/sidecar/`.
 
-### 2. MCP (Model Context Protocol)
+### 2. MCP (stdio)
 For local runtimes like Claude Code or IDE-based agents.
 
 - **Start Server**: `amm-mcp`

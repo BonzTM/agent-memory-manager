@@ -52,8 +52,11 @@ AMM organizes information into five layers, from ephemeral state to durable trut
 AMM exposes its service layer through three primary adapters:
 
 1. **CLI (`amm`)**: For interactive use, shell scripts, and local administration.
-2. **MCP (`amm-mcp`)**: Implementation of the Model Context Protocol for direct integration with agent runtimes like Claude Code.
-3. **HTTP (`amm-http`)**: A RESTful API server for network-based integration and multi-agent setups.
+2. **MCP (`amm-mcp`)**: Implementation of the Model Context Protocol (stdio) for direct integration with agent runtimes.
+3. **HTTP (`amm-http`)**: A dual-purpose RESTful API and MCP-over-HTTP server.
+   - **REST API**: Standard endpoints for all service methods.
+   - **MCP-over-HTTP**: Streamable HTTP transport (using `mcp-go`) mounted at `/v1/mcp`.
+   - **Documentation**: OpenAPI 3.0 spec at `/openapi.json` and Swagger UI at `/swagger/`.
 
 ---
 

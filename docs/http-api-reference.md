@@ -6,66 +6,128 @@ AMM provides a RESTful HTTP API for integrating with agent runtimes that prefer 
 
 - **Base URL**: `http://localhost:8080/v1` (default)
 - **Content-Type**: `application/json`
-- **Authentication**: None (currently designed for local/sidecar use)
+- **Authentication**: When `AMM_API_KEY` is set, requests must include the key via `Authorization: Bearer <key>` or `X-API-Key: <key>` header.
 
-### Response Envelope
+## Authentication
 
-All successful responses are wrapped in a `data` object:
+When the `AMM_API_KEY` environment variable is set on the `amm-http` server, all API requests require authentication.
+
+**Exempt Endpoints**
+The following endpoints do not require an API key:
+- `GET /healthz`
+- `GET /v1/status`
+- `GET /openapi.json`
+- `GET /swagger/`
+
+**Passing the Key**
+Include the key in your requests using one of these headers:
+- `Authorization: Bearer <your-api-key>`
+- `X-API-Key: <your-api-key>`
+
+## OpenAPI & Swagger
+
+- **OpenAPI 3.0 Specification**: Available at `GET /openapi.json`.
+- **Swagger UI**: Interactive API documentation is available at `GET /swagger/`.
+
+## Response Envelope
+
+All successful responses are wrapped as:
 
 ```json
+{"data": <payload>}
+```
+
+All error responses are wrapped as:
+
+```json
+{"error": {"code": "<error_code>", "message": "<message>"}}
+```
+
+## MCP-over-HTTP
+
+The `/v1/mcp` endpoint exposes all AMM tools via the MCP Streamable HTTP protocol. This allows MCP-compatible clients to connect to AMM over a network instead of using stdio.
+
+**Example Configuration (Claude Code)**
+```json
 {
-  "data": {
-    "id": "mem_123",
-    "type": "fact",
-    "body": "User prefers Go"
+  "mcpServers": {
+    "amm": {
+      "url": "http://localhost:8080/v1/mcp"
+    }
   }
 }
 ```
 
-Errors are returned in an `error` object with a stable code and descriptive message:
+---
 
-```json
-{
-  "error": {
-    "code": "not_found",
-    "message": "memory with id mem_123 not found"
-  }
-}
-```
+## Route Table
 
-### Status Codes
-
-| Status | Meaning |
-|--------|---------|
-| 200 OK | Request succeeded. |
-| 201 Created | Resource created successfully. |
-| 204 No Content | Request succeeded, no response body (e.g., DELETE). |
-| 400 Bad Request | Invalid input or malformed JSON. |
-| 404 Not Found | Resource does not exist. |
-| 415 Unsupported Media Type | Content-Type header is not `application/json`. |
-| 500 Internal Server Error | An unexpected error occurred on the server. |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/healthz` | System liveness check (no auth) |
+| GET | `/openapi.json` | OpenAPI 3.0 specification (no auth) |
+| GET | `/swagger/` | Swagger UI documentation (no auth) |
+| POST | `/v1/mcp` | MCP-over-HTTP streamable endpoint |
+| GET | `/v1/status` | System statistics (no auth) |
+| POST | `/v1/events` | Ingest a single event |
+| POST | `/v1/transcripts` | Bulk ingest events |
+| POST | `/v1/memories` | Create a durable memory |
+| GET | `/v1/memories/{id}` | Get a memory by ID |
+| PATCH | `/v1/memories/{id}` | Update a memory |
+| DELETE | `/v1/memories/{id}` | Retract a memory |
+| PATCH | `/v1/memories/{id}/share` | Update privacy level |
+| POST | `/v1/recall` | Search memories |
+| POST | `/v1/explain-recall` | Breakdown of recall signals |
+| GET | `/v1/expand/{id}` | Fetch full item details |
+| POST | `/v1/describe` | Get metadata for multiple IDs |
+| POST | `/v1/projects` | Register a project |
+| GET | `/v1/projects` | List projects |
+| GET | `/v1/projects/{id}` | Get a project |
+| DELETE | `/v1/projects/{id}` | Remove a project |
+| POST | `/v1/relationships` | Create an entity relationship |
+| GET | `/v1/relationships` | List relationships |
+| GET | `/v1/relationships/{id}` | Get a relationship |
+| DELETE | `/v1/relationships/{id}` | Remove a relationship |
+| GET | `/v1/summaries/{id}` | Get a summary |
+| GET | `/v1/episodes/{id}` | Get an episode |
+| GET | `/v1/entities/{id}` | Get an entity |
+| POST | `/v1/jobs/{kind}` | Trigger a maintenance job |
+| POST | `/v1/init` | Initialize database |
+| POST | `/v1/history` | Query raw history |
+| GET | `/v1/policies` | List ingestion policies |
+| POST | `/v1/policies` | Add an ingestion policy |
+| DELETE | `/v1/policies/{id}` | Remove a policy |
+| POST | `/v1/repair` | Run integrity checks |
+| POST | `/v1/reset-derived` | Purge derived data |
 
 ---
 
 ## Health & System
 
+
 ### GET /healthz
 Check if the server is alive.
 
 **Response**
-- `status`: "ok"
+- `data.status`: `"ok"`
+
+Example:
+
+```json
+{"data":{"status":"ok"}}
+```
 
 ### GET /v1/status
 Get system statistics and status.
 
 **Response**
-- `db_path`: Path to the database file.
-- `initialized`: Boolean status.
-- `event_count`: Total events ingested.
-- `memory_count`: Total durable memories.
-- `summary_count`: Total summaries.
-- `episode_count`: Total episodes.
-- `entity_count`: Total entities in graph.
+- `data.db_path`: Path to the database file.
+- `data.initialized`: Boolean status.
+- `data.event_count`: Total events ingested.
+- `data.memory_count`: Total durable memories.
+- `data.summary_count`: Total summaries.
+- `data.episode_count`: Total episodes.
+- `data.entity_count`: Total entities in graph.
 
 ---
 

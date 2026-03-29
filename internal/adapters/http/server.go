@@ -8,6 +8,7 @@ import (
 	nethttp "net/http"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
+	mcpserver "github.com/mark3labs/mcp-go/server"
 )
 
 type Server struct {
@@ -15,11 +16,13 @@ type Server struct {
 	server      *nethttp.Server
 	addr        string
 	corsOrigins string
+	mcpHandler  *mcpserver.StreamableHTTPServer
 }
 
 type Config struct {
 	Addr        string
 	CORSOrigins string
+	APIKey      string
 }
 
 func NewServer(svc core.Service, cfg Config) *Server {
@@ -27,14 +30,24 @@ func NewServer(svc core.Service, cfg Config) *Server {
 		cfg.Addr = ":8080"
 	}
 
-	s := &Server{svc: svc, addr: cfg.Addr, corsOrigins: cfg.CORSOrigins}
+	if cfg.APIKey == "" {
+		slog.Info("api key auth disabled, server is open")
+	} else {
+		slog.Info("api key auth enabled")
+	}
+
+	mcpSrv := newMCPBridge(svc, "1.0.0")
+	mcpHandler := mcpserver.NewStreamableHTTPServer(mcpSrv)
+
+	s := &Server{svc: svc, addr: cfg.Addr, corsOrigins: cfg.CORSOrigins, mcpHandler: mcpHandler}
 	mux := nethttp.NewServeMux()
 	s.registerRoutes(mux)
 
-	handler := requestLogging(contentTypeJSON(mux))
+	handler := apiKeyAuth(cfg.APIKey)(contentTypeJSON(mux))
 	if cfg.CORSOrigins != "" {
-		handler = requestLogging(cors(cfg.CORSOrigins)(contentTypeJSON(mux)))
+		handler = cors(cfg.CORSOrigins)(handler)
 	}
+	handler = requestLogging(handler)
 
 	s.server = &nethttp.Server{
 		Addr:    cfg.Addr,
@@ -44,6 +57,11 @@ func NewServer(svc core.Service, cfg Config) *Server {
 }
 
 func (s *Server) registerRoutes(mux *nethttp.ServeMux) {
+	mux.Handle("/v1/mcp", s.mcpHandler)
+	mux.Handle("/v1/mcp/", s.mcpHandler)
+	mux.HandleFunc("GET /openapi.json", s.handleOpenAPISpec)
+	mux.Handle("GET /swagger/", s.handleSwaggerUI())
+
 	mux.HandleFunc("POST /v1/init", s.handleInit)
 	mux.HandleFunc("POST /v1/events", s.handleIngestEvent)
 	mux.HandleFunc("POST /v1/transcripts", s.handleIngestTranscript)

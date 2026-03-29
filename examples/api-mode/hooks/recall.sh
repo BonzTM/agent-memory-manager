@@ -6,4 +6,5 @@ AMM_API_URL="${AMM_API_URL:-http://localhost:8080}"
 QUERY="${1:?Usage: $0 <query>}"
 curl -s -X POST "${AMM_API_URL}/v1/recall" \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: ${AMM_API_KEY:-}" \
   -d "{\"query\": \"${QUERY}\", \"opts\": {\"mode\": \"ambient\", \"limit\": 20}}"

@@ -105,7 +105,7 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	summarizer := buildSummarizer(cfg)
 	svc := service.New(repo, storagePath, summarizer, buildEmbeddingProvider(cfg))
 	svc.SetIntelligenceProvider(buildIntelligenceProvider(cfg, summarizer))
-	svc.SetReprocessBatchSize(cfg.Summarizer.BatchSize)
+	svc.SetReprocessBatchSize(cfg.Summarizer.ReprocessBatchSize)
 	svc.SetReflectBatchSize(cfg.Summarizer.ReflectBatchSize)
 	svc.SetReflectLLMBatchSize(cfg.Summarizer.ReflectLLMBatchSize)
 	svc.SetLifecycleReviewBatchSize(cfg.Summarizer.LifecycleReviewBatchSize)

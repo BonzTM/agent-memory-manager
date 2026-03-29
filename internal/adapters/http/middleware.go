@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"log/slog"
 	"mime"
 	nethttp "net/http"
@@ -16,6 +17,12 @@ type statusCapturingResponseWriter struct {
 func (w *statusCapturingResponseWriter) WriteHeader(statusCode int) {
 	w.status = statusCode
 	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *statusCapturingResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(nethttp.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func requestLogging(next nethttp.Handler) nethttp.Handler {
@@ -34,6 +41,11 @@ func requestLogging(next nethttp.Handler) nethttp.Handler {
 
 func contentTypeJSON(next nethttp.Handler) nethttp.Handler {
 	return nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/mcp") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		switch r.Method {
 		case nethttp.MethodPost, nethttp.MethodPatch, nethttp.MethodPut:
 			mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -73,6 +85,63 @@ func cors(origins string) func(nethttp.Handler) nethttp.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func apiKeyAuth(key string) func(nethttp.Handler) nethttp.Handler {
+	if key == "" {
+		return func(next nethttp.Handler) nethttp.Handler {
+			return next
+		}
+	}
+
+	return func(next nethttp.Handler) nethttp.Handler {
+		return nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
+			if r.Method == nethttp.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if r.URL.Path == "/healthz" || r.URL.Path == "/v1/status" || r.URL.Path == "/openapi.json" || strings.HasPrefix(r.URL.Path, "/swagger/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			provided := bearerToken(r.Header.Get("Authorization"))
+			if provided == "" {
+				provided = strings.TrimSpace(r.Header.Get("X-API-Key"))
+			}
+
+			if provided == "" {
+				slog.Warn("auth rejected: missing API key",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"remote_addr", r.RemoteAddr,
+				)
+				writeError(w, nethttp.StatusUnauthorized, "unauthorized", "API key required")
+				return
+			}
+
+			if subtle.ConstantTimeCompare([]byte(provided), []byte(key)) != 1 {
+				slog.Warn("auth rejected: invalid API key",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"remote_addr", r.RemoteAddr,
+				)
+				writeError(w, nethttp.StatusUnauthorized, "unauthorized", "invalid API key")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func bearerToken(authHeader string) string {
+	authHeader = strings.TrimSpace(authHeader)
+	if len(authHeader) <= 7 || !strings.EqualFold(authHeader[:7], "bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(authHeader[7:])
 }
 
 func parseOrigins(origins string) []string {

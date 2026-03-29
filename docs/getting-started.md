@@ -99,11 +99,25 @@ amm recall "programming language preferences"
 ```
 
 ### Starting the HTTP Server
-If you want to use the REST API, start the HTTP adapter:
+If you want to use the REST API or MCP-over-HTTP, start the HTTP adapter:
 ```bash
 amm-http
 # Server starts on :8080 by default
 ```
+
+#### Securing the Server
+To secure the HTTP server, set the `AMM_API_KEY` environment variable. When set, all requests (except health, status, and OpenAPI docs) must include this key in the header.
+
+```bash
+# Generate a secure key
+export AMM_API_KEY=$(openssl rand -base64 32)
+# Start the server
+amm-http
+
+# In another terminal, test with authentication:
+curl -H "Authorization: Bearer $AMM_API_KEY" http://localhost:8080/v1/policies
+```
+
 Test status with curl:
 ```bash
 curl http://localhost:8080/v1/status

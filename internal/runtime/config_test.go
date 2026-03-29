@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-func TestDefaultConfig_SetsSummarizerBatchSize(t *testing.T) {
+func TestDefaultConfig_SetsReprocessBatchSize(t *testing.T) {
 	cfg := DefaultConfig()
-	if cfg.Summarizer.BatchSize != defaultSummarizerBatchSize {
-		t.Fatalf("expected default batch size %d, got %d", defaultSummarizerBatchSize, cfg.Summarizer.BatchSize)
+	if cfg.Summarizer.ReprocessBatchSize != defaultReprocessBatchSize {
+		t.Fatalf("expected default batch size %d, got %d", defaultReprocessBatchSize, cfg.Summarizer.ReprocessBatchSize)
 	}
 }
 
@@ -19,12 +19,12 @@ func TestDefaultConfig_SetsDefaultHTTPAddr(t *testing.T) {
 	}
 }
 
-func TestConfigFromEnv_OverridesSummarizerBatchSize(t *testing.T) {
-	t.Setenv("AMM_SUMMARIZER_BATCH_SIZE", "30")
+func TestConfigFromEnv_OverridesReprocessBatchSize(t *testing.T) {
+	t.Setenv("AMM_REPROCESS_BATCH_SIZE", "30")
 
 	cfg := ConfigFromEnv(DefaultConfig())
-	if cfg.Summarizer.BatchSize != 30 {
-		t.Fatalf("expected env override batch size 30, got %d", cfg.Summarizer.BatchSize)
+	if cfg.Summarizer.ReprocessBatchSize != 30 {
+		t.Fatalf("expected env override batch size 30, got %d", cfg.Summarizer.ReprocessBatchSize)
 	}
 }
 
@@ -68,12 +68,12 @@ func TestLoadConfig_ParsesHTTPToml(t *testing.T) {
 	}
 }
 
-func TestConfigFromEnv_IgnoresInvalidSummarizerBatchSize(t *testing.T) {
-	t.Setenv("AMM_SUMMARIZER_BATCH_SIZE", "0")
+func TestConfigFromEnv_IgnoresInvalidReprocessBatchSize(t *testing.T) {
+	t.Setenv("AMM_REPROCESS_BATCH_SIZE", "0")
 
 	cfg := ConfigFromEnv(DefaultConfig())
-	if cfg.Summarizer.BatchSize != defaultSummarizerBatchSize {
-		t.Fatalf("expected invalid env batch size to keep default %d, got %d", defaultSummarizerBatchSize, cfg.Summarizer.BatchSize)
+	if cfg.Summarizer.ReprocessBatchSize != defaultReprocessBatchSize {
+		t.Fatalf("expected invalid env batch size to keep default %d, got %d", defaultReprocessBatchSize, cfg.Summarizer.ReprocessBatchSize)
 	}
 }
 
@@ -244,6 +244,59 @@ func TestConfigFromEnv_OverridesEmbeddingConfig(t *testing.T) {
 	}
 	if cfg.Embeddings.Model != "embed-test" {
 		t.Fatalf("expected model embed-test, got %q", cfg.Embeddings.Model)
+	}
+}
+
+func TestDefaultConfig_APIConfigEmpty(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.API.URL != "" {
+		t.Fatalf("expected empty API URL by default, got %q", cfg.API.URL)
+	}
+	if cfg.API.Key != "" {
+		t.Fatalf("expected empty API key by default, got %q", cfg.API.Key)
+	}
+}
+
+func TestConfigFromEnv_OverridesAPIConfig(t *testing.T) {
+	t.Setenv("AMM_API_URL", "http://localhost:8080")
+	t.Setenv("AMM_API_KEY", "test-key-123")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.API.URL != "http://localhost:8080" {
+		t.Fatalf("expected API URL http://localhost:8080, got %q", cfg.API.URL)
+	}
+	if cfg.API.Key != "test-key-123" {
+		t.Fatalf("expected API key test-key-123, got %q", cfg.API.Key)
+	}
+}
+
+func TestConfigFromEnv_IgnoresEmptyAPIConfig(t *testing.T) {
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.API.URL != "" {
+		t.Fatalf("expected empty API URL when env not set, got %q", cfg.API.URL)
+	}
+	if cfg.API.Key != "" {
+		t.Fatalf("expected empty API key when env not set, got %q", cfg.API.Key)
+	}
+}
+
+func TestLoadConfig_ParsesAPIToml(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	content := []byte("[api]\nurl = \"http://remote:8080\"\nkey = \"toml-key\"\n")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("expected TOML config to load, got error: %v", err)
+	}
+	if cfg.API.URL != "http://remote:8080" {
+		t.Fatalf("expected TOML API URL http://remote:8080, got %q", cfg.API.URL)
+	}
+	if cfg.API.Key != "toml-key" {
+		t.Fatalf("expected TOML API key toml-key, got %q", cfg.API.Key)
 	}
 }
 

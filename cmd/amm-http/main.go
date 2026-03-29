@@ -32,6 +32,7 @@ func main() {
 	server := httpapi.NewServer(svc, httpapi.Config{
 		Addr:        cfg.HTTP.Addr,
 		CORSOrigins: cfg.HTTP.CORSOrigins,
+		APIKey:      cfg.API.Key,
 	})
 
 	errCh := make(chan error, 1)

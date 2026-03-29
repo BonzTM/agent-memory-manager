@@ -54,8 +54,8 @@ func TestDefaultConfig_AllDefaults(t *testing.T) {
 		t.Fatalf("expected all maintenance flags enabled by default, got %+v", cfg.Maintenance)
 	}
 
-	if cfg.Summarizer.BatchSize != defaultSummarizerBatchSize {
-		t.Fatalf("expected default summarizer batch size %d, got %d", defaultSummarizerBatchSize, cfg.Summarizer.BatchSize)
+	if cfg.Summarizer.ReprocessBatchSize != defaultReprocessBatchSize {
+		t.Fatalf("expected default summarizer batch size %d, got %d", defaultReprocessBatchSize, cfg.Summarizer.ReprocessBatchSize)
 	}
 	if cfg.Summarizer.ReflectBatchSize != defaultReflectBatchSize {
 		t.Fatalf("expected default reflect batch size %d, got %d", defaultReflectBatchSize, cfg.Summarizer.ReflectBatchSize)
@@ -137,7 +137,7 @@ func TestLoadConfig_JSONMergesValuesWithDefaults(t *testing.T) {
 			"review_endpoint": "https://review.example/v1",
 			"review_api_key": "review-key",
 			"review_model": "review-model",
-			"batch_size": 31,
+			"reprocess_batch_size": 31,
 			"reflect_batch_size": 41,
 			"reflect_llm_batch_size": 19,
 			"lifecycle_review_batch_size": 23,
@@ -184,7 +184,7 @@ func TestLoadConfig_JSONMergesValuesWithDefaults(t *testing.T) {
 	if cfg.Summarizer.ReviewEndpoint != "https://review.example/v1" || cfg.Summarizer.ReviewAPIKey != "review-key" || cfg.Summarizer.ReviewModel != "review-model" {
 		t.Fatalf("unexpected review routing config: %+v", cfg.Summarizer)
 	}
-	if cfg.Summarizer.BatchSize != 31 || cfg.Summarizer.ReflectBatchSize != 41 || cfg.Summarizer.ReflectLLMBatchSize != 19 || cfg.Summarizer.LifecycleReviewBatchSize != 23 {
+	if cfg.Summarizer.ReprocessBatchSize != 31 || cfg.Summarizer.ReflectBatchSize != 41 || cfg.Summarizer.ReflectLLMBatchSize != 19 || cfg.Summarizer.LifecycleReviewBatchSize != 23 {
 		t.Fatalf("unexpected summarizer batch config: %+v", cfg.Summarizer)
 	}
 	if cfg.Summarizer.CompressChunkSize != 8 || cfg.Summarizer.CompressMaxEvents != 199 || cfg.Summarizer.CompressBatchSize != 17 || cfg.Summarizer.TopicBatchSize != 13 || cfg.Summarizer.EmbeddingBatchSize != 77 {
@@ -230,7 +230,7 @@ model = "toml-model"
 review_endpoint = "https://review.toml/v1"
 review_api_key = "toml-review-key"
 review_model = "toml-review-model"
-batch_size = 44
+ reprocess_batch_size = 44
 reflect_batch_size = 55
 reflect_llm_batch_size = 12
 lifecycle_review_batch_size = 28
@@ -278,7 +278,7 @@ cors_origins = "https://a.example,https://b.example"
 	if cfg.Summarizer.ReviewEndpoint != "https://review.toml/v1" || cfg.Summarizer.ReviewAPIKey != "toml-review-key" || cfg.Summarizer.ReviewModel != "toml-review-model" {
 		t.Fatalf("unexpected review routing config: %+v", cfg.Summarizer)
 	}
-	if cfg.Summarizer.BatchSize != 44 || cfg.Summarizer.ReflectBatchSize != 55 || cfg.Summarizer.ReflectLLMBatchSize != 12 || cfg.Summarizer.LifecycleReviewBatchSize != 28 {
+	if cfg.Summarizer.ReprocessBatchSize != 44 || cfg.Summarizer.ReflectBatchSize != 55 || cfg.Summarizer.ReflectLLMBatchSize != 12 || cfg.Summarizer.LifecycleReviewBatchSize != 28 {
 		t.Fatalf("unexpected summarizer batch config: %+v", cfg.Summarizer)
 	}
 	if cfg.Summarizer.CompressChunkSize != 6 || cfg.Summarizer.CompressMaxEvents != 222 || cfg.Summarizer.CompressBatchSize != 16 || cfg.Summarizer.TopicBatchSize != 11 || cfg.Summarizer.EmbeddingBatchSize != 88 {
@@ -327,7 +327,7 @@ func TestConfigFromEnv_OverridesAllFields(t *testing.T) {
 		"AMM_SUMMARIZER_ENDPOINT":                "https://summary.env/v1",
 		"AMM_SUMMARIZER_API_KEY":                 "summary-env-key",
 		"AMM_SUMMARIZER_MODEL":                   "summary-env-model",
-		"AMM_SUMMARIZER_BATCH_SIZE":              "90",
+		"AMM_REPROCESS_BATCH_SIZE":                "90",
 		"AMM_REVIEW_ENDPOINT":                    "https://review.env/v1",
 		"AMM_REVIEW_API_KEY":                     "review-env-key",
 		"AMM_REVIEW_MODEL":                       "review-env-model",
@@ -372,7 +372,7 @@ func TestConfigFromEnv_OverridesAllFields(t *testing.T) {
 	if cfg.Summarizer.ReviewEndpoint != "https://review.env/v1" || cfg.Summarizer.ReviewAPIKey != "review-env-key" || cfg.Summarizer.ReviewModel != "review-env-model" {
 		t.Fatalf("unexpected review routing config: %+v", cfg.Summarizer)
 	}
-	if cfg.Summarizer.BatchSize != 90 || cfg.Summarizer.ReflectBatchSize != 80 || cfg.Summarizer.ReflectLLMBatchSize != 11 || cfg.Summarizer.LifecycleReviewBatchSize != 18 {
+	if cfg.Summarizer.ReprocessBatchSize != 90 || cfg.Summarizer.ReflectBatchSize != 80 || cfg.Summarizer.ReflectLLMBatchSize != 11 || cfg.Summarizer.LifecycleReviewBatchSize != 18 {
 		t.Fatalf("unexpected summarizer batch config: %+v", cfg.Summarizer)
 	}
 	if cfg.Summarizer.CompressChunkSize != 5 || cfg.Summarizer.CompressMaxEvents != 155 || cfg.Summarizer.CompressBatchSize != 14 || cfg.Summarizer.TopicBatchSize != 9 || cfg.Summarizer.EmbeddingBatchSize != 66 {
@@ -409,7 +409,7 @@ func TestConfigFromEnv_InvalidAndEmptyValuesDoNotOverride(t *testing.T) {
 	base.Summarizer.ReviewEndpoint = "https://base-review"
 	base.Summarizer.ReviewAPIKey = "base-review-key"
 	base.Summarizer.ReviewModel = "base-review-model"
-	base.Summarizer.BatchSize = 29
+	base.Summarizer.ReprocessBatchSize = 29
 	base.Summarizer.ReflectBatchSize = 39
 	base.Summarizer.ReflectLLMBatchSize = 49
 	base.Summarizer.LifecycleReviewBatchSize = 59
@@ -443,7 +443,7 @@ func TestConfigFromEnv_InvalidAndEmptyValuesDoNotOverride(t *testing.T) {
 		"AMM_SUMMARIZER_ENDPOINT":                "",
 		"AMM_SUMMARIZER_API_KEY":                 "",
 		"AMM_SUMMARIZER_MODEL":                   "",
-		"AMM_SUMMARIZER_BATCH_SIZE":              "0",
+		"AMM_REPROCESS_BATCH_SIZE":                "0",
 		"AMM_REVIEW_ENDPOINT":                    "",
 		"AMM_REVIEW_API_KEY":                     "",
 		"AMM_REVIEW_MODEL":                       "",
@@ -494,7 +494,7 @@ func TestConfigFromEnv_InvalidAndEmptyValuesDoNotOverride(t *testing.T) {
 	if cfg.Summarizer.ReviewEndpoint != "https://base-review" || cfg.Summarizer.ReviewAPIKey != "base-review-key" || cfg.Summarizer.ReviewModel != "base-review-model" {
 		t.Fatalf("unexpected review routing config after invalid env: %+v", cfg.Summarizer)
 	}
-	if cfg.Summarizer.BatchSize != 29 || cfg.Summarizer.ReflectBatchSize != 39 || cfg.Summarizer.ReflectLLMBatchSize != 49 || cfg.Summarizer.LifecycleReviewBatchSize != 59 {
+	if cfg.Summarizer.ReprocessBatchSize != 29 || cfg.Summarizer.ReflectBatchSize != 39 || cfg.Summarizer.ReflectLLMBatchSize != 49 || cfg.Summarizer.LifecycleReviewBatchSize != 59 {
 		t.Fatalf("unexpected summarizer batch config after invalid env: %+v", cfg.Summarizer)
 	}
 	if cfg.Summarizer.CompressChunkSize != 69 || cfg.Summarizer.CompressMaxEvents != 79 || cfg.Summarizer.CompressBatchSize != 89 || cfg.Summarizer.TopicBatchSize != 99 || cfg.Summarizer.EmbeddingBatchSize != 109 {
@@ -528,7 +528,7 @@ func TestLoadConfigWithEnv_HomeConfigAndEnvPrecedence(t *testing.T) {
 			"postgres_dsn": "postgres://file-user:file-pass@localhost/amm"
 		},
 		"summarizer": {
-			"batch_size": 33
+			"reprocess_batch_size": 33
 		},
 		"http": {
 			"addr": "127.0.0.1:7000",
@@ -542,7 +542,7 @@ func TestLoadConfigWithEnv_HomeConfigAndEnvPrecedence(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("AMM_DB_PATH", "/tmp/from-env.db")
 	t.Setenv("AMM_STORAGE_BACKEND", "sqlite")
-	t.Setenv("AMM_SUMMARIZER_BATCH_SIZE", "54")
+	t.Setenv("AMM_REPROCESS_BATCH_SIZE", "54")
 	t.Setenv("AMM_HTTP_ADDR", "127.0.0.1:8088")
 	t.Setenv("AMM_HTTP_CORS_ORIGINS", "https://env.example")
 
@@ -557,8 +557,8 @@ func TestLoadConfigWithEnv_HomeConfigAndEnvPrecedence(t *testing.T) {
 	if cfg.Storage.PostgresDSN != "postgres://file-user:file-pass@localhost/amm" {
 		t.Fatalf("expected DSN from file to remain, got %q", cfg.Storage.PostgresDSN)
 	}
-	if cfg.Summarizer.BatchSize != 54 {
-		t.Fatalf("expected env batch size to win, got %d", cfg.Summarizer.BatchSize)
+	if cfg.Summarizer.ReprocessBatchSize != 54 {
+		t.Fatalf("expected env batch size to win, got %d", cfg.Summarizer.ReprocessBatchSize)
 	}
 	if cfg.HTTP.Addr != "127.0.0.1:8088" || cfg.HTTP.CORSOrigins != "https://env.example" {
 		t.Fatalf("expected env HTTP values to win, got %+v", cfg.HTTP)

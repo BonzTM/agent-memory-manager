@@ -2,6 +2,24 @@
 
 This directory contains examples of how to interact with the Agent Memory Manager (AMM) via its HTTP API instead of the binary CLI.
 
+## Integration patterns
+
+API mode now supports two integration paths:
+
+1. **REST hooks** — curl-based scripts that call endpoints like `/v1/recall`, `/v1/events`, and `/v1/memories`.
+2. **MCP-over-HTTP** — MCP-capable runtimes such as Claude Code can connect directly with:
+   ```json
+   {
+     "mcpServers": {
+       "amm-http": {
+         "url": "http://localhost:8080/v1/mcp"
+       }
+     }
+   }
+   ```
+
+MCP-over-HTTP is the recommended approach for MCP-capable runtimes.
+
 ## When to use API-Mode
 
 - **Remote Server**: Running AMM on a centralized server for multiple agents.
@@ -21,6 +39,9 @@ This directory contains examples of how to interact with the Agent Memory Manage
 The examples here use the following environment variable:
 
 - `AMM_API_URL`: The base URL of the AMM HTTP API. Defaults to `http://localhost:8080`.
+- `AMM_API_KEY`: Optional server-side static key. When set, send `Authorization: Bearer <key>` with requests.
+
+OpenAPI docs are available at `/openapi.json`, and Swagger UI is available at `/swagger/`.
 
 ## Quick Comparison
 
@@ -58,3 +79,5 @@ curl -s -X POST "http://localhost:8080/v1/memories" \
 - `claude-code/`: Configuration and hooks for Claude Code.
 - `codex/`: Python-based hooks for Codex.
 - `opencode/`: Plugin configuration for OpenCode.
+
+For a sidecar deployment example, see [`../../deploy/sidecar/`](../../deploy/sidecar/).

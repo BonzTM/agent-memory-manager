@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	defaultSummarizerBatchSize             = 20
+	defaultReprocessBatchSize              = 20
 	defaultReflectBatchSize                = 100
 	defaultReflectLLMBatchSize             = 20
 	defaultLifecycleReviewBatchSize        = 50
@@ -36,6 +36,15 @@ type Config struct {
 	Summarizer  SummarizerConfig  `json:"summarizer"`
 	Embeddings  EmbeddingsConfig  `json:"embeddings"`
 	HTTP        HTTPConfig        `json:"http"`
+	API         APIConfig         `json:"api"`
+}
+
+// APIConfig controls remote API client mode. When URL is set, CLI and MCP
+// binaries act as HTTP clients to a remote amm-http server instead of
+// opening a local database.
+type APIConfig struct {
+	URL string `json:"url"` // Remote amm-http server base URL (e.g. http://localhost:8080)
+	Key string `json:"key"` // API key for authenticating with the remote server
 }
 
 type CompressionConfig struct {
@@ -54,7 +63,7 @@ type SummarizerConfig struct {
 	ReviewEndpoint                  string  `json:"review_endpoint"`
 	ReviewAPIKey                    string  `json:"review_api_key"`
 	ReviewModel                     string  `json:"review_model"`
-	BatchSize                       int     `json:"batch_size"`
+	ReprocessBatchSize              int     `json:"reprocess_batch_size"`
 	ReflectBatchSize                int     `json:"reflect_batch_size"`
 	ReflectLLMBatchSize             int     `json:"reflect_llm_batch_size"`
 	LifecycleReviewBatchSize        int     `json:"lifecycle_review_batch_size"`
@@ -133,7 +142,7 @@ func DefaultConfig() Config {
 			EscalationDeterministicMaxChars: defaultEscalationDeterministicMaxChars,
 		},
 		Summarizer: SummarizerConfig{
-			BatchSize:                       defaultSummarizerBatchSize,
+			ReprocessBatchSize:              defaultReprocessBatchSize,
 			ReflectBatchSize:                defaultReflectBatchSize,
 			ReflectLLMBatchSize:             defaultReflectLLMBatchSize,
 			LifecycleReviewBatchSize:        defaultLifecycleReviewBatchSize,
@@ -263,9 +272,9 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			cfg.Summarizer.APIKey = val
 		case "summarizer.model":
 			cfg.Summarizer.Model = val
-		case "summarizer.batch_size":
+		case "summarizer.reprocess_batch_size":
 			if n, err := strconv.Atoi(val); err == nil && n > 0 {
-				cfg.Summarizer.BatchSize = n
+				cfg.Summarizer.ReprocessBatchSize = n
 			}
 		case "summarizer.review_endpoint":
 			cfg.Summarizer.ReviewEndpoint = val
@@ -325,6 +334,10 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			cfg.HTTP.Addr = val
 		case "http.cors_origins":
 			cfg.HTTP.CORSOrigins = val
+		case "api.url":
+			cfg.API.URL = val
+		case "api.key":
+			cfg.API.Key = val
 		}
 	}
 	applyConfigDefaults(cfg)
@@ -372,7 +385,7 @@ func LoadConfigWithEnv() Config {
 //	AMM_SUMMARIZER_ENDPOINT -> Summarizer.Endpoint
 //	AMM_SUMMARIZER_API_KEY -> Summarizer.APIKey
 //	AMM_SUMMARIZER_MODEL -> Summarizer.Model
-//	AMM_SUMMARIZER_BATCH_SIZE -> Summarizer.BatchSize
+//	AMM_REPROCESS_BATCH_SIZE -> Summarizer.ReprocessBatchSize
 //	AMM_COMPRESS_CHUNK_SIZE -> Summarizer.CompressChunkSize
 //	AMM_COMPRESS_MAX_EVENTS -> Summarizer.CompressMaxEvents
 //	AMM_COMPRESS_BATCH_SIZE -> Summarizer.CompressBatchSize
@@ -386,6 +399,8 @@ func LoadConfigWithEnv() Config {
 //	AMM_EMBEDDINGS_MODEL -> Embeddings.Model
 //	AMM_HTTP_ADDR -> HTTP.Addr
 //	AMM_HTTP_CORS_ORIGINS -> HTTP.CORSOrigins
+//	AMM_API_URL -> API.URL
+//	AMM_API_KEY -> API.Key
 func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_DB_PATH"); v != "" {
 		base.Storage.DBPath = v
@@ -456,9 +471,9 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_SUMMARIZER_MODEL"); v != "" {
 		base.Summarizer.Model = v
 	}
-	if v := os.Getenv("AMM_SUMMARIZER_BATCH_SIZE"); v != "" {
+	if v := os.Getenv("AMM_REPROCESS_BATCH_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			base.Summarizer.BatchSize = n
+			base.Summarizer.ReprocessBatchSize = n
 		}
 	}
 	if v := os.Getenv("AMM_REVIEW_ENDPOINT"); v != "" {
@@ -537,6 +552,12 @@ func ConfigFromEnv(base Config) Config {
 	}
 	if v := os.Getenv("AMM_HTTP_CORS_ORIGINS"); v != "" {
 		base.HTTP.CORSOrigins = v
+	}
+	if v := os.Getenv("AMM_API_URL"); v != "" {
+		base.API.URL = v
+	}
+	if v := os.Getenv("AMM_API_KEY"); v != "" {
+		base.API.Key = v
 	}
 	applyConfigDefaults(&base)
 	return base

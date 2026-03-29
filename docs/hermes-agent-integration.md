@@ -15,13 +15,16 @@ That means the integration contract stays simple:
 
 Use Hermes and amm in three layers:
 
-1. **MCP** for explicit agent-controlled memory access
+1. **MCP** for explicit agent-controlled memory access (via stdio or HTTP)
 2. **Hooks** for transparent event capture and ambient recall on the hot path
 3. **Cron or scheduled jobs** for reflection, compression, and heavier maintenance
 
 ## 1. Register `amm-mcp`
 
-Hermes supports MCP, so the lowest-friction explicit integration is to register `amm-mcp` in your Hermes configuration.
+Hermes supports MCP, so the lowest-friction explicit integration is to register the AMM MCP server.
+
+### Option A: MCP-over-stdio (Local)
+Register `amm-mcp` directly in your Hermes configuration.
 
 ```yaml
 mcp:
@@ -31,6 +34,18 @@ mcp:
       env:
         AMM_DB_PATH: /home/you/.amm/amm.db
 ```
+
+### Option B: MCP-over-HTTP (Remote/Sidecar)
+When running AMM as a sidecar or remote server (via `amm-http`), Hermes can connect via the MCP Streamable HTTP protocol.
+
+```yaml
+mcp:
+  servers:
+    amm:
+      url: http://localhost:8080/v1/mcp
+```
+
+This is the recommended method for Kubernetes deployments using the sidecar pattern (see `deploy/sidecar/`). If `AMM_API_KEY` is set on the server, ensure the client includes the appropriate authentication headers.
 
 Once that is in place, Hermes can call tools such as:
 
