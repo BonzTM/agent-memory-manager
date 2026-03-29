@@ -10,7 +10,6 @@ import (
 
 const (
 	sessionTraceArchiveMaxAge = 7 * 24 * time.Hour
-	sessionTraceLowImportance = 0.3
 )
 
 func (s *AMMService) ArchiveLowSalienceSessionTraces(ctx context.Context) (int, error) {
@@ -33,9 +32,6 @@ func (s *AMMService) ArchiveLowSalienceSessionTraces(ctx context.Context) (int, 
 	for i := range memories {
 		mem := &memories[i]
 
-		if mem.Importance >= sessionTraceLowImportance {
-			continue
-		}
 		if now.Sub(lastTouchTime(mem)) <= sessionTraceArchiveMaxAge {
 			continue
 		}
@@ -44,7 +40,7 @@ func (s *AMMService) ArchiveLowSalienceSessionTraces(ctx context.Context) (int, 
 		mem.UpdatedAt = now
 
 		if err := s.repo.UpdateMemory(ctx, mem); err != nil {
-			return archived, fmt.Errorf("archive low-salience session trace %s: %w", mem.ID, err)
+			return archived, fmt.Errorf("archive session trace %s: %w", mem.ID, err)
 		}
 		archived++
 	}

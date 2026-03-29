@@ -99,6 +99,75 @@ func TestArchiveLowSalienceSessionTraces_SkipsGlobalAndProjectMemories(t *testin
 	}
 }
 
+func TestArchiveSessionTraces_ArchivesHighImportanceAfterExpiry(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeSession,
+		SessionID:        "sess_high_importance",
+		Body:             "high importance session memory",
+		TightDescription: "high importance session",
+		Importance:       0.95,
+		Confidence:       0.9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	old := time.Now().UTC().Add(-10 * 24 * time.Hour)
+	mem.UpdatedAt = old
+	if err := repo.UpdateMemory(ctx, mem); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ExecContext(ctx, "UPDATE memories SET created_at=? WHERE id=?", old.Format(time.RFC3339), mem.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	archived, err := svc.ArchiveLowSalienceSessionTraces(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archived != 1 {
+		t.Fatalf("expected 1 archived (high-importance session memory should still expire), got %d", archived)
+	}
+
+	updated, err := repo.GetMemory(ctx, mem.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != core.MemoryStatusArchived {
+		t.Fatalf("expected archived, got %s", updated.Status)
+	}
+}
+
+func TestArchiveSessionTraces_SkipsRecentSessionMemories(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	_, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeSession,
+		SessionID:        "sess_recent",
+		Body:             "recent session memory",
+		TightDescription: "recent session",
+		Importance:       0.1,
+		Confidence:       0.8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	archived, err := svc.ArchiveLowSalienceSessionTraces(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archived != 0 {
+		t.Fatalf("expected 0 archived (recent memory should not expire), got %d", archived)
+	}
+}
+
 func TestRunJob_DispatchesArchiveKind(t *testing.T) {
 	svc, repo := testServiceAndRepo(t)
 	ctx := context.Background()
