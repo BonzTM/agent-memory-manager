@@ -239,6 +239,60 @@ func TestRepositoryMemories(t *testing.T) {
 	}
 }
 
+func TestInsertMemoryNilSlices(t *testing.T) {
+	repo, _ := testRepo(t)
+	ctx := context.Background()
+	now := nowUTC()
+
+	m := &core.Memory{
+		ID:               "mem_nil_slices",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "memory with nil slices",
+		TightDescription: "nil slices test",
+		Confidence:       0.8,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+
+	if err := repo.InsertMemory(ctx, m); err != nil {
+		t.Fatalf("InsertMemory with nil slices: %v", err)
+	}
+
+	got, err := repo.GetMemory(ctx, "mem_nil_slices")
+	if err != nil {
+		t.Fatalf("GetMemory after nil-slice insert: %v", err)
+	}
+	if got.Body != "memory with nil slices" {
+		t.Fatalf("body mismatch: %q", got.Body)
+	}
+	if got.SourceEventIDs == nil {
+		t.Fatal("expected non-nil SourceEventIDs after round-trip")
+	}
+	if len(got.SourceEventIDs) != 0 {
+		t.Fatalf("expected empty SourceEventIDs, got %v", got.SourceEventIDs)
+	}
+
+	m.Body = "updated with nil slices"
+	m.UpdatedAt = now.Add(time.Second)
+	if err := repo.UpdateMemory(ctx, m); err != nil {
+		t.Fatalf("UpdateMemory with nil slices: %v", err)
+	}
+}
+
+func TestEmptyIfNil(t *testing.T) {
+	if got := emptyIfNil(nil); got == nil || len(got) != 0 {
+		t.Fatalf("emptyIfNil(nil) = %v, want empty non-nil slice", got)
+	}
+	input := []string{"a", "b"}
+	if got := emptyIfNil(input); len(got) != 2 || got[0] != "a" {
+		t.Fatalf("emptyIfNil(non-nil) = %v, want %v", got, input)
+	}
+}
+
 func TestRepositorySummaries(t *testing.T) {
 	repo, _ := testRepo(t)
 	ctx := context.Background()

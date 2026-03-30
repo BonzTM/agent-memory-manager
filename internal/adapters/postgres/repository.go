@@ -85,6 +85,15 @@ func (r *Repository) IsInitialized(ctx context.Context) (bool, error) {
 	return ver > 0, nil
 }
 
+// emptyIfNil normalises a nil string slice to an empty slice so that
+// pq.Array produces '{}' instead of NULL, satisfying NOT NULL constraints.
+func emptyIfNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
 func marshalMapJSON(m map[string]string) []byte {
 	if m == nil {
 		return []byte(`{}`)
@@ -629,7 +638,7 @@ func (r *Repository) InsertMemory(ctx context.Context, memory *core.Memory) erro
 		memory.Confidence, memory.Importance, string(memory.PrivacyLevel), string(memory.Status),
 		memory.ObservedAt, memory.CreatedAt.UTC(), memory.UpdatedAt.UTC(), memory.ValidFrom, memory.ValidTo, memory.LastConfirmedAt,
 		memory.Supersedes, memory.SupersededBy, memory.SupersededAt,
-		pq.Array(memory.SourceEventIDs), pq.Array(memory.SourceSummaryIDs), pq.Array(memory.SourceArtifactIDs), pq.Array(memory.Tags), marshalMapJSON(memory.Metadata),
+		pq.Array(emptyIfNil(memory.SourceEventIDs)), pq.Array(emptyIfNil(memory.SourceSummaryIDs)), pq.Array(emptyIfNil(memory.SourceArtifactIDs)), pq.Array(emptyIfNil(memory.Tags)), marshalMapJSON(memory.Metadata),
 	)
 	return wrapErr("insert memory", err)
 }
@@ -728,8 +737,8 @@ func (r *Repository) UpdateMemory(ctx context.Context, memory *core.Memory) erro
 		string(memory.PrivacyLevel), string(memory.Status), memory.ObservedAt, memory.UpdatedAt.UTC(),
 		memory.ValidFrom, memory.ValidTo, memory.LastConfirmedAt,
 		memory.Supersedes, memory.SupersededBy, memory.SupersededAt,
-		pq.Array(memory.SourceEventIDs), pq.Array(memory.SourceSummaryIDs), pq.Array(memory.SourceArtifactIDs),
-		pq.Array(memory.Tags), marshalMapJSON(memory.Metadata), memory.ID,
+		pq.Array(emptyIfNil(memory.SourceEventIDs)), pq.Array(emptyIfNil(memory.SourceSummaryIDs)), pq.Array(emptyIfNil(memory.SourceArtifactIDs)),
+		pq.Array(emptyIfNil(memory.Tags)), marshalMapJSON(memory.Metadata), memory.ID,
 	)
 	return wrapErr("update memory", err)
 }
@@ -766,8 +775,8 @@ func (r *Repository) UpdateMemoriesBatch(ctx context.Context, memories []*core.M
 			string(memory.PrivacyLevel), string(memory.Status), memory.ObservedAt, memory.UpdatedAt.UTC(),
 			memory.ValidFrom, memory.ValidTo, memory.LastConfirmedAt,
 			memory.Supersedes, memory.SupersededBy, memory.SupersededAt,
-			pq.Array(memory.SourceEventIDs), pq.Array(memory.SourceSummaryIDs), pq.Array(memory.SourceArtifactIDs),
-			pq.Array(memory.Tags), marshalMapJSON(memory.Metadata), memory.ID,
+			pq.Array(emptyIfNil(memory.SourceEventIDs)), pq.Array(emptyIfNil(memory.SourceSummaryIDs)), pq.Array(emptyIfNil(memory.SourceArtifactIDs)),
+			pq.Array(emptyIfNil(memory.Tags)), marshalMapJSON(memory.Metadata), memory.ID,
 		); err != nil {
 			return wrapErr(fmt.Sprintf("update memory %s in batch", memory.ID), err)
 		}
@@ -1054,14 +1063,14 @@ func (r *Repository) InsertEntity(ctx context.Context, entity *core.Entity) erro
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO entities (id, type, canonical_name, aliases, description, metadata_json, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,NULLIF($5,''),$6::jsonb,$7,$8)`,
-		entity.ID, entity.Type, entity.CanonicalName, pq.Array(entity.Aliases), entity.Description, marshalMapJSON(entity.Metadata), entity.CreatedAt.UTC(), entity.UpdatedAt.UTC())
+		entity.ID, entity.Type, entity.CanonicalName, pq.Array(emptyIfNil(entity.Aliases)), entity.Description, marshalMapJSON(entity.Metadata), entity.CreatedAt.UTC(), entity.UpdatedAt.UTC())
 	return wrapErr("insert entity", err)
 }
 
 func (r *Repository) UpdateEntity(ctx context.Context, entity *core.Entity) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE entities SET type = $1, canonical_name = $2, aliases = $3, description = NULLIF($4,''), metadata_json = $5::jsonb, updated_at = $6
-		WHERE id = $7`, entity.Type, entity.CanonicalName, pq.Array(entity.Aliases), entity.Description, marshalMapJSON(entity.Metadata), entity.UpdatedAt.UTC(), entity.ID)
+		WHERE id = $7`, entity.Type, entity.CanonicalName, pq.Array(emptyIfNil(entity.Aliases)), entity.Description, marshalMapJSON(entity.Metadata), entity.UpdatedAt.UTC(), entity.ID)
 	return wrapErr("update entity", err)
 }
 
@@ -1749,8 +1758,8 @@ func (r *Repository) InsertEpisode(ctx context.Context, episode *core.Episode) e
 		episode.ID, episode.Title, episode.Summary, episode.TightDescription, string(episode.Scope),
 		episode.ProjectID, episode.SessionID, episode.Importance, string(episode.PrivacyLevel),
 		episode.StartedAt, episode.EndedAt, marshalSourceSpan(episode.SourceSpan),
-		pq.Array(episode.SourceSummaryIDs), pq.Array(episode.Participants), pq.Array(episode.RelatedEntities),
-		pq.Array(episode.Outcomes), pq.Array(episode.UnresolvedItems), marshalMapJSON(episode.Metadata),
+		pq.Array(emptyIfNil(episode.SourceSummaryIDs)), pq.Array(emptyIfNil(episode.Participants)), pq.Array(emptyIfNil(episode.RelatedEntities)),
+		pq.Array(emptyIfNil(episode.Outcomes)), pq.Array(emptyIfNil(episode.UnresolvedItems)), marshalMapJSON(episode.Metadata),
 		episode.CreatedAt.UTC(), episode.UpdatedAt.UTC())
 	return wrapErr("insert episode", err)
 }
