@@ -1,43 +1,673 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://amm.dev/spec/v1/mcp.tools.v1.json",
-  "title": "AMM MCP Tools Schema",
-  "description": "Tool definitions for AMM MCP server",
+  "title": "AMM MCP Tools Catalog",
+  "description": "Concrete tool definitions for the AMM MCP server",
   "version": "amm.v1",
-  "type": "object",
-  "required": ["version", "tools"],
-  "properties": {
-    "version": {
-      "type": "string",
-      "const": "amm.v1"
-    },
-    "tools": {
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/Tool"
+  "tools": [
+    {
+      "name": "amm_init",
+      "description": "Initialize the amm database",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
       }
-    }
-  },
-  "definitions": {
-    "Tool": {
-      "type": "object",
-      "required": ["name", "description", "inputSchema"],
-      "properties": {
-        "name": {
-          "type": "string",
-          "pattern": "^amm_[a-z_]+$"
+    },
+    {
+      "name": "amm_ingest_event",
+      "description": "Append a raw event to history",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "Event kind (e.g. message_user, message_assistant)"
+          },
+          "source_system": {
+            "type": "string",
+            "description": "Source system identifier"
+          },
+          "content": {
+            "type": "string",
+            "description": "Event content"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Session identifier"
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Project identifier"
+          },
+          "occurred_at": {
+            "type": "string",
+            "description": "When the event occurred (RFC3339)"
+          }
         },
-        "description": {
-          "type": "string"
+        "required": ["kind", "source_system", "content"]
+      }
+    },
+    {
+      "name": "amm_remember",
+      "description": "Commit a durable memory",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Memory type"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Scope: global, project, session"
+          },
+          "body": {
+            "type": "string",
+            "description": "Memory body"
+          },
+          "tight_description": {
+            "type": "string",
+            "description": "One-line summary"
+          },
+          "subject": {
+            "type": "string",
+            "description": "Subject of the memory"
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Project identifier"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Agent identifier"
+          }
         },
-        "inputSchema": {
-          "type": "object"
+        "required": ["type", "body", "tight_description"]
+      }
+    },
+    {
+      "name": "amm_recall",
+      "description": "Retrieve memories using various modes",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Agent identifier"
+          },
+          "explain": {
+            "type": "boolean",
+            "description": "Include score signal breakdowns in each recall item"
+          },
+          "opts": {
+            "type": "object",
+            "properties": {
+              "mode": {
+				"type": "string",
+				"enum": [
+				  "ambient",
+				  "facts",
+				  "contradictions",
+				  "episodes",
+				  "timeline",
+				  "project",
+				  "entity",
+				  "active",
+				  "history",
+				  "hybrid"
+				]
+              },
+              "project_id": {
+                "type": "string"
+              },
+              "session_id": {
+                "type": "string"
+              },
+              "agent_id": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "integer"
+              },
+              "explain": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "amm_describe",
+      "description": "Get thin descriptions of items",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["ids"]
+      }
+    },
+    {
+      "name": "amm_expand",
+      "description": "Expand an item to full detail",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID to expand"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Item kind: memory, summary, episode (defaults to 'memory' if omitted)"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Session identifier for relevance feedback"
+          },
+          "delegation_depth": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Current delegation depth for recursion control"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "amm_format_context_window",
+      "description": "Assemble deterministic context from summaries and fresh events",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "fresh_tail_count": {
+            "type": "integer"
+          },
+          "max_summary_depth": {
+            "type": "integer"
+          },
+          "include_parent_refs": {
+            "type": "boolean"
+          }
         }
       }
     },
-    "JSONSchema": {
-      "type": "object",
-      "description": "JSON Schema for tool input validation"
+    {
+      "name": "amm_history",
+      "description": "Query raw interaction history",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "opts": {
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string"
+              },
+              "project_id": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "amm_grep",
+      "description": "Search events grouped by covering summary",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "max_group_depth": {
+            "type": "integer"
+          },
+          "group_limit": {
+            "type": "integer"
+          },
+          "matches_per_group": {
+            "type": "integer"
+          }
+        },
+        "required": ["pattern"]
+      }
+    },
+    {
+      "name": "amm_get_memory",
+      "description": "Get a single memory by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "amm_jobs_run",
+      "description": "Run a maintenance job",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "Job kind to run"
+          }
+        },
+        "required": ["kind"]
+      }
+    },
+    {
+      "name": "amm_share",
+      "description": "Update a memory privacy level",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Memory ID to share"
+          },
+          "privacy": {
+            "type": "string",
+            "description": "Privacy level: private, shared, public_safe"
+          }
+        },
+        "required": ["id", "privacy"]
+      }
+    },
+    {
+      "name": "amm_explain_recall",
+      "description": "Explain why an item surfaced",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "item_id": {
+            "type": "string"
+          }
+        },
+        "required": ["query", "item_id"]
+      }
+    },
+    {
+      "name": "amm_repair",
+      "description": "Run integrity checks and repairs",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "check": {
+            "type": "boolean"
+          },
+          "fix": {
+            "type": "string",
+            "description": "What to fix: indexes, links, recall_history"
+          }
+        }
+      }
+    },
+    {
+      "name": "amm_status",
+      "description": "Get system status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "amm_ingest_transcript",
+      "description": "Bulk ingest a sequence of events",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "description": "List of events to ingest",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "description": "Event kind (e.g. message_user, message_assistant)"
+                },
+                "source_system": {
+                  "type": "string",
+                  "description": "Source system identifier"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Event content"
+                },
+                "session_id": {
+                  "type": "string",
+                  "description": "Session identifier"
+                },
+                "project_id": {
+                  "type": "string",
+                  "description": "Project identifier"
+                },
+                "occurred_at": {
+                  "type": "string",
+                  "description": "When the event occurred (RFC3339)"
+                }
+              },
+              "required": ["kind", "source_system", "content"]
+            }
+          }
+        },
+        "required": ["events"]
+      }
+    },
+    {
+      "name": "amm_update_memory",
+      "description": "Update an existing memory",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Memory ID to update"
+          },
+          "body": {
+            "type": "string",
+            "description": "Updated memory body"
+          },
+          "tight_description": {
+            "type": "string",
+            "description": "Updated one-line summary"
+          },
+          "status": {
+            "type": "string",
+            "description": "Memory status: active, superseded, archived, retracted"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "amm_policy_list",
+      "description": "List all ingestion policies",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "amm_policy_add",
+      "description": "Add an ingestion policy",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern_type": {
+            "type": "string",
+            "description": "Pattern type: kind, session, source, surface, agent, project, runtime"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Policy pattern"
+          },
+          "mode": {
+            "type": "string",
+            "description": "Ingestion mode: full, read_only, ignore"
+          },
+          "priority": {
+            "type": "integer",
+            "description": "Priority ordering (higher wins)"
+          },
+          "match_mode": {
+            "type": "string",
+            "description": "Pattern match mode: exact, glob, regex"
+          }
+        },
+        "required": ["pattern_type", "pattern", "mode"]
+      }
+    },
+    {
+      "name": "amm_policy_remove",
+      "description": "Remove an ingestion policy by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Policy ID to remove"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "amm_register_project",
+      "description": "Register a new project",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Project name"
+          },
+          "path": {
+            "type": "string",
+            "description": "Project path"
+          },
+          "description": {
+            "type": "string",
+            "description": "Project description"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "amm_get_project",
+      "description": "Get a project by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "amm_list_projects",
+      "description": "List all projects",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "amm_remove_project",
+      "description": "Remove a project by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "amm_add_relationship",
+      "description": "Add an entity relationship",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from_entity_id": {
+            "type": "string",
+            "description": "Source entity ID"
+          },
+          "to_entity_id": {
+            "type": "string",
+            "description": "Destination entity ID"
+          },
+          "relationship_type": {
+            "type": "string",
+            "description": "Relationship type"
+          }
+        },
+        "required": ["from_entity_id", "to_entity_id", "relationship_type"]
+      }
+    },
+    {
+      "name": "amm_get_relationship",
+      "description": "Get a relationship by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "amm_list_relationships",
+      "description": "List relationships",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entity_id": {
+            "type": "string",
+            "description": "Filter by entity ID"
+          },
+          "relationship_type": {
+            "type": "string",
+            "description": "Filter by relationship type"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results to return"
+          }
+        }
+      }
+    },
+    {
+      "name": "amm_remove_relationship",
+      "description": "Remove a relationship by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "amm_get_summary",
+      "description": "Get a summary by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "amm_get_episode",
+      "description": "Get an episode by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "amm_get_entity",
+      "description": "Get an entity by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "amm_forget",
+      "description": "Forget (retract) a memory by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Item ID"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "amm_reset_derived",
+      "description": "Purge all derived data while preserving events",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          }
+        },
+        "required": ["confirm"]
+      }
     }
-  }
+  ]
 }

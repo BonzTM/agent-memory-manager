@@ -1,0 +1,1283 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://amm.dev/spec/v1/payloads.schema.json",
+  "title": "AMM Payloads",
+  "description": "JSON Schema for all AMM request and response payloads",
+  "definitions": {
+    "AddRelationshipRequest": {
+      "type": "object",
+      "required": [
+        "from_entity_id",
+        "to_entity_id",
+        "relationship_type"
+      ],
+      "properties": {
+        "from_entity_id": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "relationship_type": {
+          "type": "string"
+        },
+        "to_entity_id": {
+          "type": "string"
+        }
+      }
+    },
+    "DescribeItemResponse": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "scope",
+        "tight_description",
+        "created_at"
+      ],
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "tight_description": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      }
+    },
+    "DescribeRequest": {
+      "type": "object",
+      "required": [
+        "ids"
+      ],
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "DescribeResponse": {
+      "type": "object",
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DescribeItemResponse"
+          }
+        }
+      }
+    },
+    "ExpandRequest": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "delegation_depth": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "memory",
+            "summary",
+            "episode"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      }
+    },
+    "ExpandResponse": {
+      "type": "object",
+      "properties": {
+        "children": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "episode": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "memory": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "ExplainRecallRequest": {
+      "type": "object",
+      "required": [
+        "query",
+        "item_id"
+      ],
+      "properties": {
+        "item_id": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        }
+      }
+    },
+    "ExplainRecallResponse": {
+      "type": "object",
+      "required": [
+        "explanation"
+      ],
+      "properties": {
+        "explanation": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "ForgetRequest": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "FormatContextWindowManifestEntry": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "stable_ref"
+      ],
+      "properties": {
+        "depth": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "stable_ref": {
+          "type": "string"
+        }
+      }
+    },
+    "FormatContextWindowRequest": {
+      "type": "object",
+      "properties": {
+        "fresh_tail_count": {
+          "type": "integer"
+        },
+        "include_parent_refs": {
+          "type": "boolean"
+        },
+        "max_summary_depth": {
+          "type": "integer"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      }
+    },
+    "FormatContextWindowResponse": {
+      "type": "object",
+      "required": [
+        "content",
+        "summary_count",
+        "fresh_count",
+        "est_tokens",
+        "manifest"
+      ],
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "est_tokens": {
+          "type": "integer"
+        },
+        "fresh_count": {
+          "type": "integer"
+        },
+        "manifest": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FormatContextWindowManifestEntry"
+          }
+        },
+        "summary_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "GetEntityRequest": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "GetEpisodeRequest": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "GetMemoryRequest": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "GetProjectRequest": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "GetRelationshipRequest": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "GetSummaryRequest": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "GrepGroupResponse": {
+      "type": "object",
+      "required": [
+        "matches"
+      ],
+      "properties": {
+        "matches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/GrepMatchResponse"
+          }
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "summary_id": {
+          "type": "string"
+        },
+        "summary_text": {
+          "type": "string"
+        }
+      }
+    },
+    "GrepMatchResponse": {
+      "type": "object",
+      "required": [
+        "event_id",
+        "kind",
+        "content"
+      ],
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "type": "string"
+        }
+      }
+    },
+    "GrepRequest": {
+      "type": "object",
+      "required": [
+        "pattern"
+      ],
+      "properties": {
+        "group_limit": {
+          "type": "integer"
+        },
+        "matches_per_group": {
+          "type": "integer"
+        },
+        "max_group_depth": {
+          "type": "integer"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      }
+    },
+    "GrepResponse": {
+      "type": "object",
+      "required": [
+        "pattern",
+        "total_hits",
+        "sample_limited",
+        "groups"
+      ],
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/GrepGroupResponse"
+          }
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "sample_limited": {
+          "type": "boolean"
+        },
+        "total_hits": {
+          "type": "integer"
+        }
+      }
+    },
+    "HistoryEventResponse": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "source_system",
+        "content",
+        "privacy_level",
+        "occurred_at",
+        "ingested_at"
+      ],
+      "properties": {
+        "actor_type": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ingested_at": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "occurred_at": {
+          "type": "string"
+        },
+        "privacy_level": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source_system": {
+          "type": "string"
+        },
+        "surface": {
+          "type": "string"
+        }
+      }
+    },
+    "HistoryRequest": {
+      "type": "object",
+      "properties": {
+        "after": {
+          "type": "string"
+        },
+        "before": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      }
+    },
+    "HistoryResponse": {
+      "type": "object",
+      "required": [
+        "events"
+      ],
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/HistoryEventResponse"
+          }
+        }
+      }
+    },
+    "IngestEventRequest": {
+      "type": "object",
+      "required": [
+        "kind",
+        "source_system",
+        "content"
+      ],
+      "properties": {
+        "actor_id": {
+          "type": "string"
+        },
+        "actor_type": {
+          "type": "string"
+        },
+        "agent_id": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "occurred_at": {
+          "type": "string"
+        },
+        "privacy_level": {
+          "type": "string",
+          "enum": [
+            "private",
+            "shared",
+            "public_safe"
+          ]
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source_system": {
+          "type": "string"
+        },
+        "surface": {
+          "type": "string"
+        }
+      }
+    },
+    "IngestEventResponse": {
+      "type": "object",
+      "required": [
+        "id",
+        "ingested_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ingested_at": {
+          "type": "string"
+        }
+      }
+    },
+    "IngestTranscriptRequest": {
+      "type": "object",
+      "required": [
+        "events"
+      ],
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IngestEventRequest"
+          }
+        }
+      }
+    },
+    "IngestTranscriptResponse": {
+      "type": "object",
+      "required": [
+        "ingested"
+      ],
+      "properties": {
+        "ingested": {
+          "type": "integer"
+        }
+      }
+    },
+    "ListRelationshipsRequest": {
+      "type": "object",
+      "properties": {
+        "entity_id": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "relationship_type": {
+          "type": "string"
+        }
+      }
+    },
+    "PolicyAddRequest": {
+      "type": "object",
+      "required": [
+        "pattern_type",
+        "pattern",
+        "mode"
+      ],
+      "properties": {
+        "match_mode": {
+          "type": "string",
+          "enum": [
+            "exact",
+            "glob",
+            "regex"
+          ]
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "full",
+            "read_only",
+            "ignore"
+          ]
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "pattern_type": {
+          "type": "string",
+          "enum": [
+            "kind",
+            "session",
+            "source",
+            "surface",
+            "agent",
+            "project",
+            "runtime"
+          ]
+        },
+        "priority": {
+          "type": "integer"
+        }
+      }
+    },
+    "PolicyAddResponse": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "PolicyListRequest": {
+      "type": "object"
+    },
+    "PolicyListResponse": {
+      "type": "object",
+      "required": [
+        "policies"
+      ],
+      "properties": {
+        "policies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PolicyResponse"
+          }
+        }
+      }
+    },
+    "PolicyRemoveRequest": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "PolicyResponse": {
+      "type": "object",
+      "required": [
+        "id",
+        "pattern_type",
+        "pattern",
+        "mode",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "match_mode": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "mode": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "pattern_type": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "RecallItemResponse": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "scope",
+        "score",
+        "tight_description"
+      ],
+      "properties": {
+        "confidence": {
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        },
+        "signals": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "tight_description": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      }
+    },
+    "RecallMetaResponse": {
+      "type": "object",
+      "required": [
+        "mode",
+        "query_time_ms"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "query_time_ms": {
+          "type": "integer"
+        }
+      }
+    },
+    "RecallRequest": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "agent_id": {
+          "type": "string"
+        },
+        "entity_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "explain": {
+          "type": "boolean"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ambient",
+            "facts",
+            "contradictions",
+            "episodes",
+            "timeline",
+            "project",
+            "entity",
+            "active",
+            "history",
+            "hybrid"
+          ]
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      }
+    },
+    "RecallResponse": {
+      "type": "object",
+      "required": [
+        "items",
+        "meta"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RecallItemResponse"
+          }
+        },
+        "meta": {
+          "$ref": "#/definitions/RecallMetaResponse"
+        }
+      }
+    },
+    "RegisterProjectRequest": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "RememberRequest": {
+      "type": "object",
+      "required": [
+        "type",
+        "body",
+        "tight_description"
+      ],
+      "properties": {
+        "agent_id": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "importance": {
+          "type": "number"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "privacy_level": {
+          "type": "string",
+          "enum": [
+            "private",
+            "shared",
+            "public_safe"
+          ]
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "global",
+            "project",
+            "session"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "source_event_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "subject": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tight_description": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "identity",
+            "preference",
+            "fact",
+            "decision",
+            "episode",
+            "todo",
+            "relationship",
+            "procedure",
+            "constraint",
+            "incident",
+            "artifact",
+            "summary",
+            "active_context",
+            "open_loop",
+            "assumption",
+            "contradiction"
+          ]
+        }
+      }
+    },
+    "RememberResponse": {
+      "type": "object",
+      "required": [
+        "id",
+        "created_at"
+      ],
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "RemoveProjectRequest": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "RemoveRelationshipRequest": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "RepairRequest": {
+      "type": "object",
+      "properties": {
+        "check": {
+          "type": "boolean"
+        },
+        "fix": {
+          "type": "string"
+        }
+      }
+    },
+    "RepairResponse": {
+      "type": "object",
+      "required": [
+        "checked",
+        "issues",
+        "fixed"
+      ],
+      "properties": {
+        "checked": {
+          "type": "integer"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fixed": {
+          "type": "integer"
+        },
+        "issues": {
+          "type": "integer"
+        }
+      }
+    },
+    "ResetDerivedRequest": {
+      "type": "object",
+      "required": [
+        "confirm"
+      ],
+      "properties": {
+        "confirm": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RunJobRequest": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "reflect",
+            "compress_history",
+            "consolidate_sessions",
+            "build_topic_summaries",
+            "rebuild_indexes",
+            "rebuild_indexes_full",
+            "extract_claims",
+            "enrich_memories",
+            "form_episodes",
+            "detect_contradictions",
+            "decay_stale_memory",
+            "merge_duplicates",
+            "cleanup_recall_history",
+            "reprocess",
+            "reprocess_all",
+            "lifecycle_review",
+            "cross_project_transfer",
+            "rebuild_entity_graph",
+            "archive_session_traces",
+            "purge_old_events",
+            "purge_old_jobs",
+            "expire_retrieval_cache",
+            "purge_relevance_feedback",
+            "vacuum_analyze",
+            "update_ranking_weights"
+          ]
+        }
+      }
+    },
+    "RunJobResponse": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "status"
+      ],
+      "properties": {
+        "error_text": {
+          "type": "string"
+        },
+        "finished_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      }
+    },
+    "ShareRequest": {
+      "type": "object",
+      "required": [
+        "id",
+        "privacy"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "privacy": {
+          "type": "string",
+          "enum": [
+            "private",
+            "shared",
+            "public_safe"
+          ]
+        }
+      }
+    },
+    "StatusResponse": {
+      "type": "object",
+      "required": [
+        "db_path",
+        "initialized",
+        "event_count",
+        "memory_count",
+        "summary_count",
+        "episode_count",
+        "entity_count"
+      ],
+      "properties": {
+        "db_path": {
+          "type": "string"
+        },
+        "entity_count": {
+          "type": "integer"
+        },
+        "episode_count": {
+          "type": "integer"
+        },
+        "event_count": {
+          "type": "integer"
+        },
+        "initialized": {
+          "type": "boolean"
+        },
+        "memory_count": {
+          "type": "integer"
+        },
+        "summary_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "UpdateMemoryRequest": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "id": {
+          "type": "string"
+        },
+        "importance": {
+          "type": "number"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "global",
+            "project",
+            "session"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "superseded",
+            "archived",
+            "retracted"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tight_description": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "identity",
+            "preference",
+            "fact",
+            "decision",
+            "episode",
+            "todo",
+            "relationship",
+            "procedure",
+            "constraint",
+            "incident",
+            "artifact",
+            "summary",
+            "active_context",
+            "open_loop",
+            "assumption",
+            "contradiction"
+          ]
+        }
+      }
+    }
+  }
+}

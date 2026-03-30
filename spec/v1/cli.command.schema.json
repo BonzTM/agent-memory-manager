@@ -15,24 +15,38 @@
     "command": {
       "type": "string",
       "enum": [
-        "init",
         "ingest_event",
         "ingest_transcript",
         "remember",
         "recall",
         "describe",
         "expand",
+        "format_context_window",
         "history",
+        "grep",
         "get_memory",
         "update_memory",
+        "share",
+        "forget",
         "policy_list",
         "policy_add",
         "policy_remove",
+        "register_project",
+        "get_project",
+        "list_projects",
+        "remove_project",
+        "add_relationship",
+        "get_relationship",
+        "list_relationships",
+        "remove_relationship",
+        "get_summary",
+        "get_episode",
+        "get_entity",
         "run_job",
-        "reset_derived",
-        "explain_recall",
         "repair",
-        "status"
+        "explain_recall",
+        "status",
+        "reset_derived"
       ],
       "description": "Command to execute"
     },
@@ -87,7 +101,7 @@
         },
         "privacy_level": {
           "type": "string",
-          "enum": ["public", "private", "sensitive"]
+          "enum": ["private", "shared", "public_safe"]
         },
         "metadata": {
           "type": "object"
@@ -163,6 +177,7 @@
           "enum": [
             "ambient",
             "facts",
+            "contradictions",
             "episodes",
             "timeline",
             "project",
@@ -208,7 +223,7 @@
       "properties": {
         "pattern_type": {
           "type": "string",
-          "enum": ["session", "source", "surface", "agent", "project", "runtime"]
+          "enum": ["kind", "session", "source", "surface", "agent", "project", "runtime"]
         },
         "pattern": {
           "type": "string",

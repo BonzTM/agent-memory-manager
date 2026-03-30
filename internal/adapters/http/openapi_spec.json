@@ -707,6 +707,9 @@
           },
           {
             "$ref": "#/components/parameters/SessionIDQuery"
+          },
+          {
+            "$ref": "#/components/parameters/DelegationDepthQuery"
           }
         ],
         "responses": {
@@ -736,6 +739,130 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/ExpansionRecursionBlocked"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/v1/context-window": {
+      "get": {
+        "tags": [
+          "retrieval"
+        ],
+        "summary": "Format context window",
+        "description": "Assemble deterministic context from summaries and fresh events. At least one of session_id or project_id is required.",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fresh_tail_count",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "max_summary_depth",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "include_parent_refs",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "content",
+                        "summary_count",
+                        "fresh_count",
+                        "est_tokens",
+                        "manifest"
+                      ],
+                      "properties": {
+                        "content": {
+                          "type": "string"
+                        },
+                        "summary_count": {
+                          "type": "integer"
+                        },
+                        "fresh_count": {
+                          "type": "integer"
+                        },
+                        "est_tokens": {
+                          "type": "integer"
+                        },
+                        "manifest": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "kind",
+                              "stable_ref"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "type": "string"
+                              },
+                              "stable_ref": {
+                                "type": "string"
+                              },
+                              "depth": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
@@ -790,6 +917,155 @@
           },
           "415": {
             "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/v1/grep": {
+      "get": {
+        "tags": [
+          "retrieval"
+        ],
+        "summary": "Grep events",
+        "description": "Search events and group matches by covering summary.",
+        "parameters": [
+          {
+            "name": "pattern",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "max_group_depth",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "group_limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "matches_per_group",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                       "required": [
+                         "pattern",
+                         "total_hits",
+                         "sample_limited",
+                         "groups"
+                       ],
+                       "properties": {
+                         "pattern": {
+                           "type": "string"
+                         },
+                         "total_hits": {
+                           "type": "integer"
+                         },
+                         "sample_limited": {
+                           "type": "boolean",
+                           "description": "True when search results may be incomplete due to sampling limit"
+                         },
+                         "groups": {
+                           "type": "array",
+                           "items": {
+                             "type": "object",
+                            "required": [
+                              "matches"
+                            ],
+                            "properties": {
+                              "summary": {
+                                "$ref": "#/components/schemas/Summary"
+                              },
+                              "summary_id": {
+                                "type": "string"
+                              },
+                              "summary_text": {
+                                "type": "string"
+                              },
+                              "matches": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "event_id",
+                                    "kind",
+                                    "content"
+                                  ],
+                                  "properties": {
+                                    "event_id": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "type": "string"
+                                    },
+                                    "content": {
+                                      "type": "string"
+                                    },
+                                    "occurred_at": {
+                                      "type": "string"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
@@ -1727,12 +2003,14 @@
         "required": false,
         "schema": {
           "type": "string",
+          "default": "memory",
           "enum": [
             "memory",
             "summary",
             "episode"
           ]
-        }
+        },
+        "description": "Item kind; defaults to 'memory' if omitted"
       },
       "SessionIDQuery": {
         "name": "session_id",
@@ -1740,6 +2018,15 @@
         "required": false,
         "schema": {
           "type": "string"
+        }
+      },
+      "DelegationDepthQuery": {
+        "name": "delegation_depth",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "EntityIDQuery": {
@@ -1791,6 +2078,16 @@
       },
       "NotFound": {
         "description": "Not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "ExpansionRecursionBlocked": {
+        "description": "Expansion recursion blocked",
         "content": {
           "application/json": {
             "schema": {
@@ -1875,6 +2172,7 @@
         "enum": [
           "ambient",
           "facts",
+          "contradictions",
           "episodes",
           "timeline",
           "project",
