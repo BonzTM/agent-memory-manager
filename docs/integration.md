@@ -54,9 +54,11 @@ Regardless of the mechanism, the ideal integration follows this loop:
 
 1. **Recall on Entry**: At the start of a turn, ask AMM for context (ambient recall).
 2. **Inject Context**: Add the recalled hints to the agent's system prompt.
-3. **Ingest Interaction**: Capture the user message and assistant response as events.
-4. **Remember Durable Facts**: Agent explicitly calls "remember" for high-confidence knowledge.
-5. **Background Maintenance**: Run periodic jobs (reflect, compress) to consolidate new information.
+3. **Context Window Assembly**: Use the `context-window` command/tool to get a pre-formatted block of recent activity and relevant memories.
+4. **Ingest Interaction**: Capture the user message and assistant response as events.
+5. **Grep for Reference**: When the agent needs to find a specific past detail, use the `grep` tool for a high-precision search across all memory types.
+6. **Remember Durable Facts**: Agent explicitly calls "remember" for high-confidence knowledge.
+7. **Background Maintenance**: Run periodic jobs (reflect, compress, detect_contradictions) to consolidate and clean up information.
 
 ---
 
@@ -67,3 +69,44 @@ For high-quality recall, ensure your integration provides these fields:
 - `session_id`: To keep recall session-aware (prevents repeating the same hints).
 - `project_id`: To scope memories to the current workspace.
 - `content`: The actual text of the message or tool result.
+
+---
+
+## Expand Delegation Depth Control (P7)
+
+AMM protects against recursive expansion loops with a depth guard.
+
+- Runtime config: `AMM_MAX_EXPAND_DEPTH` (default `1`)
+  - `-1` disables the guard (unlimited depth)
+  - `0` blocks any delegated expand where `delegation_depth > 0`
+- Expand input parameter: `delegation_depth` (integer, `>= 0`)
+- Guard behavior: expand fails with `EXPANSION_RECURSION_BLOCKED` when
+  `delegation_depth >= AMM_MAX_EXPAND_DEPTH` and depth is non-zero.
+
+### Runtime responsibility
+
+If your runtime delegates `expand` calls, it must pass `delegation_depth` and increment it on nested delegation.
+
+- First direct expand call: `delegation_depth = 0`
+- First delegated expand call: `delegation_depth = 1`
+- Continue incrementing for each nested delegation hop
+
+The current example integrations (`examples/opencode`, `examples/openclaw`, `examples/codex`, `examples/hermes-agent`) do not issue `expand` calls today. When adding expand usage to those runtimes, include `delegation_depth` from the start.
+
+---
+
+## Context Window Assembly (P7)
+
+The `context-window` command/tool provides a unified assembly of the most important recent information for an agent. Runtimes should call this at the start of a new task or session to quickly populate the agent's prompt with relevant background.
+
+- **CLI**: `amm context-window --project-id <id> --session-id <id> --fresh-tail-count <n> --max-summary-depth <n> [--include-parent-refs]`
+- **MCP**: `amm_format_context_window`
+- **HTTP**: `GET /v1/context-window`
+
+## Grouped Search (Grep) (P7)
+
+When standard vector or keyword recall isn't enough, the `grep` tool searches raw events for literal patterns and groups matches by covering summary. This is especially useful for finding specific error codes, unique identifiers, or literal code snippets from past interactions.
+
+- **CLI**: `amm grep "pattern" --session-id <id> --project-id <id> --group-limit <n> --matches-per-group <n>`
+- **MCP**: `amm_grep`
+- **HTTP**: `GET /v1/grep`

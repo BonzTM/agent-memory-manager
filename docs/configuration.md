@@ -34,6 +34,7 @@ AMM loads configuration in the following order:
 | `AMM_AMBIENT_LIMIT` | Result limit for ambient recall mode | `5` |
 | `AMM_ENABLE_SEMANTIC` | Enable semantic vector scoring in recall (requires embeddings to be enabled and populated) | `false` |
 | `AMM_ENABLE_EXPLAIN` | Enable explain-recall signal breakdowns | `true` |
+| `AMM_MAX_EXPAND_DEPTH` | Maximum recursive delegation depth for Expand calls | `1` |
 
 ### Privacy
 | Variable | Description | Default |
@@ -113,12 +114,13 @@ Full reference — all supported keys shown with their defaults:
     "url": "",
     "key": ""
   },
-  "retrieval": {
-    "default_limit": 10,
-    "ambient_limit": 5,
-    "enable_semantic": false,
-    "enable_explain": true
-  },
+    "retrieval": {
+      "default_limit": 10,
+      "ambient_limit": 5,
+      "enable_semantic": false,
+      "enable_explain": true
+    },
+    "max_expand_depth": 1,
   "privacy": {
     "default_privacy": "private"
   },
@@ -184,6 +186,8 @@ default_limit = 10
 ambient_limit = 5
 enable_semantic = false
 enable_explain = true
+
+max_expand_depth = 1
 
 [privacy]
 default_privacy = "private"

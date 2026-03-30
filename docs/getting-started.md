@@ -98,6 +98,18 @@ Retrieve relevant memories based on a query:
 amm recall "programming language preferences"
 ```
 
+### Context Window Assembly
+Assemble a pre-formatted context window for an agent:
+```bash
+amm context-window --project-id amm --fresh-tail-count 32 --max-summary-depth 1 --include-parent-refs
+```
+
+### High-Precision Search
+Search raw events and group matches by covering summary:
+```bash
+amm grep "Neovim"
+```
+
 ### Starting the HTTP Server
 If you want to use the REST API or MCP-over-HTTP, start the HTTP adapter:
 ```bash

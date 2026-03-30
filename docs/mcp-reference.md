@@ -275,7 +275,7 @@ Retrieve memories using various recall modes.
 }
 ```
 
-**Recall modes:** `ambient`, `facts`, `episodes`, `timeline`, `project`, `entity`, `active`, `history`, `hybrid` (default).
+**Recall modes:** `ambient`, `facts`, `episodes`, `timeline`, `project`, `entity`, `active`, `history`, `contradictions`, `hybrid` (default).
 
 **Example:**
 
@@ -298,6 +298,88 @@ Retrieve memories using various recall modes.
 ```
 
 Response text contains a `RecallResult` with `items` and `meta`.
+
+---
+
+### amm_grep
+
+Search raw events for a text pattern, then group matches by their covering summary.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "pattern": {"type": "string", "description": "Regex or text pattern to search for"},
+    "session_id": {"type": "string", "description": "Filter to a session"},
+    "project_id": {"type": "string", "description": "Filter to a project"},
+    "max_group_depth": {"type": "integer", "description": "Max summary depth when finding a covering summary"},
+    "group_limit": {"type": "integer", "description": "Max groups to return"},
+    "matches_per_group": {"type": "integer", "description": "Max matches to keep per group"}
+  },
+  "required": ["pattern"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 141,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_grep",
+    "arguments": {
+      "pattern": "Neovim",
+      "session_id": "sess_abc",
+      "group_limit": 5
+    }
+  }
+}
+```
+
+---
+
+### amm_format_context_window
+
+Assemble a context window from summaries plus fresh events, in chronological order.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "session_id": {"type": "string"},
+    "project_id": {"type": "string"},
+    "fresh_tail_count": {"type": "integer"},
+    "max_summary_depth": {"type": "integer"},
+    "include_parent_refs": {"type": "boolean"}
+  }
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 142,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_format_context_window",
+    "arguments": {
+      "project_id": "amm",
+      "fresh_tail_count": 20,
+      "max_summary_depth": 3,
+      "include_parent_refs": true
+    }
+  }
+}
+```
+
 
 ---
 
@@ -346,14 +428,15 @@ Expand an item to full detail, including linked claims, events, and children.
   "type": "object",
   "properties": {
     "id":   {"type": "string", "description": "Item ID to expand"},
-    "kind": {"type": "string", "description": "Item kind: memory, summary, episode"},
-    "session_id": {"type": "string", "description": "Session identifier for relevance feedback"}
+    "kind": {"type": "string", "description": "Item kind: memory, summary, episode (defaults to memory when omitted)"},
+    "session_id": {"type": "string", "description": "Session identifier for relevance feedback"},
+    "delegation_depth": {"type": "integer", "description": "Max recursive delegation depth for linked content"}
   },
   "required": ["id"]
 }
 ```
 
-When `kind` is omitted, the server infers it from the ID prefix (`mem_`, `sum_`, `ep_`).
+When `kind` is omitted, the server defaults to `memory`.
 
 **Example:**
 
@@ -1208,7 +1291,7 @@ All 16 valid memory types: `identity`, `preference`, `fact`, `decision`, `episod
 
 ## Recall Modes
 
-All 9 recall modes: `ambient`, `facts`, `episodes`, `timeline`, `project`, `entity`, `active`, `history`, `hybrid`.
+All 10 recall modes: `ambient`, `facts`, `episodes`, `timeline`, `project`, `entity`, `active`, `history`, `contradictions`, `hybrid`.
 
 ## Scopes
 

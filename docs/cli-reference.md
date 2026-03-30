@@ -32,12 +32,12 @@ On failure the envelope goes to stderr with `"ok": false` and an `"error"` objec
 | Variable | Description | Default |
 |---|---|---|
 | `AMM_DB_PATH` | Path to the SQLite database file | `~/.amm/amm.db` |
-| `AMM_COMPRESS_CHUNK_SIZE` | Max events per history chunk | `20` |
-| `AMM_COMPRESS_MAX_EVENTS` | Max events per session summary | `100` |
-| `AMM_COMPRESS_BATCH_SIZE` | Max summaries per LLM call | `5` |
-| `AMM_TOPIC_BATCH_SIZE` | Max topic summaries per LLM call | `5` |
-| `AMM_EMBEDDING_BATCH_SIZE` | Max items per embedding API call | `20` |
-| `AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD` | Threshold for cross-project memory transfer | `0.85` |
+| `AMM_COMPRESS_CHUNK_SIZE` | Max events per history chunk | `10` |
+| `AMM_COMPRESS_MAX_EVENTS` | Max events per session summary | `200` |
+| `AMM_COMPRESS_BATCH_SIZE` | Max summaries per LLM call | `15` |
+| `AMM_TOPIC_BATCH_SIZE` | Max topic summaries per LLM call | `15` |
+| `AMM_EMBEDDING_BATCH_SIZE` | Max items per embedding API call | `64` |
+| `AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD` | Threshold for cross-project memory transfer | `0.7` |
 
 ## Building
 
@@ -249,6 +249,95 @@ amm recall "editor preferences" --mode facts
 
 ---
 
+### grep
+
+Search raw events for a text pattern, then group matches by their covering summary.
+
+```
+amm grep <pattern> [--project-id <id>] [--session-id <id>] [--max-group-depth <n>] [--group-limit <n>] [--matches-per-group <n>]
+```
+
+| Flag | Description |
+|---|---|
+| `--project-id` | Filter to a project |
+| `--session-id` | Filter to a session |
+| `--max-group-depth` | Max summary depth when finding a covering summary |
+| `--group-limit` | Max groups to return |
+| `--matches-per-group` | Max matches to keep per group |
+
+**Example:**
+
+```bash
+amm grep "Neovim"
+```
+
+```json
+{
+  "ok": true,
+  "command": "grep",
+  "timestamp": "2026-03-30T12:00:00Z",
+  "result": {
+    "pattern": "Neovim",
+    "total_hits": 1,
+    "sample_limited": false,
+    "groups": [
+      {
+        "summary_id": "sum_xyz789",
+        "summary_text": "Editor preferences",
+        "matches": [
+          {
+            "event_id": "evt_abc123",
+            "kind": "message_user",
+            "content": "User prefers Neovim with Lua config over VS Code"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+---
+
+### context-window
+
+Assemble and format a context window for an agent based on recent activity and relevant memories.
+
+```
+amm context-window [--project-id <id>] [--session-id <id>] [--fresh-tail-count <n>] [--max-summary-depth <n>] [--include-parent-refs]
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--project-id` | | Project identifier |
+| `--session-id` | | Session identifier |
+| `--fresh-tail-count` | `32` | Number of fresh events to include |
+| `--max-summary-depth` | `0` | Max summary depth to include |
+| `--include-parent-refs` | `false` | Include parent summary references |
+
+**Example:**
+
+```bash
+amm context-window --project-id amm --fresh-tail-count 32 --max-summary-depth 1 --include-parent-refs
+```
+
+```json
+{
+  "ok": true,
+  "command": "context_window",
+  "timestamp": "2026-03-30T12:05:00Z",
+  "result": {
+    "content": "...",
+    "summary_count": 3,
+    "fresh_count": 32,
+    "est_tokens": 1240,
+    "manifest": []
+  }
+}
+```
+
+---
+
 ### describe
 
 Return thin descriptions for one or more items by ID.
@@ -291,13 +380,14 @@ amm describe mem_xyz789 ep_abc123
 Expand a single item to its full detail, including linked claims, events, and children.
 
 ```
-amm expand <id> [--kind <kind>] [--session-id <id>]
+amm expand <id> [--kind <kind>] [--session-id <id>] [--delegation-depth <n>]
 ```
 
 | Flag | Default | Description |
 |---|---|---|
 | `--kind` | Auto-inferred from ID prefix | Item kind: `memory`, `summary`, or `episode` |
 | `--session-id` | | Session identifier used for expand-time relevance feedback attribution |
+| `--delegation-depth` | `0` | Max recursive delegation depth for linked content |
 
 The kind is inferred automatically from the ID prefix:
 
@@ -983,7 +1073,7 @@ Delete all derived/canonical-derived data and reset event reflection markers whi
 amm reset-derived [--confirm]
 ```
 
-By default, this command is interactive and requires typing `yes` to proceed.
+The command only runs with `--confirm`.
 
 | Flag | Description |
 |---|---|
@@ -996,13 +1086,13 @@ By default, this command is interactive and requires typing `yes` to proceed.
 - A later `amm jobs run reflect` will re-extract from events.
 - This operation is irreversible.
 
-**Example (interactive):**
+**Example (without `--confirm`):**
 
 ```bash
 amm reset-derived
 ```
 
-**Example (non-interactive):**
+**Example (with `--confirm`):**
 
 ```bash
 amm reset-derived --confirm
@@ -1066,6 +1156,7 @@ All 9 valid values for the `--mode` flag on `recall`:
 | `entity` | Retrieve memories related to specific entities |
 | `active` | Currently active context and open loops |
 | `history` | Raw event history search |
+| `contradictions` | Retrieve memories with detected contradictions |
 | `hybrid` | Combined scoring across multiple strategies (default) |
 
 ## Scopes

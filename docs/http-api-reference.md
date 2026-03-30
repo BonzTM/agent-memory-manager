@@ -79,6 +79,8 @@ The `/v1/mcp` endpoint exposes all AMM tools via the MCP Streamable HTTP protoco
 | POST | `/v1/recall` | Search memories |
 | POST | `/v1/explain-recall` | Breakdown of recall signals |
 | GET | `/v1/expand/{id}` | Fetch full item details |
+| GET | `/v1/grep` | Search raw events and group matches by covering summary |
+| GET | `/v1/context-window` | Assemble formatted context window |
 | POST | `/v1/describe` | Get metadata for multiple IDs |
 | POST | `/v1/projects` | Register a project |
 | GET | `/v1/projects` | List projects |
@@ -198,7 +200,7 @@ Perform associative retrieval.
 **Request Body**
 - `query`: The search string.
 - `opts`:
-  - `mode`: `ambient`, `facts`, `episodes`, `timeline`, `project`, `entity`, `active`, `history`, `hybrid`.
+  - `mode`: `ambient`, `facts`, `episodes`, `timeline`, `project`, `entity`, `active`, `history`, `contradictions`, `hybrid`.
   - `limit`: Max items to return.
   - `project_id`: Filter by project.
   - `explain`: Include scoring signals in response.
@@ -215,6 +217,31 @@ Fetch full details (claims, source events, children) for a memory, summary, or e
 
 **Query Parameters**
 - `kind`: `memory`, `summary`, or `episode`.
+- `delegation_depth`: (Optional) Max recursive delegation depth for linked content.
+
+**Errors**
+- `403 EXPANSION_RECURSION_BLOCKED`: Expansion depth limit reached.
+
+### GET /v1/grep
+Search raw events for a text pattern, then group matches by covering summary.
+
+**Query Parameters**
+- `pattern`: (Required) Regex or text pattern to search for.
+- `project_id`: (Optional) Filter to a project.
+- `session_id`: (Optional) Filter to a session.
+- `max_group_depth`: (Optional) Max summary depth when finding a covering summary.
+- `group_limit`: (Optional) Max groups to return.
+- `matches_per_group`: (Optional) Max matches to keep per group.
+
+### GET /v1/context-window
+Assemble and format a context window for an agent based on recent activity and relevant memories.
+
+**Query Parameters**
+- `project_id`: (Optional) Project identifier.
+- `session_id`: (Optional) Session identifier.
+- `fresh_tail_count`: (Optional) Number of fresh events to include.
+- `max_summary_depth`: (Optional) Max summary depth to include.
+- `include_parent_refs`: (Optional) Include parent summary references.
 
 ### POST /v1/describe
 Fetch thin descriptions for multiple IDs at once.

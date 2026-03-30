@@ -44,6 +44,7 @@ AMM organizes information into five layers, from ephemeral state to durable trut
 - FTS5 virtual tables for full-text search.
 - Optional vector embeddings for semantic similarity.
 - Retrieval caches and entity graph projections.
+- **Grouped Search (Grep)**: Provides pattern-based retrieval with results grouped by canonical item, bypassing semantic scoring for high-precision exact matches.
 
 ---
 
@@ -86,6 +87,7 @@ AMM runs a staged intelligence pipeline to extract knowledge from raw history:
 4. **Compress**: Builds hierarchical summaries over event spans. Uses three-level escalation (normal → aggressive → deterministic truncate) to guarantee convergence at every level (leaf, topic, session).
 5. **Consolidate**: Groups related activity into narrative episodes.
 6. **Enrich**: Links memories to canonical entities and builds the relationship graph.
+7. **Review**: LLM-powered batch review for decay, promote, and contradiction detection. Lifecycle reviews now persist contradictions as typed memories.
 
 ### Compression Convergence Guarantee
 
@@ -98,6 +100,16 @@ Every summarization call in the compression pipeline uses `summarizeWithEscalati
 | 3 | Deterministic truncate to `min(len, maxChars, escalation_deterministic_max_chars)` + `[Truncated from N chars]` | Always — no LLM call |
 
 This means compaction can never produce output longer than input, regardless of LLM behaviour.
+
+---
+
+### Context Window Assembly
+
+The Context Window Assembly service provides a unified view of the most important recent information for an agent. It combines:
+1. **Topic Summaries**: High-level recaps for earlier activity.
+2. **Fresh Events**: The last N raw events from the current session.
+
+The window is assembled chronologically: summaries first, then fresh events.
 
 ---
 
