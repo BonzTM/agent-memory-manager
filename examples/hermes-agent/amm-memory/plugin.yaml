@@ -1,0 +1,7 @@
+name: amm-memory
+version: 0.1.0
+description: Inject AMM ambient recall into Hermes turns and persist user/assistant events.
+author: bonztm
+provides_hooks:
+  - pre_llm_call
+  - post_llm_call

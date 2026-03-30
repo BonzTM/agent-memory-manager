@@ -1,48 +1,55 @@
 # Hermes-Agent Integration Guide
 
-Hermes and AMM fit together cleanly as a sidecar pattern. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md).
+Hermes and AMM now fit together cleanly as an MCP + local-plugin pattern, with optional helper scripts for shell-driven capture and warm-path maintenance. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md).
 
-- **Hermes-agent** owns the runtime, hooks, scheduling, and agent behavior.
+- **Hermes-Agent** owns the runtime, plugin loading, hooks, scheduling, and agent behavior.
 - **AMM** owns durable history, recall, summaries, and maintenance jobs.
 
-That means the integration contract stays simple:
+That keeps the integration contract simple:
 
-- register `amm-mcp` if you want explicit amm tools inside Hermes
-- use Hermes hooks or hook handlers to call amm-side helper scripts for capture/recall
-- keep maintenance jobs as external `amm jobs run <kind>` calls against the same database
+- register `amm-mcp` if you want explicit AMM tools inside Hermes
+- install the repo-shipped Hermes plugin example for per-turn ambient recall injection and user/assistant capture
+- use the optional helper scripts only when you want shell-hook wiring, raw tool event capture, or a separate session-end runner
+- keep maintenance jobs external as `amm jobs run <kind>` calls against the same database
+
+The plugin's hot-path transport is independent from the explicit MCP tool transport:
+
+- **Binary mode**: plugin calls the local `amm` binary, and Hermes can talk to `amm-mcp` over stdio
+- **API mode**: plugin calls the AMM REST API via `AMM_API_URL`, and Hermes can talk to `/v1/mcp` over MCP-over-HTTP
 
 ## Recommended Shape
 
-Use Hermes and amm in three layers:
+Use Hermes and AMM in four layers:
 
 1. **MCP** for explicit agent-controlled memory access (via stdio or HTTP)
-2. **Hooks** for transparent event capture and ambient recall on the hot path
-3. **Cron or scheduled jobs** for reflection, compression, and heavier maintenance
+2. **Local plugin** for transparent per-turn ambient recall injection plus `message_user` / `message_assistant` capture
+3. **Optional helper scripts** for shell-based bridging or explicit raw tool capture
+4. **Cron or scheduled jobs** for reflection, compression, and heavier maintenance
 
 ## 1. Register `amm-mcp`
 
 Hermes supports MCP, so the lowest-friction explicit integration is to register the AMM MCP server.
 
 ### Option A: MCP-over-stdio (Local)
+
 Register `amm-mcp` directly in your Hermes configuration.
 
 ```yaml
-mcp:
-  servers:
-    amm:
-      command: /usr/local/bin/amm-mcp
-      env:
-        AMM_DB_PATH: /home/you/.amm/amm.db
+mcp_servers:
+  amm:
+    command: /usr/local/bin/amm-mcp
+    env:
+      AMM_DB_PATH: /home/you/.amm/amm.db
 ```
 
 ### Option B: MCP-over-HTTP (Remote/Sidecar)
+
 When running AMM as a sidecar or remote server (via `amm-http`), Hermes can connect via the MCP Streamable HTTP protocol.
 
 ```yaml
-mcp:
-  servers:
-    amm:
-      url: http://localhost:8080/v1/mcp
+mcp_servers:
+  amm:
+    url: http://localhost:8080/v1/mcp
 ```
 
 This is the recommended method for Kubernetes deployments using the sidecar pattern (see `deploy/sidecar/`). If `AMM_API_KEY` is set on the server, ensure the client includes the appropriate authentication headers.
@@ -54,11 +61,11 @@ Once that is in place, Hermes can call tools such as:
 - `amm_remember`
 - `amm_jobs_run`
 
-Keep the mental model the same as every other runtime: Hermes asks for memory, but amm remains an external service boundary exposed through stdio MCP and the CLI.
+Keep the mental model the same as every other runtime: Hermes asks for memory, but AMM remains an external service boundary exposed through MCP and the CLI.
 
 ## 1.5. Configure Recommended Ingestion Policies
 
-The Hermes helper scripts capture `tool_call` and `tool_result` events via `on-tool-use.sh`. To prevent these from polluting extracted memories, **strongly consider** adding ignore policies after initialization:
+The optional Hermes tool-capture helper records `tool_call` and `tool_result` events via `on-tool-use.sh`. To prevent these from polluting extracted memories, **strongly consider** adding ignore policies after initialization:
 
 ```bash
 amm policy-add --pattern-type kind --pattern "tool_call" --mode ignore --match-mode exact --priority 100
@@ -67,27 +74,73 @@ amm policy-add --pattern-type kind --pattern "tool_result" --mode ignore --match
 
 Without these policies, the extraction pipeline treats raw tool invocation JSON (patch text, shell commands, API payloads) as meaningful content, producing low-quality memories. The meaningful information is already captured in `message_user` and `message_assistant` events. See [Configuration: Ingestion Policies](configuration.md#ingestion-policies) for the full reference.
 
-## 2. Use Hook Handlers to Bridge Hermes Into amm
+## 2. Install The Repo-Shipped Hermes Plugin
 
-Hermes has its own hook registration model. This repo does **not** ship a Hermes-native plugin package or a full Hermes config tree. Instead, it ships amm-side helper scripts that a Hermes hook handler can call.
+Current Hermes releases support directory plugins under `~/.hermes/plugins/<name>/`, and `pre_llm_call` hooks can return a `context` block that Hermes appends to the effective system prompt for the current turn. See the official Hermes [Plugins guide](https://hermes-agent.nousresearch.com/docs/user-guide/features/plugins/), [Hooks guide](https://hermes-agent.nousresearch.com/docs/user-guide/features/hooks/#plugin-hooks), and [`run_agent.py` implementation](https://github.com/NousResearch/hermes-agent/blob/v2026.3.30/run_agent.py).
 
-The helper pattern is intentionally small:
+This repo ships a Hermes directory plugin example at:
 
-- pass the current user message to `examples/hermes-agent/on-user-message.sh`
-- pass assistant responses to `examples/hermes-agent/on-assistant-message.sh`
-- pass tool call/result payloads to `examples/hermes-agent/on-tool-use.sh`
-- call `examples/hermes-agent/on-session-end.sh` when the session closes, or reuse the shared worker runner on a schedule
+- [`examples/hermes-agent/amm-memory/plugin.yaml`](../examples/hermes-agent/amm-memory/plugin.yaml)
+- [`examples/hermes-agent/amm-memory/__init__.py`](../examples/hermes-agent/amm-memory/__init__.py)
 
-### Repo-shipped helper scripts
+Install it globally:
+
+```bash
+mkdir -p ~/.hermes/plugins
+cp -R examples/hermes-agent/amm-memory ~/.hermes/plugins/amm-memory
+```
+
+Or install it project-locally:
+
+```bash
+mkdir -p ./.hermes/plugins
+cp -R examples/hermes-agent/amm-memory ./.hermes/plugins/amm-memory
+HERMES_ENABLE_PROJECT_PLUGINS=true hermes
+```
+
+### What the plugin does
+
+- ingests the current user turn as `message_user` in `pre_llm_call`
+- calls AMM ambient recall for the current turn using either the local CLI or `POST /v1/recall`
+- renders a thin `amm ambient recall:` block and returns it as hook `context`
+- ingests the final assistant response as `message_assistant` in `post_llm_call`
+
+The plugin resolves `project_id` like this:
+
+- use `AMM_PROJECT_ID` when set
+- otherwise, derive from `TERMINAL_CWD` when Hermes exposes it
+- otherwise, on CLI sessions only, fall back to the current working directory basename
+
+Recommended environment:
+
+- `AMM_BIN` for local-binary mode
+- `AMM_DB_PATH` for local-binary mode
+- `AMM_API_URL` to switch the plugin into REST mode against `amm-http`
+- `AMM_API_KEY` when the HTTP server requires bearer auth
+- `AMM_PROJECT_ID`
+- `AMM_HERMES_RECALL_LIMIT` to override the default recall block length (`5`)
+
+Important:
+
+- Do **not** also wire `on-user-message.sh` or `on-assistant-message.sh` for the same Hermes hot path when this plugin is enabled. That will duplicate `message_user` / `message_assistant` events.
+- The repo-shipped plugin intentionally focuses on the hot path. It does **not** run maintenance jobs automatically.
+- The current Hermes tool-hook API exposes `task_id`, not `session_id`, so this repo keeps raw tool-event capture as an optional helper-script path instead of pretending the plugin has better correlation than Hermes currently provides.
+- When `AMM_API_URL` is set, the plugin uses the AMM REST API endpoints `POST /v1/events` and `POST /v1/recall`. It does not need to act as an MCP client for the hot path.
+
+## 2.5. Optional Helper Scripts
+
+The repo still ships shell helpers for users who prefer hook-handler wiring or need behaviors outside the plugin's hot path:
 
 - [`examples/hermes-agent/on-user-message.sh`](../examples/hermes-agent/on-user-message.sh)
 - [`examples/hermes-agent/on-assistant-message.sh`](../examples/hermes-agent/on-assistant-message.sh)
 - [`examples/hermes-agent/on-tool-use.sh`](../examples/hermes-agent/on-tool-use.sh)
 - [`examples/hermes-agent/on-session-end.sh`](../examples/hermes-agent/on-session-end.sh)
 
-These helpers are **amm-side scripts**, not Hermes runtime code. Your Hermes hook handler is responsible for deciding when to call them and what environment variables or stdin payloads to pass.
+Use them when you want one of these:
 
-## Suggested Environment Contract
+- shell-hook integration without installing a Hermes plugin
+- explicit raw `tool_call` / `tool_result` ingestion via `on-tool-use.sh`
+- a separate warm-path runner via `on-session-end.sh`
 
 To keep the helper scripts runtime-neutral, pass the following values from your Hermes hook handler when they are available:
 
@@ -96,11 +149,11 @@ To keep the helper scripts runtime-neutral, pass the following values from your 
 - stdin — message text for `on-user-message.sh` and `on-assistant-message.sh`
 - stdin JSON for `on-tool-use.sh` with `tool_name`, `tool_input`, `tool_output`, `call_id`, and `status`
 
-That keeps the amm scripts reusable even if your Hermes hook wiring changes over time.
+That keeps the AMM scripts reusable even if your Hermes hook wiring changes over time.
 
 ## 3. Keep Background Workers External
 
-amm does not ship an internal scheduler loop. Because SQLite only allows one writer at a time, we recommend running the **conservative baseline** maintenance jobs sequentially:
+AMM does not ship an internal scheduler loop. Because SQLite only allows one writer at a time, we recommend running the **conservative baseline** maintenance jobs sequentially:
 
 ```bash
 # Recommended: Serialized Baseline Runner
@@ -113,14 +166,14 @@ That means you can choose the trigger that fits Hermes best:
 
 - Hermes cron or scheduled jobs (staggered or serialized baseline)
 - a host-level cron or systemd timer (serialized baseline runner)
-- a session-end hook that runs the repo-shipped warm-path sequence via `examples/hermes-agent/on-session-end.sh`
+- a real session-end hook or wrapper that runs the repo-shipped warm-path sequence via `examples/hermes-agent/on-session-end.sh`
 
 ## Suggested Operational Pattern
 
 Use a hot/warm/cold split:
 
-- **Hot path**: Hermes hook handlers capture full transcript flow by sending user turns to `on-user-message.sh` (with ambient recall), assistant turns to `on-assistant-message.sh`, and tool activity to `on-tool-use.sh`
-- **Warm path**: a session-end or periodic Hermes task runs the repo-shipped warm-path sequence serially via `examples/hermes-agent/on-session-end.sh`
+- **Hot path**: the repo-shipped Hermes plugin injects AMM ambient recall every turn and captures `message_user` / `message_assistant` via either the local binary or the HTTP API, depending on whether `AMM_API_URL` is set
+- **Warm path**: a real session-end hook, wrapper script, or periodic Hermes task runs the repo-shipped warm-path sequence serially via `examples/hermes-agent/on-session-end.sh`
 - **Cold path**: scheduled jobs run the broader maintenance sequence through the shared runner or explicitly staggered entries
 
 The repo-shipped session-end sequence runs `reflect`, `compress_history`, `consolidate_sessions`, `form_episodes`, `enrich_memories`, `rebuild_entity_graph`, and `lifecycle_review`.
@@ -134,27 +187,27 @@ If you want a Hermes-oriented instruction block, use something like this:
 ```md
 ## amm memory usage
 
-- Treat amm as the durable memory substrate for this project.
+- Treat AMM as the durable memory substrate for this project.
 - Use `amm_recall` or `amm recall --mode ambient` when resuming work, switching projects, or when important context may exist outside the immediate conversation.
 - Use `amm_expand` only when a thin recall item needs to be opened in full.
 - Use `amm_remember` for stable, high-confidence memories such as preferences, decisions, and durable constraints.
-- Do not assume amm runs its own worker loop. Maintenance happens through external `amm jobs run <kind>` calls.
+- Do not assume AMM runs its own worker loop. Maintenance happens through external `amm jobs run <kind>` calls.
 ```
 
 ## Verification Checklist
 
 - `amm-mcp` starts successfully with the configured `AMM_DB_PATH`
 - Hermes can see and call the `amm` MCP server
-- your Hermes hook handler can call `examples/hermes-agent/on-user-message.sh` with a sample prompt
-- your Hermes hook handler can call `examples/hermes-agent/on-assistant-message.sh` with a sample response
-- your Hermes hook handler can call `examples/hermes-agent/on-tool-use.sh` with sample JSON payload
-- amm history shows captured `message_user`, `message_assistant`, `tool_call`, and `tool_result` events after helpers run
+- `python3 -m py_compile examples/hermes-agent/amm-memory/__init__.py` succeeds
+- `hermes plugins list` shows `amm-memory` as loaded after installation
+- a sample Hermes turn produces `message_user` and `message_assistant` events in AMM history
+- if `AMM_API_URL` is set, the same sample Hermes turn succeeds against the AMM HTTP server without the local `amm` binary on PATH
+- if you use the optional tool helper, `examples/hermes-agent/on-tool-use.sh` accepts a sample JSON payload
 - `examples/hermes-agent/on-session-end.sh` can run without shell errors
 - scheduled worker runs create summaries or memories as expected
 
 ## What This Repo Does Not Promise
 
-- a built-in amm scheduler
-- a Hermes-native plugin or SDK package in this repository
-- a one-size-fits-all Hermes hook registration schema
-- automatic execution of helper scripts or `maintenance.auto_*` flags without an external trigger
+- a built-in AMM scheduler
+- a one-size-fits-all Hermes config tree
+- automatic maintenance execution without an external trigger

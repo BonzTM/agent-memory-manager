@@ -29,7 +29,7 @@ Once amm is installed, the agent should follow the same durable-memory rules reg
 # Verify jq is available (used by hook scripts)
 jq --version
 
-# Verify Python 3 is available (used by Claude/Codex/Hermes helper scripts)
+# Verify Python 3 is available (used by Claude/Codex helpers and the Hermes plugin/helper examples)
 python3 --version
 ```
 
@@ -207,7 +207,7 @@ After Steps 1-2, pick the path that matches the user's host:
 | Codex | [Codex Integration](codex-integration.md) | MCP + Codex hooks + transcript-aware closeout |
 | OpenCode | [OpenCode Integration](opencode-integration.md) | MCP + local plugin glue + explicit recall |
 | OpenClaw | [OpenClaw Integration](openclaw-integration.md) | MCP sidecar + native hooks |
-| Hermes-Agent | [Hermes-Agent Integration](hermes-agent-integration.md) | MCP + sidecar/helper-script pattern |
+| Hermes-Agent | [Hermes-Agent Integration](hermes-agent-integration.md) | MCP + local plugin + optional helper scripts |
 
 The Claude sections below remain the most detailed copy-paste walkthrough, but they are no longer the only mental model.
 

@@ -25,7 +25,7 @@ AMM loads configuration in the following order:
 | `AMM_HTTP_ADDR` | HTTP server listen address | `:8080` |
 | `AMM_HTTP_CORS_ORIGINS` | Comma-separated list of allowed CORS origins | _(unset)_ |
 | `AMM_API_KEY` | Static API key for HTTP server authentication. When set, all HTTP API requests (except `/healthz`, `/v1/status`, `/openapi.json`, `/swagger/`) must include the key via `Authorization: Bearer <key>` or `X-API-Key: <key>` header. | _(unset)_ |
-| `AMM_API_URL` | Reserved for future use. Currently stored in configuration but not consumed by any binary. | _(unset)_ |
+| `AMM_API_URL` | Base URL for API-mode example integrations (for example the Hermes plugin example and other shipped HTTP hooks). Not consumed directly by the AMM binaries themselves. | _(unset)_ |
 
 ### Retrieval
 | Variable | Description | Default |

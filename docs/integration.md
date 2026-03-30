@@ -1,11 +1,12 @@
 # Integration Guide
 
-AMM (Agent Memory Manager) integrates with agent runtimes through four primary mechanisms:
+AMM (Agent Memory Manager) integrates with agent runtimes through five primary mechanisms:
 
 1. **Hooks**: Automatic capture of interactions (events in, ambient recall out).
 2. **MCP Tools**: Explicit agent-initiated memory management for MCP-compatible runtimes.
-3. **MCP-over-HTTP**: Streamable HTTP transport for remote or containerized MCP clients.
-4. **HTTP API**: RESTful integration for networked or web-based agents.
+3. **Local Plugins**: Runtime-native plugins that can inject per-turn context and capture events without patching core runtime code.
+4. **MCP-over-HTTP**: Streamable HTTP transport for remote or containerized MCP clients.
+5. **HTTP API**: RESTful integration for networked or web-based agents.
 
 ## Integration Modes
 
@@ -25,7 +26,14 @@ For local runtimes like Claude Code or IDE-based agents.
 - **When to use**: Direct agent tool usage where the agent is "memory-aware".
 - **Reference**: [MCP Reference](mcp-reference.md)
 
-### 3. CLI Hooks (Transparent Capture)
+### 3. Local Plugins
+For runtimes that expose a native plugin API for hooks, prompt injection, or event capture.
+
+- **Transport**: local `amm` binary or `amm-http` over REST, plus optional MCP for explicit tools
+- **When to use**: Runtime-native hot-path context injection without maintaining shell wrappers.
+- **Examples**: [Hermes Integration](hermes-agent-integration.md), [OpenCode Integration](opencode-integration.md)
+
+### 4. CLI Hooks (Transparent Capture)
 For runtimes that support lifecycle hooks (e.g., shell scripts triggered on user input/output).
 
 - **Binary**: `amm`
@@ -42,7 +50,7 @@ For runtimes that support lifecycle hooks (e.g., shell scripts triggered on user
 | Codex | MCP + CLI Hooks | [Codex Integration](codex-integration.md) |
 | OpenCode | MCP + Local Plugin | [OpenCode Integration](opencode-integration.md) |
 | OpenClaw | MCP Sidecar | [OpenClaw Integration](openclaw-integration.md) |
-| Hermes | MCP Sidecar | [Hermes Integration](hermes-agent-integration.md) |
+| Hermes | MCP + Local Plugin | [Hermes Integration](hermes-agent-integration.md) |
 
 *Note: For all runtimes, the HTTP API mode is also an option for remote or containerized deployments.*
 
@@ -116,7 +124,7 @@ If your runtime delegates `expand` calls, it must pass `delegation_depth` and in
 - First delegated expand call: `delegation_depth = 1`
 - Continue incrementing for each nested delegation hop
 
-The current example integrations (`examples/opencode`, `examples/openclaw`, `examples/codex`, `examples/hermes-agent`) do not issue `expand` calls today. When adding expand usage to those runtimes, include `delegation_depth` from the start.
+The current example integrations (`examples/opencode`, `examples/openclaw`, `examples/codex`, `examples/hermes-agent/amm-memory`) do not issue `expand` calls today. When adding expand usage to those runtimes, include `delegation_depth` from the start.
 
 ---
 
