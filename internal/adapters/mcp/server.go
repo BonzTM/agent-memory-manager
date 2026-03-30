@@ -47,7 +47,7 @@ type Tool struct {
 // incoming tool calls through the shared service layer.
 func Serve() error {
 	cfg := runtime.LoadConfigWithEnv()
-	slog.Debug("mcp server start", "db_path", cfg.Storage.DBPath, "version", Version)
+	slog.Debug("mcp server start", "db_path", cfg.Storage.DBPath, "version", buildinfo.Version)
 
 	svc, cleanup, err := runtime.NewService(cfg)
 	if err != nil {
