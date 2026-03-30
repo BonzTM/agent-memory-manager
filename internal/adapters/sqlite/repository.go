@@ -2,9 +2,7 @@ package sqlite
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -41,14 +39,6 @@ func sanitizeFTS5Query(query string) string {
 	return strings.Join(filtered, " ")
 }
 
-func generateID(prefix string) string {
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		panic(fmt.Sprintf("generateID: crypto/rand failed: %v", err))
-	}
-	return prefix + hex.EncodeToString(b)
-}
-
 // SQLiteRepository implements core.Repository backed by SQLite.
 type SQLiteRepository struct {
 	*DB
@@ -62,12 +52,19 @@ func NewSQLiteRepository() *SQLiteRepository {
 	return &SQLiteRepository{}
 }
 
+func wrapErr(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", op, err)
+}
+
 // ---------- Lifecycle ----------
 
 func (r *SQLiteRepository) Open(ctx context.Context, dbPath string) error {
 	db, err := Open(ctx, dbPath)
 	if err != nil {
-		return err
+		return wrapErr("open sqlite", err)
 	}
 	r.DB = db
 	return nil
@@ -77,11 +74,11 @@ func (r *SQLiteRepository) Close() error {
 	if r.DB == nil {
 		return nil
 	}
-	return r.DB.Close()
+	return wrapErr("close sqlite", r.DB.Close())
 }
 
 func (r *SQLiteRepository) Migrate(ctx context.Context) error {
-	return Migrate(ctx, r.DB)
+	return wrapErr("migrate sqlite", Migrate(ctx, r.DB))
 }
 
 func (r *SQLiteRepository) IsInitialized(ctx context.Context) (bool, error) {
@@ -89,7 +86,7 @@ func (r *SQLiteRepository) IsInitialized(ctx context.Context) (bool, error) {
 		"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_version'")
 	var count int
 	if err := row.Scan(&count); err != nil {
-		return false, err
+		return false, wrapErr("is initialized", err)
 	}
 	if count == 0 {
 		return false, nil
@@ -97,7 +94,7 @@ func (r *SQLiteRepository) IsInitialized(ctx context.Context) (bool, error) {
 	row = r.QueryRowContext(ctx, "SELECT COALESCE(MAX(version),0) FROM schema_version")
 	var ver int
 	if err := row.Scan(&ver); err != nil {
-		return false, err
+		return false, wrapErr("is initialized", err)
 	}
 	return ver > 0, nil
 }
@@ -135,13 +132,17 @@ func marshalSliceJSON(s []string) string {
 
 func unmarshalMap(data string) map[string]string {
 	m := make(map[string]string)
-	_ = json.Unmarshal([]byte(data), &m)
+	if err := json.Unmarshal([]byte(data), &m); err != nil {
+		slog.Warn("decode field failed", "field", "map_json", "error", err)
+	}
 	return m
 }
 
 func unmarshalSlice(data string) []string {
 	var s []string
-	_ = json.Unmarshal([]byte(data), &s)
+	if err := json.Unmarshal([]byte(data), &s); err != nil {
+		slog.Warn("decode field failed", "field", "slice_json", "error", err)
+	}
 	return s
 }
 
@@ -154,7 +155,9 @@ func marshalEmbeddingJSON(v []float32) string {
 
 func unmarshalEmbeddingJSON(data string) []float32 {
 	var v []float32
-	_ = json.Unmarshal([]byte(data), &v)
+	if err := json.Unmarshal([]byte(data), &v); err != nil {
+		slog.Warn("decode field failed", "field", "embedding_json", "error", err)
+	}
 	return v
 }
 
@@ -192,6 +195,10 @@ func nullStr(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: true}
 }
 
+func errNotFound(kind, id string) error {
+	return fmt.Errorf("%w: %s %s", core.ErrNotFound, kind, id)
+}
+
 // placeholders returns a comma-separated list of n placeholders for SQL IN clauses.
 // placeholders generates a comma-separated list of SQL placeholders (?).
 // Used to construct IN clause queries dynamically.
@@ -213,7 +220,7 @@ func placeholders(n int) string {
 
 func (r *SQLiteRepository) InsertEvent(ctx context.Context, event *core.Event) error {
 	if event.ID == "" {
-		event.ID = generateID("evt_")
+		event.ID = core.GenerateID("evt_")
 	}
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO events (id, kind, source_system, surface, session_id, project_id,
@@ -228,10 +235,10 @@ func (r *SQLiteRepository) InsertEvent(ctx context.Context, event *core.Event) e
 		timeToStr(event.OccurredAt), timeToStr(event.IngestedAt),
 	)
 	if err != nil {
-		return err
+		return wrapErr("insert event", err)
 	}
 	_, err = r.ExecContext(ctx, `UPDATE events SET sequence_id = rowid WHERE id = ?`, event.ID)
-	return err
+	return wrapErr("insert event sequence", err)
 }
 
 func (r *SQLiteRepository) GetEvent(ctx context.Context, id string) (*core.Event, error) {
@@ -249,7 +256,7 @@ func (r *SQLiteRepository) GetEvent(ctx context.Context, id string) (*core.Event
 		&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt, &reflectedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("event not found: %s", id)
+			return nil, errNotFound("event", id)
 		}
 		return nil, err
 	}
@@ -305,7 +312,7 @@ func (r *SQLiteRepository) ListEvents(ctx context.Context, opts core.ListEventsO
 	if opts.AfterSequenceID > 0 || opts.BeforeSequenceID > 0 || opts.UnreflectedOnly {
 		query += " ORDER BY sequence_id ASC LIMIT ?"
 	} else {
-		query += " ORDER BY occurred_at DESC, id DESC LIMIT ?"
+		query += " ORDER BY occurred_at DESC, sequence_id DESC, id DESC LIMIT ?"
 	}
 	args = append(args, defaultLimit(opts.Limit))
 
@@ -392,7 +399,7 @@ func (r *SQLiteRepository) UpdateEvent(ctx context.Context, event *core.Event) e
 		ptrTimeToStr(event.ReflectedAt),
 		event.ID,
 	)
-	return err
+	return wrapErr("insert memory", err)
 }
 
 func (r *SQLiteRepository) CountUnreflectedEvents(ctx context.Context) (int64, error) {
@@ -447,7 +454,7 @@ func (r *SQLiteRepository) ClaimUnreflectedEvents(ctx context.Context, limit int
 }
 func (r *SQLiteRepository) InsertSummary(ctx context.Context, summary *core.Summary) error {
 	if summary.ID == "" {
-		summary.ID = generateID("sum_")
+		summary.ID = core.GenerateID("sum_")
 	}
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO summaries (id, kind, scope, project_id, session_id, agent_id,
@@ -478,11 +485,13 @@ func (r *SQLiteRepository) GetSummary(ctx context.Context, id string) (*core.Sum
 		&s.PrivacyLevel, &spanJSON, &metaJSON, &s.Depth, &s.CondensedKind, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("summary not found: %s", id)
+			return nil, errNotFound("summary", id)
 		}
 		return nil, err
 	}
-	_ = json.Unmarshal([]byte(spanJSON), &s.SourceSpan)
+	if err := json.Unmarshal([]byte(spanJSON), &s.SourceSpan); err != nil {
+		slog.Warn("decode field failed", "field", "source_span_json", "summary_id", s.ID, "error", err)
+	}
 	s.Metadata = unmarshalMap(metaJSON)
 	s.CreatedAt = strToTime(createdAt)
 	s.UpdatedAt = strToTime(updatedAt)
@@ -530,7 +539,9 @@ func (r *SQLiteRepository) ListSummaries(ctx context.Context, opts core.ListSumm
 			&s.PrivacyLevel, &spanJSON, &metaJSON, &s.Depth, &s.CondensedKind, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(spanJSON), &s.SourceSpan)
+		if err := json.Unmarshal([]byte(spanJSON), &s.SourceSpan); err != nil {
+			slog.Warn("decode field failed", "field", "source_span_json", "summary_id", s.ID, "error", err)
+		}
 		s.Metadata = unmarshalMap(metaJSON)
 		s.CreatedAt = strToTime(createdAt)
 		s.UpdatedAt = strToTime(updatedAt)
@@ -566,7 +577,9 @@ func (r *SQLiteRepository) SearchSummaries(ctx context.Context, query string, li
 			&s.PrivacyLevel, &spanJSON, &metaJSON, &s.Depth, &s.CondensedKind, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(spanJSON), &s.SourceSpan)
+		if err := json.Unmarshal([]byte(spanJSON), &s.SourceSpan); err != nil {
+			slog.Warn("decode field failed", "field", "source_span_json", "summary_id", s.ID, "error", err)
+		}
 		s.Metadata = unmarshalMap(metaJSON)
 		s.CreatedAt = strToTime(createdAt)
 		s.UpdatedAt = strToTime(updatedAt)
@@ -580,6 +593,29 @@ func (r *SQLiteRepository) GetSummaryChildren(ctx context.Context, parentID stri
 		SELECT parent_summary_id, child_kind, child_id, COALESCE(edge_order, 0)
 		FROM summary_edges WHERE parent_summary_id = ?
 		ORDER BY edge_order`, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var edges []core.SummaryEdge
+	for rows.Next() {
+		var e core.SummaryEdge
+		if err := rows.Scan(&e.ParentSummaryID, &e.ChildKind, &e.ChildID, &e.EdgeOrder); err != nil {
+			return nil, err
+		}
+		edges = append(edges, e)
+	}
+	return edges, rows.Err()
+}
+
+func (r *SQLiteRepository) GetSummaryParents(ctx context.Context, childID string) ([]core.SummaryEdge, error) {
+	slog.Debug("get summary parents", "child_id", childID)
+
+	rows, err := r.QueryContext(ctx, `
+		SELECT parent_summary_id, child_kind, child_id, COALESCE(edge_order, 0)
+		FROM summary_edges WHERE child_id = ?
+		ORDER BY edge_order`, childID)
 	if err != nil {
 		return nil, err
 	}
@@ -630,7 +666,7 @@ func (r *SQLiteRepository) InsertSummaryEdge(ctx context.Context, edge *core.Sum
 
 func (r *SQLiteRepository) InsertMemory(ctx context.Context, memory *core.Memory) error {
 	if memory.ID == "" {
-		memory.ID = generateID("mem_")
+		memory.ID = core.GenerateID("mem_")
 	}
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO memories (id, type, scope, project_id, session_id, agent_id,
@@ -709,9 +745,9 @@ func (r *SQLiteRepository) GetMemory(ctx context.Context, id string) (*core.Memo
 	m, err := r.scanMemory(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("memory not found: %s", id)
+			return nil, errNotFound("memory", id)
 		}
-		return nil, err
+		return nil, wrapErr("get memory", err)
 	}
 	return m, nil
 }
@@ -775,7 +811,7 @@ func (r *SQLiteRepository) UpdateMemory(ctx context.Context, memory *core.Memory
 		marshalMapJSON(memory.Metadata),
 		memory.ID,
 	)
-	return err
+	return wrapErr("update memory", err)
 }
 
 func (r *SQLiteRepository) UpdateMemoriesBatch(ctx context.Context, memories []*core.Memory) error {
@@ -1056,7 +1092,7 @@ func prefixCols(alias, cols string) string {
 
 func (r *SQLiteRepository) InsertClaim(ctx context.Context, claim *core.Claim) error {
 	if claim.ID == "" {
-		claim.ID = generateID("clm_")
+		claim.ID = core.GenerateID("clm_")
 	}
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO claims (id, memory_id, subject_entity_id, predicate, object_value,
@@ -1092,7 +1128,7 @@ func (r *SQLiteRepository) GetClaim(ctx context.Context, id string) (*core.Claim
 		&observedAt, &validFrom, &validTo, &metaJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("claim not found: %s", id)
+			return nil, errNotFound("claim", id)
 		}
 		return nil, err
 	}
@@ -1139,7 +1175,7 @@ func (r *SQLiteRepository) ListClaimsByMemory(ctx context.Context, memoryID stri
 
 func (r *SQLiteRepository) InsertEntity(ctx context.Context, entity *core.Entity) error {
 	if entity.ID == "" {
-		entity.ID = generateID("ent_")
+		entity.ID = core.GenerateID("ent_")
 	}
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO entities (id, type, canonical_name, aliases_json, description,
@@ -1181,7 +1217,7 @@ func (r *SQLiteRepository) GetEntity(ctx context.Context, id string) (*core.Enti
 		&e.Description, &metaJSON, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("entity not found: %s", id)
+			return nil, errNotFound("entity", id)
 		}
 		return nil, err
 	}
@@ -1471,7 +1507,7 @@ func (r *SQLiteRepository) CountActiveMemories(ctx context.Context) (int64, erro
 
 func (r *SQLiteRepository) InsertProject(ctx context.Context, project *core.Project) error {
 	if project.ID == "" {
-		project.ID = generateID("prj_")
+		project.ID = core.GenerateID("prj_")
 	}
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO projects (id, name, path, description, metadata_json, created_at, updated_at)
@@ -1494,7 +1530,7 @@ func (r *SQLiteRepository) GetProject(ctx context.Context, id string) (*core.Pro
 	err := row.Scan(&p.ID, &p.Name, &p.Path, &p.Description, &metaJSON, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("project not found: %s", id)
+			return nil, errNotFound("project", id)
 		}
 		return nil, err
 	}
@@ -1539,14 +1575,14 @@ func (r *SQLiteRepository) DeleteProject(ctx context.Context, id string) error {
 		return err
 	}
 	if affected == 0 {
-		return fmt.Errorf("project not found: %s", id)
+		return errNotFound("project", id)
 	}
 	return nil
 }
 
 func (r *SQLiteRepository) InsertRelationship(ctx context.Context, rel *core.Relationship) error {
 	if rel.ID == "" {
-		rel.ID = generateID("rel_")
+		rel.ID = core.GenerateID("rel_")
 	}
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO relationships (id, from_entity_id, to_entity_id, relationship_type, metadata_json, created_at, updated_at)
@@ -1568,7 +1604,7 @@ func (r *SQLiteRepository) GetRelationship(ctx context.Context, id string) (*cor
 	err := row.Scan(&rel.ID, &rel.FromEntityID, &rel.ToEntityID, &rel.RelationshipType, &metaJSON, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("relationship not found: %s", id)
+			return nil, errNotFound("relationship", id)
 		}
 		return nil, err
 	}
@@ -1681,7 +1717,7 @@ func (r *SQLiteRepository) InsertRelationshipsBatch(ctx context.Context, rels []
 			continue
 		}
 		if rel.ID == "" {
-			rel.ID = generateID("rel_")
+			rel.ID = core.GenerateID("rel_")
 		}
 		if strings.TrimSpace(rel.FromEntityID) == "" || strings.TrimSpace(rel.ToEntityID) == "" || strings.TrimSpace(rel.RelationshipType) == "" {
 			continue
@@ -1925,7 +1961,7 @@ func (r *SQLiteRepository) DeleteRelationship(ctx context.Context, id string) er
 		return err
 	}
 	if affected == 0 {
-		return fmt.Errorf("relationship not found: %s", id)
+		return errNotFound("relationship", id)
 	}
 	return nil
 }
@@ -1934,7 +1970,7 @@ func (r *SQLiteRepository) DeleteRelationship(ctx context.Context, id string) er
 
 func (r *SQLiteRepository) InsertEpisode(ctx context.Context, episode *core.Episode) error {
 	if episode.ID == "" {
-		episode.ID = generateID("epi_")
+		episode.ID = core.GenerateID("epi_")
 	}
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO episodes (id, title, summary, tight_description, scope, project_id,
@@ -1979,7 +2015,9 @@ func (r *SQLiteRepository) scanEpisode(scanner interface {
 	}
 	ep.StartedAt = nullStrToPtrTime(startedAt)
 	ep.EndedAt = nullStrToPtrTime(endedAt)
-	_ = json.Unmarshal([]byte(spanJSON), &ep.SourceSpan)
+	if err := json.Unmarshal([]byte(spanJSON), &ep.SourceSpan); err != nil {
+		slog.Warn("decode field failed", "field", "source_span_json", "episode_id", ep.ID, "error", err)
+	}
 	ep.SourceSummaryIDs = unmarshalSlice(sumIDsJSON)
 	ep.Participants = unmarshalSlice(partJSON)
 	ep.RelatedEntities = unmarshalSlice(relJSON)
@@ -2004,7 +2042,7 @@ func (r *SQLiteRepository) GetEpisode(ctx context.Context, id string) (*core.Epi
 	ep, err := r.scanEpisode(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("episode not found: %s", id)
+			return nil, errNotFound("episode", id)
 		}
 		return nil, err
 	}
@@ -2074,7 +2112,7 @@ func (r *SQLiteRepository) SearchEpisodes(ctx context.Context, query string, lim
 
 func (r *SQLiteRepository) InsertArtifact(ctx context.Context, artifact *core.Artifact) error {
 	if artifact.ID == "" {
-		artifact.ID = generateID("art_")
+		artifact.ID = core.GenerateID("art_")
 	}
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO artifacts (id, kind, source_system, project_id, path, content,
@@ -2100,7 +2138,7 @@ func (r *SQLiteRepository) GetArtifact(ctx context.Context, id string) (*core.Ar
 		&a.Path, &a.Content, &metaJSON, &createdAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("artifact not found: %s", id)
+			return nil, errNotFound("artifact", id)
 		}
 		return nil, err
 	}
@@ -2113,7 +2151,7 @@ func (r *SQLiteRepository) GetArtifact(ctx context.Context, id string) (*core.Ar
 
 func (r *SQLiteRepository) InsertJob(ctx context.Context, job *core.Job) error {
 	if job.ID == "" {
-		job.ID = generateID("job_")
+		job.ID = core.GenerateID("job_")
 	}
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO jobs (id, kind, status, payload_json, result_json, error_text,
@@ -2143,7 +2181,7 @@ func (r *SQLiteRepository) GetJob(ctx context.Context, id string) (*core.Job, er
 		&scheduledAt, &startedAt, &finishedAt, &createdAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("job not found: %s", id)
+			return nil, errNotFound("job", id)
 		}
 		return nil, err
 	}
@@ -2219,7 +2257,7 @@ func (r *SQLiteRepository) ListJobs(ctx context.Context, opts core.ListJobsOptio
 
 func (r *SQLiteRepository) InsertIngestionPolicy(ctx context.Context, policy *core.IngestionPolicy) error {
 	if policy.ID == "" {
-		policy.ID = generateID("pol_")
+		policy.ID = core.GenerateID("pol_")
 	}
 	_, err := r.ExecContext(ctx, `
 		INSERT INTO ingestion_policies (id, pattern_type, pattern, mode,
@@ -2246,7 +2284,7 @@ func (r *SQLiteRepository) GetIngestionPolicy(ctx context.Context, id string) (*
 		&priority, &matchMode, &metaJSON, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("ingestion policy not found: %s", id)
+			return nil, errNotFound("ingestion policy", id)
 		}
 		return nil, err
 	}
@@ -2301,7 +2339,7 @@ func (r *SQLiteRepository) DeleteIngestionPolicy(ctx context.Context, id string)
 		return err
 	}
 	if affected == 0 {
-		return fmt.Errorf("ingestion policy not found: %s", id)
+		return errNotFound("ingestion policy", id)
 	}
 	return nil
 }
@@ -2618,7 +2656,7 @@ func (r *SQLiteRepository) GetEmbedding(ctx context.Context, objectID, objectKin
 	var embeddingJSON, createdAt string
 	if err := row.Scan(&rec.ObjectID, &rec.ObjectKind, &embeddingJSON, &rec.Model, &createdAt); err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("embedding not found: %s/%s/%s", objectKind, objectID, model)
+			return nil, errNotFound("embedding", fmt.Sprintf("%s/%s/%s", objectKind, objectID, model))
 		}
 		return nil, err
 	}
@@ -2752,7 +2790,9 @@ func (r *SQLiteRepository) ListUnembeddedSummaries(ctx context.Context, model st
 			&sm.PrivacyLevel, &spanJSON, &metaJSON, &sm.Depth, &sm.CondensedKind, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(spanJSON), &sm.SourceSpan)
+		if err := json.Unmarshal([]byte(spanJSON), &sm.SourceSpan); err != nil {
+			slog.Warn("decode field failed", "field", "source_span_json", "summary_id", sm.ID, "error", err)
+		}
 		sm.Metadata = unmarshalMap(metaJSON)
 		sm.CreatedAt = strToTime(createdAt)
 		sm.UpdatedAt = strToTime(updatedAt)

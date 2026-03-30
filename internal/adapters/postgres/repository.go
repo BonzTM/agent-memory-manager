@@ -2,10 +2,8 @@ package postgres
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,14 +26,6 @@ var _ core.Repository = (*Repository)(nil)
 
 func NewRepository() *Repository {
 	return &Repository{}
-}
-
-func generateID(prefix string) string {
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		panic(fmt.Sprintf("generateID: crypto/rand failed: %v", err))
-	}
-	return prefix + hex.EncodeToString(b)
 }
 
 func defaultLimit(limit int) int {
@@ -139,7 +129,9 @@ func parseSourceSpanJSON(data []byte) core.SourceSpan {
 		return core.SourceSpan{}
 	}
 	var out core.SourceSpan
-	_ = json.Unmarshal(data, &out)
+	if err := json.Unmarshal(data, &out); err != nil {
+		slog.Warn("decode field failed", "field", "source_span_json", "error", err)
+	}
 	return out
 }
 
@@ -199,7 +191,7 @@ func placeholders(start, n int) string {
 
 func (r *Repository) InsertEvent(ctx context.Context, event *core.Event) error {
 	if event.ID == "" {
-		event.ID = generateID("evt_")
+		event.ID = core.GenerateID("evt_")
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO events (
@@ -308,7 +300,7 @@ func (r *Repository) ListEvents(ctx context.Context, opts core.ListEventsOptions
 	if opts.AfterSequenceID > 0 || opts.BeforeSequenceID > 0 || opts.UnreflectedOnly {
 		query += " ORDER BY sequence_id ASC"
 	} else {
-		query += " ORDER BY occurred_at DESC, id DESC"
+		query += " ORDER BY occurred_at DESC, sequence_id DESC, id DESC"
 	}
 	query += fmt.Sprintf(" LIMIT $%d", i)
 	args = append(args, defaultLimit(opts.Limit))
@@ -432,7 +424,7 @@ func (r *Repository) ClaimUnreflectedEvents(ctx context.Context, limit int) ([]c
 
 func (r *Repository) InsertSummary(ctx context.Context, summary *core.Summary) error {
 	if summary.ID == "" {
-		summary.ID = generateID("sum_")
+		summary.ID = core.GenerateID("sum_")
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO summaries (id, kind, scope, project_id, session_id, agent_id,
@@ -565,6 +557,27 @@ func (r *Repository) GetSummaryChildren(ctx context.Context, parentID string) ([
 	return out, rows.Err()
 }
 
+func (r *Repository) GetSummaryParents(ctx context.Context, childID string) ([]core.SummaryEdge, error) {
+	slog.Debug("get summary parents", "child_id", childID)
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT parent_summary_id, child_kind, child_id, COALESCE(edge_order, 0)
+		FROM summary_edges WHERE child_id = $1 ORDER BY edge_order`, childID)
+	if err != nil {
+		return nil, wrapErr("get summary parents", err)
+	}
+	defer rows.Close()
+	out := make([]core.SummaryEdge, 0)
+	for rows.Next() {
+		var e core.SummaryEdge
+		if err := rows.Scan(&e.ParentSummaryID, &e.ChildKind, &e.ChildID, &e.EdgeOrder); err != nil {
+			return nil, wrapErr("get summary parents", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func (r *Repository) ListParentedSummaryIDs(ctx context.Context) (map[string]bool, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT child_id FROM summary_edges WHERE child_kind = 'summary'`)
 	if err != nil {
@@ -594,7 +607,7 @@ func (r *Repository) InsertSummaryEdge(ctx context.Context, edge *core.SummaryEd
 
 func (r *Repository) InsertMemory(ctx context.Context, memory *core.Memory) error {
 	if memory.ID == "" {
-		memory.ID = generateID("mem_")
+		memory.ID = core.GenerateID("mem_")
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO memories (
@@ -943,7 +956,7 @@ func (r *Repository) CountActiveMemories(ctx context.Context) (int64, error) {
 
 func (r *Repository) InsertClaim(ctx context.Context, claim *core.Claim) error {
 	if claim.ID == "" {
-		claim.ID = generateID("clm_")
+		claim.ID = core.GenerateID("clm_")
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO claims (id, memory_id, subject_entity_id, predicate, object_value,
@@ -1036,7 +1049,7 @@ func (r *Repository) ListClaimsByMemory(ctx context.Context, memoryID string) ([
 
 func (r *Repository) InsertEntity(ctx context.Context, entity *core.Entity) error {
 	if entity.ID == "" {
-		entity.ID = generateID("ent_")
+		entity.ID = core.GenerateID("ent_")
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO entities (id, type, canonical_name, aliases, description, metadata_json, created_at, updated_at)
@@ -1298,7 +1311,7 @@ func (r *Repository) CountMemoryEntityLinksBatch(ctx context.Context, entityIDs 
 
 func (r *Repository) InsertProject(ctx context.Context, project *core.Project) error {
 	if project.ID == "" {
-		project.ID = generateID("prj_")
+		project.ID = core.GenerateID("prj_")
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO projects (id, name, path, description, metadata_json, created_at, updated_at)
@@ -1357,7 +1370,7 @@ func (r *Repository) DeleteProject(ctx context.Context, id string) error {
 
 func (r *Repository) InsertRelationship(ctx context.Context, rel *core.Relationship) error {
 	if rel.ID == "" {
-		rel.ID = generateID("rel_")
+		rel.ID = core.GenerateID("rel_")
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO relationships (id, from_entity_id, to_entity_id, relationship_type, metadata_json, created_at, updated_at)
@@ -1467,7 +1480,7 @@ func (r *Repository) InsertRelationshipsBatch(ctx context.Context, rels []*core.
 			continue
 		}
 		if rel.ID == "" {
-			rel.ID = generateID("rel_")
+			rel.ID = core.GenerateID("rel_")
 		}
 		if strings.TrimSpace(rel.FromEntityID) == "" || strings.TrimSpace(rel.ToEntityID) == "" || strings.TrimSpace(rel.RelationshipType) == "" {
 			continue
@@ -1720,7 +1733,7 @@ func (r *Repository) DeleteRelationship(ctx context.Context, id string) error {
 
 func (r *Repository) InsertEpisode(ctx context.Context, episode *core.Episode) error {
 	if episode.ID == "" {
-		episode.ID = generateID("epi_")
+		episode.ID = core.GenerateID("epi_")
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO episodes (
@@ -1853,7 +1866,7 @@ func (r *Repository) SearchEpisodes(ctx context.Context, query string, limit int
 
 func (r *Repository) InsertArtifact(ctx context.Context, artifact *core.Artifact) error {
 	if artifact.ID == "" {
-		artifact.ID = generateID("art_")
+		artifact.ID = core.GenerateID("art_")
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO artifacts (id, kind, source_system, project_id, path, content, metadata_json, created_at)
@@ -1878,7 +1891,7 @@ func (r *Repository) GetArtifact(ctx context.Context, id string) (*core.Artifact
 
 func (r *Repository) InsertJob(ctx context.Context, job *core.Job) error {
 	if job.ID == "" {
-		job.ID = generateID("job_")
+		job.ID = core.GenerateID("job_")
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO jobs (id, kind, status, payload_json, result_json, error_text, scheduled_at, started_at, finished_at, created_at)
@@ -1985,7 +1998,7 @@ func matchesPolicy(p core.IngestionPolicy, value string) bool {
 
 func (r *Repository) InsertIngestionPolicy(ctx context.Context, policy *core.IngestionPolicy) error {
 	if policy.ID == "" {
-		policy.ID = generateID("pol_")
+		policy.ID = core.GenerateID("pol_")
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO ingestion_policies (id, pattern_type, pattern, mode, priority, match_mode, metadata_json, created_at, updated_at)
