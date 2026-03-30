@@ -8,6 +8,7 @@ import (
 	nethttp "net/http"
 	"time"
 
+	"github.com/bonztm/agent-memory-manager/internal/buildinfo"
 	"github.com/bonztm/agent-memory-manager/internal/core"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
@@ -40,7 +41,7 @@ func NewServer(svc core.Service, cfg Config) *Server {
 		}
 	}
 
-	mcpSrv := newMCPBridge(svc, "1.0.0")
+	mcpSrv := newMCPBridge(svc, buildinfo.Version)
 	mcpHandler := mcpserver.NewStreamableHTTPServer(mcpSrv)
 
 	s := &Server{svc: svc, addr: cfg.Addr, corsOrigins: cfg.CORSOrigins, mcpHandler: mcpHandler}

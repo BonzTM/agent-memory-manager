@@ -10,11 +10,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/bonztm/agent-memory-manager/internal/buildinfo"
 	"github.com/bonztm/agent-memory-manager/internal/core"
 	"github.com/bonztm/agent-memory-manager/internal/runtime"
 )
-
-var Version = "dev"
 
 // JSON-RPC types for MCP protocol.
 type jsonrpcRequest struct {
@@ -87,7 +86,7 @@ func handleRequest(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 				"protocolVersion": "2024-11-05",
 				"serverInfo": map[string]string{
 					"name":    "amm-mcp",
-					"version": "0.1.0",
+					"version": buildinfo.Version,
 				},
 				"capabilities": map[string]interface{}{
 					"tools": map[string]bool{"listChanged": false},

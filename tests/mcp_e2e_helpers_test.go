@@ -129,7 +129,7 @@ func startMCPServer(t *testing.T) *mcpE2EServer {
 		"protocolVersion": "2024-11-05",
 		"clientInfo": map[string]string{
 			"name":    "amm-mcp-e2e",
-			"version": "0.1.0",
+			"version": "1.0.0",
 		},
 		"capabilities": map[string]interface{}{},
 	})

@@ -3148,8 +3148,8 @@ func TestSupersession_Remember(t *testing.T) {
 
 	memA, err := svc.Remember(ctx, &core.Memory{
 		Type:             core.MemoryTypeFact,
-		Body:             "Go version is 1.21",
-		TightDescription: "Go 1.21",
+		Body:             "Go version is 1.26.1",
+		TightDescription: "Go 1.26.1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -3157,8 +3157,8 @@ func TestSupersession_Remember(t *testing.T) {
 
 	memB, err := svc.Remember(ctx, &core.Memory{
 		Type:             core.MemoryTypeFact,
-		Body:             "Go version is 1.22",
-		TightDescription: "Go 1.22",
+		Body:             "Go version is 1.26.2",
+		TightDescription: "Go 1.26.2",
 		Supersedes:       memA.ID,
 	})
 	if err != nil {

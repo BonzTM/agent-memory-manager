@@ -5,4 +5,4 @@ SESSION_CONTENT="Claude Code session ended for project: ${CLAUDE_PROJECT_ID:-unk
 curl -s -X POST "${AMM_API_URL}/v1/events" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: ${AMM_API_KEY:-}" \
-  -d "{\"kind\": \"session_end\", \"source_system\": \"claude-code\", \"content\": \"${SESSION_CONTENT}\"}"
+  -d "{\"kind\": \"session_stop\", \"source_system\": \"claude-code\", \"content\": \"${SESSION_CONTENT}\"}"

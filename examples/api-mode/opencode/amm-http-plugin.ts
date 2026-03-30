@@ -8,13 +8,17 @@ export default {
   description: 'Connect to AMM via HTTP API',
   config: {
     apiUrl: process.env.AMM_API_URL || 'http://localhost:8080',
-    projectId: process.env.OPENCODE_PROJECT_ID || 'default'
+    apiKey: process.env.AMM_API_KEY || '',
+    projectId: process.env.AMM_PROJECT_ID || 'default'
   },
   hooks: {
     async onSessionStart(ctx) {
       const response = await fetch(`${this.config.apiUrl}/v1/recall`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : {})
+        },
         body: JSON.stringify({
           query: `Ambient context for project ${this.config.projectId}`,
           opts: { mode: 'ambient', limit: 20 }
@@ -23,10 +27,13 @@ export default {
       const data = await response.json();
       ctx.setContext('amm_recall', data.data);
     },
-    async onMessage(ctx, message) {
+    async onMessage(_ctx, message) {
       await fetch(`${this.config.apiUrl}/v1/events`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : {})
+        },
         body: JSON.stringify({
           kind: message.role === 'user' ? 'message_user' : 'message_assistant',
           source_system: 'opencode',
