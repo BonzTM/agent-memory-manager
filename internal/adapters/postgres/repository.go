@@ -658,7 +658,7 @@ func (r *Repository) scanMemory(scanner interface{ Scan(dest ...any) error }) (*
 		&m.Subject, &m.Body, &m.TightDescription, &m.Confidence, &m.Importance, &m.PrivacyLevel, &m.Status,
 		&observedAt, &m.CreatedAt, &m.UpdatedAt, &validFrom, &validTo, &lastConfirmedAt,
 		&m.Supersedes, &m.SupersededBy, &supersededAt,
-		pq.Array(&sourceEventIDs), pq.Array(&sourceSummaryIDs), pq.Array(&sourceArtifactIDs), pq.Array(&tags), &meta); err != nil {
+		&sourceEventIDs, &sourceSummaryIDs, &sourceArtifactIDs, &tags, &meta); err != nil {
 		return nil, wrapErr("scan memory", err)
 	}
 	if observedAt.Valid {
@@ -1074,48 +1074,54 @@ func (r *Repository) UpdateEntity(ctx context.Context, entity *core.Entity) erro
 	return wrapErr("update entity", err)
 }
 
-func (r *Repository) GetEntity(ctx context.Context, id string) (*core.Entity, error) {
-	row := r.db.QueryRowContext(ctx, `SELECT id, type, canonical_name, aliases, COALESCE(description,''), metadata_json, created_at, updated_at FROM entities WHERE id = $1`, id)
+const entityCols = `id, type, canonical_name, aliases, COALESCE(description,''), metadata_json, created_at, updated_at`
+
+func (r *Repository) scanEntity(scanner interface{ Scan(dest ...any) error }) (*core.Entity, error) {
 	var e core.Entity
 	var aliases pq.StringArray
 	var meta []byte
-	if err := row.Scan(&e.ID, &e.Type, &e.CanonicalName, pq.Array(&aliases), &e.Description, &meta, &e.CreatedAt, &e.UpdatedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errNotFound("entity", id)
-		}
-		return nil, wrapErr("get entity", err)
+	if err := scanner.Scan(&e.ID, &e.Type, &e.CanonicalName, &aliases, &e.Description, &meta, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		return nil, wrapErr("scan entity", err)
 	}
 	e.Aliases = []string(aliases)
 	e.Metadata = parseMapJSON(meta)
 	return &e, nil
 }
 
+func (r *Repository) GetEntity(ctx context.Context, id string) (*core.Entity, error) {
+	row := r.db.QueryRowContext(ctx, `SELECT `+entityCols+` FROM entities WHERE id = $1`, id)
+	e, err := r.scanEntity(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errNotFound("entity", id)
+		}
+		return nil, wrapErr("get entity", err)
+	}
+	return e, nil
+}
+
 func (r *Repository) GetEntitiesByIDs(ctx context.Context, ids []string) ([]core.Entity, error) {
 	if len(ids) == 0 {
 		return []core.Entity{}, nil
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT id, type, canonical_name, aliases, COALESCE(description,''), metadata_json, created_at, updated_at FROM entities WHERE id = ANY($1)`, pq.Array(ids))
+	rows, err := r.db.QueryContext(ctx, `SELECT `+entityCols+` FROM entities WHERE id = ANY($1)`, pq.Array(ids))
 	if err != nil {
 		return nil, wrapErr("get entities by ids", err)
 	}
 	defer rows.Close()
 	out := make([]core.Entity, 0)
 	for rows.Next() {
-		var e core.Entity
-		var aliases pq.StringArray
-		var meta []byte
-		if err := rows.Scan(&e.ID, &e.Type, &e.CanonicalName, pq.Array(&aliases), &e.Description, &meta, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		e, err := r.scanEntity(rows)
+		if err != nil {
 			return nil, wrapErr("get entities by ids", err)
 		}
-		e.Aliases = []string(aliases)
-		e.Metadata = parseMapJSON(meta)
-		out = append(out, e)
+		out = append(out, *e)
 	}
 	return out, rows.Err()
 }
 
 func (r *Repository) ListEntities(ctx context.Context, opts core.ListEntitiesOptions) ([]core.Entity, error) {
-	query := `SELECT id, type, canonical_name, aliases, COALESCE(description,''), metadata_json, created_at, updated_at FROM entities WHERE 1=1`
+	query := `SELECT ` + entityCols + ` FROM entities WHERE 1=1`
 	args := make([]any, 0)
 	i := 1
 	if opts.Type != "" {
@@ -1132,15 +1138,11 @@ func (r *Repository) ListEntities(ctx context.Context, opts core.ListEntitiesOpt
 	defer rows.Close()
 	out := make([]core.Entity, 0)
 	for rows.Next() {
-		var e core.Entity
-		var aliases pq.StringArray
-		var meta []byte
-		if err := rows.Scan(&e.ID, &e.Type, &e.CanonicalName, pq.Array(&aliases), &e.Description, &meta, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		e, err := r.scanEntity(rows)
+		if err != nil {
 			return nil, wrapErr("list entities", err)
 		}
-		e.Aliases = []string(aliases)
-		e.Metadata = parseMapJSON(meta)
-		out = append(out, e)
+		out = append(out, *e)
 	}
 	return out, rows.Err()
 }
@@ -1148,7 +1150,7 @@ func (r *Repository) ListEntities(ctx context.Context, opts core.ListEntitiesOpt
 func (r *Repository) SearchEntities(ctx context.Context, query string, limit int) ([]core.Entity, error) {
 	like := "%" + query + "%"
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, type, canonical_name, aliases, COALESCE(description,''), metadata_json, created_at, updated_at
+		SELECT `+entityCols+`
 		FROM entities
 		WHERE canonical_name ILIKE $1
 			OR description ILIKE $1
@@ -1160,15 +1162,11 @@ func (r *Repository) SearchEntities(ctx context.Context, query string, limit int
 	defer rows.Close()
 	out := make([]core.Entity, 0)
 	for rows.Next() {
-		var e core.Entity
-		var aliases pq.StringArray
-		var meta []byte
-		if err := rows.Scan(&e.ID, &e.Type, &e.CanonicalName, pq.Array(&aliases), &e.Description, &meta, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		e, err := r.scanEntity(rows)
+		if err != nil {
 			return nil, wrapErr("search entities", err)
 		}
-		e.Aliases = []string(aliases)
-		e.Metadata = parseMapJSON(meta)
-		out = append(out, e)
+		out = append(out, *e)
 	}
 	return out, rows.Err()
 }
@@ -1212,7 +1210,7 @@ func (r *Repository) LinkMemoryEntitiesBatch(ctx context.Context, links []core.M
 
 func (r *Repository) GetMemoryEntities(ctx context.Context, memoryID string) ([]core.Entity, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT e.id, e.type, e.canonical_name, e.aliases, COALESCE(e.description,''), e.metadata_json, e.created_at, e.updated_at
+		SELECT `+entityCols+`
 		FROM entities e
 		JOIN memory_entities me ON me.entity_id = e.id
 		WHERE me.memory_id = $1`, memoryID)
@@ -1222,15 +1220,11 @@ func (r *Repository) GetMemoryEntities(ctx context.Context, memoryID string) ([]
 	defer rows.Close()
 	out := make([]core.Entity, 0)
 	for rows.Next() {
-		var e core.Entity
-		var aliases pq.StringArray
-		var meta []byte
-		if err := rows.Scan(&e.ID, &e.Type, &e.CanonicalName, pq.Array(&aliases), &e.Description, &meta, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		e, err := r.scanEntity(rows)
+		if err != nil {
 			return nil, wrapErr("get memory entities", err)
 		}
-		e.Aliases = []string(aliases)
-		e.Metadata = parseMapJSON(meta)
-		out = append(out, e)
+		out = append(out, *e)
 	}
 	return out, rows.Err()
 }
@@ -1256,7 +1250,7 @@ func (r *Repository) GetMemoryEntitiesBatch(ctx context.Context, memoryIDs []str
 		var e core.Entity
 		var aliases pq.StringArray
 		var meta []byte
-		if err := rows.Scan(&memoryID, &e.ID, &e.Type, &e.CanonicalName, pq.Array(&aliases), &e.Description, &meta, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		if err := rows.Scan(&memoryID, &e.ID, &e.Type, &e.CanonicalName, &aliases, &e.Description, &meta, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, wrapErr("get memory entities batch", err)
 		}
 		e.Aliases = []string(aliases)
@@ -1581,7 +1575,7 @@ func (r *Repository) ListRelatedEntities(ctx context.Context, entityID string, d
 		var meta []byte
 		var hop int
 		var relType string
-		if err := rows.Scan(&ent.ID, &ent.Type, &ent.CanonicalName, pq.Array(&aliases),
+		if err := rows.Scan(&ent.ID, &ent.Type, &ent.CanonicalName, &aliases,
 			&ent.Description, &meta, &ent.CreatedAt, &ent.UpdatedAt, &hop, &relType); err != nil {
 			return nil, wrapErr("list related entities", err)
 		}
@@ -1776,7 +1770,7 @@ func (r *Repository) scanEpisode(scanner interface{ Scan(dest ...any) error }) (
 	var span, meta []byte
 	if err := scanner.Scan(&ep.ID, &ep.Title, &ep.Summary, &ep.TightDescription, &ep.Scope,
 		&ep.ProjectID, &ep.SessionID, &ep.Importance, &ep.PrivacyLevel, &startedAt, &endedAt,
-		&span, pq.Array(&sourceSummaryIDs), pq.Array(&participants), pq.Array(&relatedEntities), pq.Array(&outcomes), pq.Array(&unresolvedItems),
+		&span, &sourceSummaryIDs, &participants, &relatedEntities, &outcomes, &unresolvedItems,
 		&meta, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
 		return nil, wrapErr("scan episode", err)
 	}

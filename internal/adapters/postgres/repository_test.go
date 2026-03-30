@@ -2,9 +2,11 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"sort"
 	"testing"
 	"time"
@@ -41,6 +43,76 @@ func testRepo(t *testing.T) (*Repository, func()) {
 	cleanup := func() { _ = repo.Close() }
 	t.Cleanup(cleanup)
 	return repo, cleanup
+}
+
+type stubScanner struct {
+	values []any
+}
+
+func (s stubScanner) Scan(dest ...any) error {
+	if len(dest) != len(s.values) {
+		return fmt.Errorf("destination count %d != value count %d", len(dest), len(s.values))
+	}
+	for i := range dest {
+		if err := assignScanValue(dest[i], s.values[i]); err != nil {
+			return fmt.Errorf("scan column %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func assignScanValue(dest, src any) error {
+	switch d := dest.(type) {
+	case *sql.NullTime:
+		if src == nil {
+			*d = sql.NullTime{}
+			return nil
+		}
+		t, ok := src.(time.Time)
+		if !ok {
+			return fmt.Errorf("null time source %T", src)
+		}
+		*d = sql.NullTime{Time: t, Valid: true}
+		return nil
+	case *[]byte:
+		switch v := src.(type) {
+		case nil:
+			*d = nil
+		case []byte:
+			*d = append([]byte(nil), v...)
+		case string:
+			*d = []byte(v)
+		default:
+			return fmt.Errorf("[]byte source %T", src)
+		}
+		return nil
+	}
+
+	if scanner, ok := dest.(sql.Scanner); ok {
+		return scanner.Scan(src)
+	}
+
+	dv := reflect.ValueOf(dest)
+	if dv.Kind() != reflect.Ptr || dv.IsNil() {
+		return fmt.Errorf("destination %T is not a writable pointer", dest)
+	}
+
+	elem := dv.Elem()
+	if src == nil {
+		elem.Set(reflect.Zero(elem.Type()))
+		return nil
+	}
+
+	sv := reflect.ValueOf(src)
+	if sv.Type().AssignableTo(elem.Type()) {
+		elem.Set(sv)
+		return nil
+	}
+	if sv.Type().ConvertibleTo(elem.Type()) {
+		elem.Set(sv.Convert(elem.Type()))
+		return nil
+	}
+	return fmt.Errorf("cannot assign %T to %T", src, dest)
 }
 
 func mustInsertEvent(t *testing.T, repo *Repository, evt *core.Event) {
@@ -150,6 +222,167 @@ func TestRepositoryEvents(t *testing.T) {
 	}
 }
 
+func TestScanMemoryReadsStringArrays(t *testing.T) {
+	repo := NewRepository()
+	now := nowUTC()
+	observedAt := now.Add(-time.Hour)
+	validFrom := now.Add(-30 * time.Minute)
+	validTo := now.Add(30 * time.Minute)
+	lastConfirmedAt := now.Add(-5 * time.Minute)
+	supersededAt := now.Add(45 * time.Minute)
+
+	got, err := repo.scanMemory(stubScanner{values: []any{
+		"mem_scan",
+		string(core.MemoryTypeFact),
+		string(core.ScopeProject),
+		"proj_scan",
+		"sess_scan",
+		"agent_scan",
+		"subject",
+		"body",
+		"tight",
+		0.9,
+		0.7,
+		string(core.PrivacyPrivate),
+		string(core.MemoryStatusActive),
+		observedAt,
+		now,
+		now.Add(time.Minute),
+		validFrom,
+		validTo,
+		lastConfirmedAt,
+		"mem_old",
+		"mem_new",
+		supersededAt,
+		`{"evt_1","evt_2"}`,
+		`{"sum_1"}`,
+		`{"art_1"}`,
+		`{"tag_a","tag_b"}`,
+		`{"k":"v"}`,
+	}})
+	if err != nil {
+		t.Fatalf("scanMemory: %v", err)
+	}
+
+	if !reflect.DeepEqual(got.SourceEventIDs, []string{"evt_1", "evt_2"}) {
+		t.Fatalf("unexpected SourceEventIDs: %#v", got.SourceEventIDs)
+	}
+	if !reflect.DeepEqual(got.SourceSummaryIDs, []string{"sum_1"}) {
+		t.Fatalf("unexpected SourceSummaryIDs: %#v", got.SourceSummaryIDs)
+	}
+	if !reflect.DeepEqual(got.SourceArtifactIDs, []string{"art_1"}) {
+		t.Fatalf("unexpected SourceArtifactIDs: %#v", got.SourceArtifactIDs)
+	}
+	if !reflect.DeepEqual(got.Tags, []string{"tag_a", "tag_b"}) {
+		t.Fatalf("unexpected Tags: %#v", got.Tags)
+	}
+	if got.Metadata["k"] != "v" {
+		t.Fatalf("unexpected Metadata: %#v", got.Metadata)
+	}
+	if got.ObservedAt == nil || !got.ObservedAt.Equal(observedAt) {
+		t.Fatalf("unexpected ObservedAt: %#v", got.ObservedAt)
+	}
+	if got.ValidFrom == nil || !got.ValidFrom.Equal(validFrom) {
+		t.Fatalf("unexpected ValidFrom: %#v", got.ValidFrom)
+	}
+	if got.ValidTo == nil || !got.ValidTo.Equal(validTo) {
+		t.Fatalf("unexpected ValidTo: %#v", got.ValidTo)
+	}
+	if got.LastConfirmedAt == nil || !got.LastConfirmedAt.Equal(lastConfirmedAt) {
+		t.Fatalf("unexpected LastConfirmedAt: %#v", got.LastConfirmedAt)
+	}
+	if got.SupersededAt == nil || !got.SupersededAt.Equal(supersededAt) {
+		t.Fatalf("unexpected SupersededAt: %#v", got.SupersededAt)
+	}
+}
+
+func TestScanEntityReadsAliases(t *testing.T) {
+	repo := NewRepository()
+	now := nowUTC()
+
+	got, err := repo.scanEntity(stubScanner{values: []any{
+		"ent_scan",
+		"system",
+		"Postgres",
+		`{"postgresql","pg"}`,
+		"database",
+		`{"team":"storage"}`,
+		now,
+		now.Add(time.Minute),
+	}})
+	if err != nil {
+		t.Fatalf("scanEntity: %v", err)
+	}
+
+	if !reflect.DeepEqual(got.Aliases, []string{"postgresql", "pg"}) {
+		t.Fatalf("unexpected Aliases: %#v", got.Aliases)
+	}
+	if got.Metadata["team"] != "storage" {
+		t.Fatalf("unexpected Metadata: %#v", got.Metadata)
+	}
+}
+
+func TestScanEpisodeReadsStringArrays(t *testing.T) {
+	repo := NewRepository()
+	now := nowUTC()
+	startedAt := now.Add(-2 * time.Hour)
+	endedAt := now.Add(-time.Hour)
+
+	got, err := repo.scanEpisode(stubScanner{values: []any{
+		"epi_scan",
+		"Episode Scan",
+		"summary",
+		"tight",
+		string(core.ScopeProject),
+		"proj_epi",
+		"sess_epi",
+		0.8,
+		string(core.PrivacyPrivate),
+		startedAt,
+		endedAt,
+		`{"event_ids":["evt_1"],"summary_ids":["sum_0"]}`,
+		`{"sum_1","sum_2"}`,
+		`{"alice","bob"}`,
+		`{"ent_1"}`,
+		`{"done"}`,
+		`{"follow_up"}`,
+		`{"kind":"incident"}`,
+		now,
+		now.Add(time.Minute),
+	}})
+	if err != nil {
+		t.Fatalf("scanEpisode: %v", err)
+	}
+
+	if !reflect.DeepEqual(got.SourceSummaryIDs, []string{"sum_1", "sum_2"}) {
+		t.Fatalf("unexpected SourceSummaryIDs: %#v", got.SourceSummaryIDs)
+	}
+	if !reflect.DeepEqual(got.Participants, []string{"alice", "bob"}) {
+		t.Fatalf("unexpected Participants: %#v", got.Participants)
+	}
+	if !reflect.DeepEqual(got.RelatedEntities, []string{"ent_1"}) {
+		t.Fatalf("unexpected RelatedEntities: %#v", got.RelatedEntities)
+	}
+	if !reflect.DeepEqual(got.Outcomes, []string{"done"}) {
+		t.Fatalf("unexpected Outcomes: %#v", got.Outcomes)
+	}
+	if !reflect.DeepEqual(got.UnresolvedItems, []string{"follow_up"}) {
+		t.Fatalf("unexpected UnresolvedItems: %#v", got.UnresolvedItems)
+	}
+	if got.SourceSpan.EventIDs[0] != "evt_1" || got.SourceSpan.SummaryIDs[0] != "sum_0" {
+		t.Fatalf("unexpected SourceSpan: %#v", got.SourceSpan)
+	}
+	if got.Metadata["kind"] != "incident" {
+		t.Fatalf("unexpected Metadata: %#v", got.Metadata)
+	}
+	if got.StartedAt == nil || !got.StartedAt.Equal(startedAt) {
+		t.Fatalf("unexpected StartedAt: %#v", got.StartedAt)
+	}
+	if got.EndedAt == nil || !got.EndedAt.Equal(endedAt) {
+		t.Fatalf("unexpected EndedAt: %#v", got.EndedAt)
+	}
+}
+
 func TestRepositoryMemories(t *testing.T) {
 	repo, _ := testRepo(t)
 	ctx := context.Background()
@@ -158,8 +391,8 @@ func TestRepositoryMemories(t *testing.T) {
 	mustInsertEvent(t, repo, &core.Event{ID: "evt_mem_1", Kind: "message_user", SourceSystem: "cli", PrivacyLevel: core.PrivacyPrivate, Content: "source event one", OccurredAt: now, IngestedAt: now})
 	mustInsertEvent(t, repo, &core.Event{ID: "evt_mem_2", Kind: "message_user", SourceSystem: "cli", PrivacyLevel: core.PrivacyPrivate, Content: "source event two", OccurredAt: now.Add(time.Second), IngestedAt: now})
 
-	m1 := &core.Memory{ID: "mem_1", Type: core.MemoryTypeFact, Scope: core.ScopeProject, ProjectID: "proj_mem", AgentID: "agent-1", Subject: "db", Body: "postgres memory alpha", TightDescription: "alpha", Confidence: 0.9, Importance: 0.7, PrivacyLevel: core.PrivacyPrivate, Status: core.MemoryStatusActive, SourceEventIDs: []string{}, SourceSummaryIDs: []string{}, SourceArtifactIDs: []string{}, Tags: []string{}, Metadata: map[string]string{"a": "1"}, CreatedAt: now, UpdatedAt: now}
-	m2 := &core.Memory{ID: "mem_2", Type: core.MemoryTypeDecision, Scope: core.ScopeProject, ProjectID: "proj_mem", AgentID: "agent-2", Subject: "cache", Body: "postgres memory beta", TightDescription: "beta", Confidence: 0.8, Importance: 0.6, PrivacyLevel: core.PrivacyShared, Status: core.MemoryStatusActive, SourceEventIDs: []string{}, SourceSummaryIDs: []string{}, SourceArtifactIDs: []string{}, Tags: []string{}, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
+	m1 := &core.Memory{ID: "mem_1", Type: core.MemoryTypeFact, Scope: core.ScopeProject, ProjectID: "proj_mem", AgentID: "agent-1", Subject: "db", Body: "postgres memory alpha", TightDescription: "alpha", Confidence: 0.9, Importance: 0.7, PrivacyLevel: core.PrivacyPrivate, Status: core.MemoryStatusActive, SourceEventIDs: []string{"evt_mem_1", "evt_mem_2"}, SourceSummaryIDs: []string{"sum_mem_1"}, SourceArtifactIDs: []string{"art_mem_1"}, Tags: []string{"db", "primary"}, Metadata: map[string]string{"a": "1"}, CreatedAt: now, UpdatedAt: now}
+	m2 := &core.Memory{ID: "mem_2", Type: core.MemoryTypeDecision, Scope: core.ScopeProject, ProjectID: "proj_mem", AgentID: "agent-2", Subject: "cache", Body: "postgres memory beta", TightDescription: "beta", Confidence: 0.8, Importance: 0.6, PrivacyLevel: core.PrivacyShared, Status: core.MemoryStatusActive, SourceEventIDs: []string{"evt_mem_2"}, SourceSummaryIDs: []string{"sum_mem_2"}, SourceArtifactIDs: []string{"art_mem_2"}, Tags: []string{"cache"}, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
 	m3 := &core.Memory{ID: "mem_3", Type: core.MemoryTypeFact, Scope: core.ScopeProject, ProjectID: "proj_mem", Body: "archived memory", TightDescription: "gamma", Confidence: 0.7, Importance: 0.5, PrivacyLevel: core.PrivacyPrivate, Status: core.MemoryStatusArchived, SourceEventIDs: []string{}, SourceSummaryIDs: []string{}, SourceArtifactIDs: []string{}, Tags: []string{}, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)}
 
 	for _, m := range []*core.Memory{m1, m2, m3} {
@@ -174,6 +407,9 @@ func TestRepositoryMemories(t *testing.T) {
 	}
 	if got.Subject != "db" || got.Metadata["a"] != "1" {
 		t.Fatalf("GetMemory mismatch: %+v", got)
+	}
+	if !reflect.DeepEqual(got.SourceEventIDs, []string{"evt_mem_1", "evt_mem_2"}) || !reflect.DeepEqual(got.SourceSummaryIDs, []string{"sum_mem_1"}) || !reflect.DeepEqual(got.Tags, []string{"db", "primary"}) {
+		t.Fatalf("GetMemory arrays mismatch: %+v", got)
 	}
 
 	batch, err := repo.GetMemoriesByIDs(ctx, []string{"mem_1", "mem_2", "missing"})
@@ -222,12 +458,20 @@ func TestRepositoryMemories(t *testing.T) {
 		t.Fatalf("unexpected SearchMemoriesFuzzy result: %#v", fuzzy)
 	}
 
-	bySource, err := repo.ListMemoriesBySourceEventIDs(ctx, []string{})
+	bySource, err := repo.ListMemoriesBySourceEventIDs(ctx, []string{"evt_mem_1"})
 	if err != nil {
 		t.Fatalf("ListMemoriesBySourceEventIDs: %v", err)
 	}
-	if len(bySource) != 0 {
-		t.Fatalf("expected empty result for empty source lookup, got %#v", bySource)
+	if len(bySource) != 1 || bySource[0].ID != "mem_1" {
+		t.Fatalf("unexpected source lookup result: %#v", bySource)
+	}
+
+	emptyBySource, err := repo.ListMemoriesBySourceEventIDs(ctx, []string{})
+	if err != nil {
+		t.Fatalf("ListMemoriesBySourceEventIDs empty: %v", err)
+	}
+	if len(emptyBySource) != 0 {
+		t.Fatalf("expected empty result for empty source lookup, got %#v", emptyBySource)
 	}
 
 	activeCount, err := repo.CountActiveMemories(ctx)
@@ -437,8 +681,8 @@ func TestRepositoryEpisodes(t *testing.T) {
 	ctx := context.Background()
 	now := nowUTC()
 
-	e1 := &core.Episode{ID: "epi_1", Title: "Episode One", Summary: "episode alpha", TightDescription: "alpha", Scope: core.ScopeProject, ProjectID: "proj_epi", Importance: 0.7, PrivacyLevel: core.PrivacyPrivate, SourceSummaryIDs: []string{}, Participants: []string{}, RelatedEntities: []string{}, Outcomes: []string{}, UnresolvedItems: []string{}, CreatedAt: now, UpdatedAt: now}
-	e2 := &core.Episode{ID: "epi_2", Title: "Episode Two", Summary: "episode beta keyword", TightDescription: "beta", Scope: core.ScopeProject, ProjectID: "proj_epi", Importance: 0.8, PrivacyLevel: core.PrivacyPrivate, SourceSummaryIDs: []string{}, Participants: []string{}, RelatedEntities: []string{}, Outcomes: []string{}, UnresolvedItems: []string{}, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
+	e1 := &core.Episode{ID: "epi_1", Title: "Episode One", Summary: "episode alpha", TightDescription: "alpha", Scope: core.ScopeProject, ProjectID: "proj_epi", Importance: 0.7, PrivacyLevel: core.PrivacyPrivate, SourceSpan: core.SourceSpan{EventIDs: []string{"evt_1"}, SummaryIDs: []string{"sum_0"}}, SourceSummaryIDs: []string{"sum_1"}, Participants: []string{"alice", "bob"}, RelatedEntities: []string{"ent_1"}, Outcomes: []string{"resolved"}, UnresolvedItems: []string{"follow_up"}, CreatedAt: now, UpdatedAt: now}
+	e2 := &core.Episode{ID: "epi_2", Title: "Episode Two", Summary: "episode beta keyword", TightDescription: "beta", Scope: core.ScopeProject, ProjectID: "proj_epi", Importance: 0.8, PrivacyLevel: core.PrivacyPrivate, SourceSummaryIDs: []string{"sum_2"}, Participants: []string{"carol"}, RelatedEntities: []string{"ent_2"}, Outcomes: []string{"logged"}, UnresolvedItems: []string{"owner"}, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
 	for _, e := range []*core.Episode{e1, e2} {
 		if err := repo.InsertEpisode(ctx, e); err != nil {
 			t.Fatalf("InsertEpisode %s: %v", e.ID, err)
@@ -451,6 +695,9 @@ func TestRepositoryEpisodes(t *testing.T) {
 	}
 	if got.Title != "Episode One" {
 		t.Fatalf("GetEpisode mismatch: %+v", got)
+	}
+	if !reflect.DeepEqual(got.SourceSummaryIDs, []string{"sum_1"}) || !reflect.DeepEqual(got.Participants, []string{"alice", "bob"}) || !reflect.DeepEqual(got.RelatedEntities, []string{"ent_1"}) {
+		t.Fatalf("GetEpisode arrays mismatch: %+v", got)
 	}
 
 	list, err := repo.ListEpisodes(ctx, core.ListEpisodesOptions{Scope: core.ScopeProject, ProjectID: "proj_epi", Limit: 10})
@@ -484,8 +731,8 @@ func TestRepositoryEntitiesAndLinks(t *testing.T) {
 		}
 	}
 
-	ent1 := &core.Entity{ID: "ent_1", Type: "person", CanonicalName: "Alice", Aliases: []string{}, Description: "alpha person", Metadata: map[string]string{"team": "x"}, CreatedAt: now, UpdatedAt: now}
-	ent2 := &core.Entity{ID: "ent_2", Type: "system", CanonicalName: "Postgres", Aliases: []string{}, Description: "database keyword", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
+	ent1 := &core.Entity{ID: "ent_1", Type: "person", CanonicalName: "Alice", Aliases: []string{"ally", "alicia"}, Description: "alpha person", Metadata: map[string]string{"team": "x"}, CreatedAt: now, UpdatedAt: now}
+	ent2 := &core.Entity{ID: "ent_2", Type: "system", CanonicalName: "Postgres", Aliases: []string{"postgresql", "pg"}, Description: "database", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
 	for _, e := range []*core.Entity{ent1, ent2} {
 		if err := repo.InsertEntity(ctx, e); err != nil {
 			t.Fatalf("InsertEntity %s: %v", e.ID, err)
@@ -504,6 +751,9 @@ func TestRepositoryEntitiesAndLinks(t *testing.T) {
 	if got.Description != "alpha person updated" {
 		t.Fatalf("entity not updated: %+v", got)
 	}
+	if !reflect.DeepEqual(got.Aliases, []string{"ally", "alicia"}) {
+		t.Fatalf("entity aliases not round-tripped: %+v", got)
+	}
 
 	byIDs, err := repo.GetEntitiesByIDs(ctx, []string{"ent_1", "ent_2"})
 	if err != nil {
@@ -521,7 +771,7 @@ func TestRepositoryEntitiesAndLinks(t *testing.T) {
 		t.Fatalf("unexpected ListEntities result: %#v", listed)
 	}
 
-	searched, err := repo.SearchEntities(ctx, "keyword", 10)
+	searched, err := repo.SearchEntities(ctx, "postgresql", 10)
 	if err != nil {
 		t.Fatalf("SearchEntities: %v", err)
 	}
