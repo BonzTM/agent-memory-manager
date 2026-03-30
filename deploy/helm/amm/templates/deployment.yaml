@@ -11,12 +11,20 @@ spec:
       {{- include "amm.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       labels:
         {{- include "amm.selectorLabels" . | nindent 8 }}
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
@@ -25,6 +33,16 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "amm.fullname" . }}
+            - secretRef:
+                name: {{ include "amm.secretName" . }}
+            {{- if .Values.extraEnvVarsCM }}
+            - configMapRef:
+                name: {{ .Values.extraEnvVarsCM }}
+            {{- end }}
+            {{- if .Values.extraEnvVarsSecret }}
+            - secretRef:
+                name: {{ .Values.extraEnvVarsSecret }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz

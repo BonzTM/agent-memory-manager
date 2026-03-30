@@ -5,14 +5,61 @@ metadata:
   labels:
     {{- include "amm.labels" . | nindent 4 }}
 data:
-  AMM_HTTP_ADDR: ":8080"
+  AMM_HTTP_ADDR: {{ .Values.http.addr | quote }}
   {{- if eq .Values.backend "sqlite" }}
   AMM_DB_PATH: "/data/amm.db"
   {{- end }}
   {{- if eq .Values.backend "postgres" }}
   AMM_STORAGE_BACKEND: "postgres"
-  AMM_POSTGRES_DSN: {{ .Values.postgres.dsn | quote }}
   {{- end }}
-  {{- range $key, $value := .Values.env }}
+  {{- if .Values.http.corsOrigins }}
+  AMM_HTTP_CORS_ORIGINS: {{ .Values.http.corsOrigins | quote }}
+  {{- end }}
+  AMM_DEFAULT_LIMIT: {{ .Values.retrieval.defaultLimit | quote }}
+  AMM_AMBIENT_LIMIT: {{ .Values.retrieval.ambientLimit | quote }}
+  AMM_ENABLE_SEMANTIC: {{ .Values.retrieval.enableSemantic | quote }}
+  AMM_ENABLE_EXPLAIN: {{ .Values.retrieval.enableExplain | quote }}
+  AMM_MAX_EXPAND_DEPTH: {{ .Values.config.maxExpandDepth | default "1" | quote }}
+  AMM_DEFAULT_PRIVACY: {{ .Values.retrieval.defaultPrivacy | quote }}
+  AMM_AUTO_REFLECT: {{ .Values.maintenance.autoReflect | quote }}
+  AMM_AUTO_COMPRESS: {{ .Values.maintenance.autoCompress | quote }}
+  AMM_AUTO_CONSOLIDATE: {{ .Values.maintenance.autoConsolidate | quote }}
+  AMM_AUTO_DETECT_CONTRADICTIONS: {{ .Values.maintenance.autoDetectContradictions | quote }}
+  {{- if .Values.summarizer.endpoint }}
+  AMM_SUMMARIZER_ENDPOINT: {{ .Values.summarizer.endpoint | quote }}
+  {{- end }}
+  {{- if .Values.summarizer.model }}
+  AMM_SUMMARIZER_MODEL: {{ .Values.summarizer.model | quote }}
+  {{- end }}
+  {{- if .Values.review.endpoint }}
+  AMM_REVIEW_ENDPOINT: {{ .Values.review.endpoint | quote }}
+  {{- end }}
+  {{- if .Values.review.model }}
+  AMM_REVIEW_MODEL: {{ .Values.review.model | quote }}
+  {{- end }}
+  {{- if .Values.embeddings.enabled }}
+  AMM_EMBEDDINGS_ENABLED: "true"
+  {{- end }}
+  {{- if .Values.embeddings.provider }}
+  AMM_EMBEDDINGS_PROVIDER: {{ .Values.embeddings.provider | quote }}
+  {{- end }}
+  {{- if .Values.embeddings.endpoint }}
+  AMM_EMBEDDINGS_ENDPOINT: {{ .Values.embeddings.endpoint | quote }}
+  {{- end }}
+  {{- if .Values.embeddings.model }}
+  AMM_EMBEDDINGS_MODEL: {{ .Values.embeddings.model | quote }}
+  {{- end }}
+  AMM_REPROCESS_BATCH_SIZE: {{ .Values.batches.reprocessBatchSize | quote }}
+  AMM_REFLECT_BATCH_SIZE: {{ .Values.batches.reflectBatchSize | quote }}
+  AMM_REFLECT_LLM_BATCH_SIZE: {{ .Values.batches.reflectLlmBatchSize | quote }}
+  AMM_LIFECYCLE_REVIEW_BATCH_SIZE: {{ .Values.batches.lifecycleReviewBatchSize | quote }}
+  AMM_COMPRESS_CHUNK_SIZE: {{ .Values.batches.compressChunkSize | quote }}
+  AMM_COMPRESS_MAX_EVENTS: {{ .Values.batches.compressMaxEvents | quote }}
+  AMM_COMPRESS_BATCH_SIZE: {{ .Values.batches.compressBatchSize | quote }}
+  AMM_TOPIC_BATCH_SIZE: {{ .Values.batches.topicBatchSize | quote }}
+  AMM_EMBEDDING_BATCH_SIZE: {{ .Values.batches.embeddingBatchSize | quote }}
+  AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD: {{ .Values.advanced.crossProjectSimilarityThreshold | quote }}
+  AMM_ESCALATION_DETERMINISTIC_MAX_CHARS: {{ .Values.advanced.escalationDeterministicMaxChars | quote }}
+  {{- range $key, $value := .Values.extraEnvVars }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}

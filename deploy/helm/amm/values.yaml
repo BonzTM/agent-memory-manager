@@ -1,45 +1,246 @@
+# -- Number of replicas (only 1 supported for sqlite backend)
 replicaCount: 1
 
 image:
+  # -- Container image repository
   repository: ghcr.io/bonztm/agent-memory-manager
+  # -- Image pull policy
   pullPolicy: IfNotPresent
-  tag: "latest"
+  # -- Image tag (defaults to Chart.appVersion)
+  tag: ""
 
+# -- Override the chart name
 nameOverride: ""
+# -- Override the full release name
 fullnameOverride: ""
 
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+
+# -- Pod-level annotations
+podAnnotations: {}
+
+# =============================================================================
+# Storage Backend
+# =============================================================================
+
+# -- Storage backend: "sqlite" or "postgres"
 backend: sqlite
 
 sqlite:
   persistence:
+    # -- Enable persistent storage for SQLite
     enabled: true
+    # -- PVC size
     size: 1Gi
+    # -- Storage class (empty = default)
     storageClass: ""
+    # -- Access modes
     accessModes:
       - ReadWriteOnce
 
 postgres:
+  # -- PostgreSQL DSN — SENSITIVE. Use secrets.existingSecret instead of setting
+  # this directly. If set here, it will be placed in the chart-managed Secret.
+  # Example: "postgres://user:pass@host:5432/amm?sslmode=require"
   dsn: ""
 
-env: {}
+# =============================================================================
+# Secrets Management
+# =============================================================================
+# AMM has 5 sensitive env vars. The chart auto-generates AMM_API_KEY if not
+# provided. All other secrets (DSN, LLM API keys) must be supplied by the user
+# either inline (chart-managed Secret) or via an existing Kubernetes Secret.
+#
+# For ESO/Vault workflows: create your Secret externally, then set
+# secrets.existingSecret to its name. The chart will skip Secret creation and
+# reference yours via envFrom secretRef.
+
+secrets:
+  # -- Name of an existing Kubernetes Secret containing sensitive AMM env vars.
+  # When set, the chart does NOT create its own Secret. The referenced Secret
+  # should contain any/all of these keys:
+  #   AMM_API_KEY, AMM_POSTGRES_DSN, AMM_SUMMARIZER_API_KEY,
+  #   AMM_REVIEW_API_KEY, AMM_EMBEDDINGS_API_KEY
+  existingSecret: ""
+
+  # -- AMM HTTP API key. If blank and existingSecret is not set, the chart
+  # auto-generates a 32-byte random key and stores it in the chart-managed Secret.
+  apiKey: ""
+
+  # -- Summarizer LLM API key (e.g., OpenAI key for gpt-4o-mini)
+  summarizerApiKey: ""
+
+  # -- Review model API key (falls back to summarizer key if unset)
+  reviewApiKey: ""
+
+  # -- Embeddings provider API key
+  embeddingsApiKey: ""
+
+# =============================================================================
+# HTTP Server
+# =============================================================================
+
+http:
+  # -- Bind address for the HTTP server
+  addr: ":8080"
+  # -- Comma-separated list of allowed CORS origins
+  corsOrigins: ""
+
+# =============================================================================
+# Config
+# =============================================================================
+
+config:
+  # -- Maximum recursive delegation depth for Expand calls
+  maxExpandDepth: 1
+
+# =============================================================================
+# Retrieval & Privacy
+# =============================================================================
+
+retrieval:
+  # -- Default recall result limit
+  defaultLimit: 10
+  # -- Ambient recall result limit
+  ambientLimit: 5
+  # -- Enable semantic scoring (requires embeddings)
+  enableSemantic: false
+  # -- Enable explain-recall signal breakdowns
+  enableExplain: true
+  # -- Default memory privacy level
+  defaultPrivacy: "private"
+
+# =============================================================================
+# Maintenance Toggles
+# =============================================================================
+
+maintenance:
+  # -- Enable automatic reflection
+  autoReflect: true
+  # -- Enable automatic compression
+  autoCompress: true
+  # -- Enable automatic consolidation
+  autoConsolidate: true
+  # -- Enable automatic contradiction detection
+  autoDetectContradictions: true
+
+# =============================================================================
+# Summarizer (LLM)
+# =============================================================================
+
+summarizer:
+  # -- OpenAI-compatible API endpoint for summarization
+  endpoint: ""
+  # -- Model name (defaults to gpt-4o-mini when endpoint is set)
+  model: ""
+
+# =============================================================================
+# Review Model (LLM)
+# =============================================================================
+
+review:
+  # -- Separate endpoint for review model (falls back to summarizer)
+  endpoint: ""
+  # -- Review model name (falls back to summarizer model)
+  model: ""
+
+# =============================================================================
+# Embeddings
+# =============================================================================
+
+embeddings:
+  # -- Enable embedding generation
+  enabled: false
+  # -- Provider label (informational)
+  provider: ""
+  # -- Embedding API endpoint
+  endpoint: ""
+  # -- Model name (defaults to text-embedding-3-small when endpoint is set)
+  model: ""
+
+# =============================================================================
+# Batch Sizes & Tuning
+# =============================================================================
+
+batches:
+  # -- Reprocess job batch size
+  reprocessBatchSize: 20
+  # -- Reflect job claim batch size
+  reflectBatchSize: 100
+  # -- Reflect LLM chunk batch size
+  reflectLlmBatchSize: 20
+  # -- Lifecycle review batch size
+  lifecycleReviewBatchSize: 50
+  # -- Compression chunk size
+  compressChunkSize: 10
+  # -- Compression max events per session
+  compressMaxEvents: 200
+  # -- Compression LLM batch size
+  compressBatchSize: 15
+  # -- Topic summarization batch size
+  topicBatchSize: 15
+  # -- Embedding generation batch size
+  embeddingBatchSize: 64
+
+# =============================================================================
+# Advanced Tuning
+# =============================================================================
+
+advanced:
+  # -- Cross-project similarity threshold for memory transfer
+  crossProjectSimilarityThreshold: "0.7"
+  # -- Max characters for deterministic escalation (before LLM fallback)
+  escalationDeterministicMaxChars: "2048"
+
+# =============================================================================
+# Extra Environment Variables (escape hatches)
+# =============================================================================
+
+# -- Additional environment variables as a map (rendered into ConfigMap)
+extraEnvVars: {}
+#   MY_CUSTOM_VAR: "value"
+
+# -- Name of an existing ConfigMap to inject via envFrom
+extraEnvVarsCM: ""
+
+# -- Name of an existing Secret to inject via envFrom
+extraEnvVarsSecret: ""
+
+# =============================================================================
+# Kubernetes Resources
+# =============================================================================
 
 service:
+  # -- Service type
   type: ClusterIP
+  # -- Service port
   port: 8080
 
 ingress:
+  # -- Enable ingress
   enabled: false
+  # -- Ingress class name
   className: ""
+  # -- Ingress annotations
   annotations: {}
+  # -- Ingress hosts
   hosts:
     - host: amm.local
       paths:
         - path: /
           pathType: Prefix
+  # -- Ingress TLS configuration
   tls: []
 
+# -- Container resource requests/limits
 resources: {}
 
+# -- Node selector
 nodeSelector: {}
+
+# -- Tolerations
 tolerations: []
+
+# -- Affinity rules
 affinity: {}

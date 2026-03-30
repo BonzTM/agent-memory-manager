@@ -23,3 +23,15 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/name: {{ include "amm.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+Return the name of the Secret to use for sensitive env vars.
+If existingSecret is set, use that; otherwise use the chart-managed secret name.
+*/}}
+{{- define "amm.secretName" -}}
+{{- if .Values.secrets.existingSecret }}
+{{- .Values.secrets.existingSecret }}
+{{- else }}
+{{- printf "%s-secret" (include "amm.fullname" .) }}
+{{- end }}
+{{- end }}
