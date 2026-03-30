@@ -27,9 +27,24 @@ func (w *statusCapturingResponseWriter) Flush() {
 
 func requestLogging(next nethttp.Handler) nethttp.Handler {
 	return nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		start := time.Now()
 		sw := &statusCapturingResponseWriter{ResponseWriter: w, status: nethttp.StatusOK}
 		next.ServeHTTP(sw, r)
+		if sw.status >= 200 && sw.status < 300 {
+			slog.Debug("http request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", sw.status,
+				"duration", time.Since(start),
+			)
+			return
+		}
+
 		slog.Info("http request",
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -101,7 +116,7 @@ func apiKeyAuth(key string) func(nethttp.Handler) nethttp.Handler {
 				return
 			}
 
-			if r.URL.Path == "/healthz" || r.URL.Path == "/v1/status" || r.URL.Path == "/openapi.json" || strings.HasPrefix(r.URL.Path, "/swagger/") {
+			if r.URL.Path == "/healthz" || r.URL.Path == "/openapi.json" || strings.HasPrefix(r.URL.Path, "/swagger/") {
 				next.ServeHTTP(w, r)
 				return
 			}

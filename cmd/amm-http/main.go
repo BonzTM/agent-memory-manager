@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -25,7 +24,8 @@ func main() {
 	cfg := runtime.LoadConfigWithEnv()
 	svc, cleanup, err := runtime.NewService(cfg)
 	if err != nil {
-		log.Fatalf("amm-http: %v", err)
+		slog.Error("amm-http", "error", err)
+		os.Exit(1)
 	}
 	defer cleanup()
 
@@ -47,17 +47,20 @@ func main() {
 	select {
 	case err := <-errCh:
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatalf("amm-http: %v", err)
+			slog.Error("amm-http", "error", err)
+			os.Exit(1)
 		}
 	case sig := <-sigCh:
 		slog.Info("amm-http shutting down", "signal", sig.String())
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
-			log.Fatalf("amm-http: %v", err)
+			slog.Error("amm-http", "error", err)
+			os.Exit(1)
 		}
 		if err := <-errCh; err != nil && err != http.ErrServerClosed {
-			log.Fatalf("amm-http: %v", err)
+			slog.Error("amm-http", "error", err)
+			os.Exit(1)
 		}
 	}
 }

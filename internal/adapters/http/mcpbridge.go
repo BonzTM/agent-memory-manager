@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 
+	v1 "github.com/bonztm/agent-memory-manager/internal/contracts/v1"
 	"github.com/bonztm/agent-memory-manager/internal/core"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -66,6 +68,18 @@ func registerAllTools(s *mcpserver.MCPServer, svc core.Service) {
 		if boolArg(args, "explain") {
 			opts.Explain = true
 		}
+		if err := v1.ValidateRecall(&v1.RecallRequest{
+			Query:     query,
+			Mode:      string(opts.Mode),
+			ProjectID: opts.ProjectID,
+			SessionID: opts.SessionID,
+			AgentID:   opts.AgentID,
+			EntityIDs: opts.EntityIDs,
+			Limit:     opts.Limit,
+			Explain:   opts.Explain,
+		}); err != nil {
+			return nil, err
+		}
 		return svc.Recall(ctx, query, opts)
 	})
 
@@ -76,7 +90,17 @@ func registerAllTools(s *mcpserver.MCPServer, svc core.Service) {
 	addJSONTool(s, toolExpand(), func(ctx context.Context, args map[string]any) (any, error) {
 		id := stringArg(args, "id")
 		kind := stringArg(args, "kind")
-		opts := core.ExpandOptions{SessionID: stringArg(args, "session_id")}
+		if kind == "" {
+			kind = "memory"
+		}
+		delegationDepth, err := nonNegativeIntArg(args, "delegation_depth")
+		if err != nil {
+			return nil, err
+		}
+		opts := core.ExpandOptions{SessionID: stringArg(args, "session_id"), DelegationDepth: delegationDepth}
+		if opts.DelegationDepth < 0 {
+			return nil, fmt.Errorf("delegation_depth must be non-negative")
+		}
 		return svc.Expand(ctx, id, kind, opts)
 	})
 
@@ -245,6 +269,69 @@ func registerAllTools(s *mcpserver.MCPServer, svc core.Service) {
 	addJSONTool(s, toolGetEntity(), func(ctx context.Context, args map[string]any) (any, error) {
 		return svc.GetEntity(ctx, stringArg(args, "id"))
 	})
+
+	addJSONTool(s, toolFormatContextWindow(), func(ctx context.Context, args map[string]any) (any, error) {
+		freshTailCount, err := nonNegativeIntArg(args, "fresh_tail_count")
+		if err != nil {
+			return nil, err
+		}
+		maxSummaryDepth, err := nonNegativeIntArg(args, "max_summary_depth")
+		if err != nil {
+			return nil, err
+		}
+		req := v1.FormatContextWindowRequest{
+			SessionID:         stringArg(args, "session_id"),
+			ProjectID:         stringArg(args, "project_id"),
+			FreshTailCount:    freshTailCount,
+			MaxSummaryDepth:   maxSummaryDepth,
+			IncludeParentRefs: boolArg(args, "include_parent_refs"),
+		}
+		if err := v1.ValidateFormatContextWindow(&req); err != nil {
+			return nil, err
+		}
+		opts := core.FormatContextWindowOptions{
+			SessionID:         req.SessionID,
+			ProjectID:         req.ProjectID,
+			FreshTailCount:    req.FreshTailCount,
+			MaxSummaryDepth:   req.MaxSummaryDepth,
+			IncludeParentRefs: req.IncludeParentRefs,
+		}
+		return svc.FormatContextWindow(ctx, opts)
+	})
+
+	addJSONTool(s, toolGrep(), func(ctx context.Context, args map[string]any) (any, error) {
+		maxGroupDepth, err := nonNegativeIntArg(args, "max_group_depth")
+		if err != nil {
+			return nil, err
+		}
+		groupLimit, err := nonNegativeIntArg(args, "group_limit")
+		if err != nil {
+			return nil, err
+		}
+		matchesPerGroup, err := nonNegativeIntArg(args, "matches_per_group")
+		if err != nil {
+			return nil, err
+		}
+		req := v1.GrepRequest{
+			Pattern:         stringArg(args, "pattern"),
+			SessionID:       stringArg(args, "session_id"),
+			ProjectID:       stringArg(args, "project_id"),
+			MaxGroupDepth:   maxGroupDepth,
+			GroupLimit:      groupLimit,
+			MatchesPerGroup: matchesPerGroup,
+		}
+		if err := v1.ValidateGrep(&req); err != nil {
+			return nil, err
+		}
+		opts := core.GrepOptions{
+			SessionID:       req.SessionID,
+			ProjectID:       req.ProjectID,
+			MaxGroupDepth:   req.MaxGroupDepth,
+			GroupLimit:      req.GroupLimit,
+			MatchesPerGroup: req.MatchesPerGroup,
+		}
+		return svc.Grep(ctx, req.Pattern, opts)
+	})
 }
 
 func addJSONTool(s *mcpserver.MCPServer, tool mcp.Tool, handler func(context.Context, map[string]any) (any, error)) {
@@ -310,6 +397,44 @@ func intArg(args map[string]any, key string) int {
 	default:
 		return 0
 	}
+}
+
+func intArgStrict(args map[string]any, key string) (int, error) {
+	v, ok := args[key]
+	if !ok {
+		return 0, nil
+	}
+	switch n := v.(type) {
+	case int:
+		return n, nil
+	case int32:
+		return int(n), nil
+	case int64:
+		return int(n), nil
+	case float32:
+		if math.Trunc(float64(n)) != float64(n) {
+			return 0, fmt.Errorf("%s must be a whole number", key)
+		}
+		return int(n), nil
+	case float64:
+		if math.Trunc(n) != n {
+			return 0, fmt.Errorf("%s must be a whole number", key)
+		}
+		return int(n), nil
+	default:
+		return 0, fmt.Errorf("%s must be an integer", key)
+	}
+}
+
+func nonNegativeIntArg(args map[string]any, key string) (int, error) {
+	v, err := intArgStrict(args, key)
+	if err != nil {
+		return 0, err
+	}
+	if v < 0 {
+		return 0, fmt.Errorf("%s must be non-negative", key)
+	}
+	return v, nil
 }
 
 func stringSliceArg(args map[string]any, key string) []string {
@@ -423,8 +548,9 @@ func toolExpand() mcp.Tool {
 		"amm_expand",
 		mcp.WithDescription("Expand an item to full detail"),
 		mcp.WithString("id", mcp.Required(), mcp.Description("Item ID to expand")),
-		mcp.WithString("kind", mcp.Description("Item kind: memory, summary, episode")),
+		mcp.WithString("kind", mcp.Description("Item kind: memory, summary, episode (defaults to 'memory' if omitted)")),
 		mcp.WithString("session_id", mcp.Description("Session identifier for relevance feedback")),
+		mcp.WithNumber("delegation_depth", mcp.Description("Current delegation depth for recursion control")),
 	)
 }
 
@@ -626,5 +752,30 @@ func toolGetEntity() mcp.Tool {
 		"amm_get_entity",
 		mcp.WithDescription("Get an entity by ID"),
 		mcp.WithString("id", mcp.Required(), mcp.Description("Item ID")),
+	)
+}
+
+func toolFormatContextWindow() mcp.Tool {
+	return mcp.NewTool(
+		"amm_format_context_window",
+		mcp.WithDescription("Assemble deterministic context from summaries and fresh events"),
+		mcp.WithString("session_id", mcp.Description("Session identifier")),
+		mcp.WithString("project_id", mcp.Description("Project identifier")),
+		mcp.WithNumber("fresh_tail_count", mcp.Description("Number of fresh events to include (default 32)")),
+		mcp.WithNumber("max_summary_depth", mcp.Description("Maximum summary depth to include")),
+		mcp.WithBoolean("include_parent_refs", mcp.Description("Include parent summary references")),
+	)
+}
+
+func toolGrep() mcp.Tool {
+	return mcp.NewTool(
+		"amm_grep",
+		mcp.WithDescription("Search events grouped by covering summary"),
+		mcp.WithString("pattern", mcp.Required(), mcp.Description("Search pattern")),
+		mcp.WithString("session_id", mcp.Description("Session identifier")),
+		mcp.WithString("project_id", mcp.Description("Project identifier")),
+		mcp.WithNumber("max_group_depth", mcp.Description("Summary grouping depth (0=shallowest)")),
+		mcp.WithNumber("group_limit", mcp.Description("Maximum groups to return (default 10)")),
+		mcp.WithNumber("matches_per_group", mcp.Description("Maximum matches per group (default 5)")),
 	)
 }

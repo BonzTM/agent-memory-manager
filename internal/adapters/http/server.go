@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	nethttp "net/http"
+	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -34,6 +35,9 @@ func NewServer(svc core.Service, cfg Config) *Server {
 		slog.Info("api key auth disabled, server is open")
 	} else {
 		slog.Info("api key auth enabled")
+		if cfg.CORSOrigins == "*" {
+			slog.Warn("insecure CORS configuration: wildcard origin with API key auth enabled")
+		}
 	}
 
 	mcpSrv := newMCPBridge(svc, "1.0.0")
@@ -50,15 +54,23 @@ func NewServer(svc core.Service, cfg Config) *Server {
 	handler = requestLogging(handler)
 
 	s.server = &nethttp.Server{
-		Addr:    cfg.Addr,
-		Handler: handler,
+		Addr:              cfg.Addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	return s
 }
 
 func (s *Server) registerRoutes(mux *nethttp.ServeMux) {
-	mux.Handle("/v1/mcp", s.mcpHandler)
-	mux.Handle("/v1/mcp/", s.mcpHandler)
+	mux.Handle("POST /v1/mcp", s.mcpHandler)
+	mux.Handle("GET /v1/mcp", s.mcpHandler)
+	mux.Handle("DELETE /v1/mcp", s.mcpHandler)
+	mux.Handle("POST /v1/mcp/", s.mcpHandler)
+	mux.Handle("GET /v1/mcp/", s.mcpHandler)
+	mux.Handle("DELETE /v1/mcp/", s.mcpHandler)
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPISpec)
 	mux.Handle("GET /swagger/", s.handleSwaggerUI())
 
@@ -73,7 +85,9 @@ func (s *Server) registerRoutes(mux *nethttp.ServeMux) {
 	mux.HandleFunc("POST /v1/recall", s.handleRecall)
 	mux.HandleFunc("POST /v1/describe", s.handleDescribe)
 	mux.HandleFunc("GET /v1/expand/{id}", s.handleExpand)
+	mux.HandleFunc("GET /v1/context-window", s.handleFormatContextWindow)
 	mux.HandleFunc("POST /v1/history", s.handleHistory)
+	mux.HandleFunc("GET /v1/grep", s.handleGrep)
 	mux.HandleFunc("GET /v1/policies", s.handleListPolicies)
 	mux.HandleFunc("POST /v1/policies", s.handleAddPolicy)
 	mux.HandleFunc("DELETE /v1/policies/{id}", s.handleRemovePolicy)

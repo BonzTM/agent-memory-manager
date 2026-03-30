@@ -38,11 +38,11 @@ func serviceErrorToHTTP(err error) (int, string) {
 	if errors.Is(err, core.ErrNotFound) {
 		return nethttp.StatusNotFound, "not_found"
 	}
-	if strings.Contains(strings.ToLower(err.Error()), "not found") {
-		return nethttp.StatusNotFound, "not_found"
-	}
 	if errors.Is(err, core.ErrInvalidInput) {
 		return nethttp.StatusBadRequest, "validation_error"
+	}
+	if errors.Is(err, core.ErrExpansionRecursionBlocked) {
+		return nethttp.StatusForbidden, "expansion_recursion_blocked"
 	}
 	if strings.Contains(strings.ToLower(err.Error()), "invalid input") {
 		return nethttp.StatusBadRequest, "validation_error"
