@@ -4,6 +4,16 @@ AMM (Agent Memory Manager) provides durable, structured memory for AI agents. Th
 
 ## Installation
 
+## Pick the Fastest Route
+
+| Goal | Best path |
+|---|---|
+| Local single-user memory store | Release binaries + SQLite |
+| Agent runtime integration over stdio MCP | Release binaries + `amm-mcp` |
+| Shared network service / container / sidecar | Docker or `amm-http` |
+| Shared multi-agent backend | PostgreSQL + `amm-http` |
+| Kubernetes deployment | [Helm quickstart](../deploy/helm/amm/README.md) or [HTTP sidecar example](../deploy/sidecar/README.md) |
+
 ### 1. Release Binary (Recommended)
 The fastest way to get started is by downloading a pre-compiled binary:
 1. Go to the [Releases](https://github.com/bonztm/agent-memory-manager/releases) page.
@@ -17,20 +27,29 @@ AMM is available as a Docker image on GitHub Container Registry:
 docker pull ghcr.io/bonztm/agent-memory-manager:latest
 ```
 
-To run AMM with a persistent SQLite database:
+The container image starts `amm-http` by default. To initialize the database first:
 ```bash
-docker run -it \
+docker run --rm \
   -v ~/.amm:/data \
   -e AMM_DB_PATH=/data/amm.db \
-  ghcr.io/bonztm/agent-memory-manager:latest \
-  amm init
+  --entrypoint amm \
+  ghcr.io/bonztm/agent-memory-manager:latest init
 ```
 
-For production deployments, see the [PostgreSQL Backend](postgres.md) guide and the Helm charts in `deploy/helm/amm`.
+Then run the HTTP server against the same persisted database:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v ~/.amm:/data \
+  -e AMM_DB_PATH=/data/amm.db \
+  ghcr.io/bonztm/agent-memory-manager:latest
+```
+
+For production deployments, see the [PostgreSQL Backend](postgres.md) guide, the [Helm quickstart](../deploy/helm/amm/README.md), and the [HTTP sidecar example](../deploy/sidecar/README.md).
 
 ### 3. Build from Source
 If you prefer to build locally, you need:
-- Go 1.21 or later
+- Go 1.26.1 or later
 
 **Build Commands:**
 ```bash
@@ -63,6 +82,12 @@ amm init
 ```
 
 When `AMM_STORAGE_BACKEND=postgres` is set, AMM uses PostgreSQL instead of SQLite.
+
+If you want a disposable local PostgreSQL stack for testing:
+
+```bash
+docker compose -f docker-compose.postgres.yaml up
+```
 
 ### 2. Verify Installation
 Check the system status:
@@ -142,6 +167,12 @@ curl -s -X POST "http://localhost:8080/v1/recall" \
   -d '{"query":"user preferences","opts":{"mode":"ambient"}}'
 ```
 
+Initialize an empty HTTP deployment without the CLI:
+
+```bash
+curl -X POST http://localhost:8080/v1/init
+```
+
 ---
 
 ## Next Steps
@@ -150,3 +181,5 @@ curl -s -X POST "http://localhost:8080/v1/recall" \
 - [MCP Reference](mcp-reference.md)
 - [Configuration Guide](configuration.md)
 - [Architecture Overview](architecture.md)
+- [Agent Onboarding](agent-onboarding.md)
+- [Integration Guide](integration.md)

@@ -33,6 +33,8 @@ cp examples/opencode/plugins/amm.js ~/.config/opencode/plugins/amm.js
 
 If you already have an existing `~/.config/opencode/opencode.json`, merge only the `mcp.amm` block instead of overwriting your file.
 
+Replace placeholder paths such as `/home/you/.amm/amm.db` with your real paths before enabling the config.
+
 ## What this plugin captures
 
 - session lifecycle markers (`session_start`, `session_idle`)

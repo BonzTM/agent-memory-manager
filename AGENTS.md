@@ -65,7 +65,7 @@ deploy/
 
 ## Prerequisites
 
-- **Go 1.21+** (module requires 1.26.1; any recent Go toolchain handles this)
+- **Go 1.26.1+**
 - **Python 3** — needed for validation scripts in `scripts/`
 - **`.env` file** — copy `.env.example` to `.env` and populate `ACM_*` variables if using ACM workflows
 

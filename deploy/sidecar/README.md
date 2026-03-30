@@ -78,3 +78,7 @@ Expected health response shape:
 ## Related Docs
 
 - [Hermes agent integration guide](../../docs/hermes-agent-integration.md)
+- [OpenClaw integration guide](../../docs/openclaw-integration.md)
+- [OpenCode integration guide](../../docs/opencode-integration.md)
+- [Codex integration guide](../../docs/codex-integration.md)
+- [Helm quickstart](../helm/amm/README.md)

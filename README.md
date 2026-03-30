@@ -24,6 +24,17 @@ AMM gives AI agents durable, structured memory that persists across sessions and
 
 For detailed setup, see [Getting Started](docs/getting-started.md).
 
+## Choose Your Path
+
+| I want to... | Start here |
+|---|---|
+| Use AMM locally with SQLite | [Getting Started](docs/getting-started.md) |
+| Connect an agent runtime over MCP | [Agent Onboarding](docs/agent-onboarding.md) |
+| Run a shared HTTP/API instance | [Getting Started](docs/getting-started.md) + [HTTP API Reference](docs/http-api-reference.md) |
+| Use PostgreSQL instead of SQLite | [PostgreSQL Backend](docs/postgres.md) |
+| Deploy in Kubernetes | [Helm Quickstart](deploy/helm/amm/README.md) or [HTTP Sidecar Example](deploy/sidecar/README.md) |
+| Wire up Claude, Codex, OpenCode, OpenClaw, or Hermes | [Integration Guide](docs/integration.md) |
+
 ## Installation
 
 ### 1. Release Binary (Recommended)
@@ -34,13 +45,24 @@ Pull the official image from GitHub Container Registry:
 ```bash
 docker pull ghcr.io/bonztm/agent-memory-manager:latest
 ```
-Run with a persistent volume:
+Initialize a persistent SQLite database:
 ```bash
-docker run -v ~/.amm:/data -e AMM_DB_PATH=/data/amm.db ghcr.io/bonztm/agent-memory-manager:latest amm init
+docker run --rm \
+  -v ~/.amm:/data \
+  -e AMM_DB_PATH=/data/amm.db \
+  --entrypoint amm \
+  ghcr.io/bonztm/agent-memory-manager:latest init
+```
+Start the HTTP server with the same persisted database:
+```bash
+docker run --rm -p 8080:8080 \
+  -v ~/.amm:/data \
+  -e AMM_DB_PATH=/data/amm.db \
+  ghcr.io/bonztm/agent-memory-manager:latest
 ```
 
 ### 3. Build from Source
-If you prefer building locally, ensure you have Go 1.21+.
+If you prefer building locally, ensure you have Go 1.26.1 or later.
 ```bash
 go build ./cmd/amm ./cmd/amm-mcp ./cmd/amm-http
 ```
@@ -133,6 +155,7 @@ Full reference in [Configuration Documentation](docs/configuration.md).
 
 ## Documentation
 
+- [Changelog](CHANGELOG.md)
 - [Architecture](docs/architecture.md)
 - [HTTP API Reference](docs/http-api-reference.md)
 - [CLI Reference](docs/cli-reference.md)
@@ -142,6 +165,8 @@ Full reference in [Configuration Documentation](docs/configuration.md).
 - [Getting Started](docs/getting-started.md)
 - [Agent Onboarding](docs/agent-onboarding.md)
 - [Integration Guide](docs/integration.md)
+- [Helm Quickstart](deploy/helm/amm/README.md)
+- [HTTP Sidecar Example](deploy/sidecar/README.md)
 
 ## License
 

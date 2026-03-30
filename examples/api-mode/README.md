@@ -40,8 +40,37 @@ The examples here use the following environment variable:
 
 - `AMM_API_URL`: The base URL of the AMM HTTP API. Defaults to `http://localhost:8080`.
 - `AMM_API_KEY`: Optional server-side static key. When set, send `Authorization: Bearer <key>` with requests.
+- `AMM_PROJECT_ID`: Recommended stable project identifier for project-scoped recall in the shipped examples.
+
+The API-mode Codex examples also require:
+
+```bash
+python3 -m pip install requests
+```
 
 OpenAPI docs are available at `/openapi.json`, and Swagger UI is available at `/swagger/`.
+
+## Zero-to-Running Bootstrap
+
+Start the server:
+
+```bash
+amm-http
+```
+
+Initialize the database from another terminal:
+
+```bash
+curl -X POST http://localhost:8080/v1/init
+```
+
+Smoke test recall:
+
+```bash
+curl -s -X POST "http://localhost:8080/v1/recall" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "ambient context", "opts": {"mode": "ambient", "limit": 5}}'
+```
 
 ## Quick Comparison
 

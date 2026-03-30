@@ -16,7 +16,7 @@ For runtimes that prefer network communication or are not local to the AMM binar
 - **When to use**: Web-based agents, multi-agent shared memory, or remote backends.
 - **REST Endpoints**: [HTTP API Reference](http-api-reference.md)
 - **MCP Endpoint**: `/v1/mcp` (Streamable HTTP)
-- **Examples**: See `examples/api-mode/` and `deploy/sidecar/`.
+- **Examples**: See [`examples/api-mode/`](../examples/api-mode/README.md), [HTTP Sidecar Example](../deploy/sidecar/README.md), and [Helm Quickstart](../deploy/helm/amm/README.md).
 
 ### 2. MCP (stdio)
 For local runtimes like Claude Code or IDE-based agents.
@@ -30,7 +30,7 @@ For runtimes that support lifecycle hooks (e.g., shell scripts triggered on user
 
 - **Binary**: `amm`
 - **When to use**: Adding memory to existing CLI-based agents without modifying their source code.
-- **Example**: [Claude Code Hooks](docs/integration.md#hook-based-integration-claude-code-reference-implementation)
+- **Example**: [Agent Onboarding](agent-onboarding.md#step-4-set-up-automatic-capture-hooks)
 
 ---
 
@@ -38,13 +38,23 @@ For runtimes that support lifecycle hooks (e.g., shell scripts triggered on user
 
 | Runtime | Integration Pattern | Guide |
 |---------|---------------------|-------|
-| Claude Code | MCP + CLI Hooks | [Claude Integration](docs/integration.md#hook-based-integration-claude-code-reference-implementation) |
+| Claude Code | MCP + CLI Hooks | [Agent Onboarding](agent-onboarding.md#step-3-configure-for-claude-code-full-reference-path) |
 | Codex | MCP + CLI Hooks | [Codex Integration](codex-integration.md) |
 | OpenCode | MCP + Local Plugin | [OpenCode Integration](opencode-integration.md) |
 | OpenClaw | MCP Sidecar | [OpenClaw Integration](openclaw-integration.md) |
 | Hermes | MCP Sidecar | [Hermes Integration](hermes-agent-integration.md) |
 
 *Note: For all runtimes, the HTTP API mode is also an option for remote or containerized deployments.*
+
+## Runtime Decision Guide
+
+Ask these questions before picking a path:
+
+1. Does the runtime support stdio MCP? If yes, prefer `amm-mcp`.
+2. Does the runtime run outside the AMM host or inside containers? If yes, prefer `amm-http` or sidecar deployment.
+3. Does the runtime expose reliable lifecycle hooks? If yes, add capture helpers alongside MCP.
+4. Does the user want SQLite or PostgreSQL? SQLite is simplest; PostgreSQL is better for shared multi-agent use.
+5. Who owns maintenance scheduling? AMM does not ship an internal scheduler.
 
 ---
 

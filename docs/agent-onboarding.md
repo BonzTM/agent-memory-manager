@@ -28,9 +28,24 @@ Once amm is installed, the agent should follow the same durable-memory rules reg
 ```bash
 # Verify jq is available (used by hook scripts)
 jq --version
+
+# Verify Python 3 is available (used by Claude/Codex/Hermes helper scripts)
+python3 --version
 ```
 
-If the user wants to build from source, they need Go 1.21+. Use [Getting Started](getting-started.md) for full install instructions.
+If the user wants to build from source, they need Go 1.26.1 or later. API-mode Codex examples also require the Python `requests` package. Use [Getting Started](getting-started.md) for full install instructions.
+
+## Preflight Questions the Agent Should Ask
+
+Before installing anything, ask these questions and branch on the answers:
+
+1. **Which runtime are you integrating?** Claude Code, Codex, OpenCode, OpenClaw, Hermes-Agent, or another MCP/HTTP client?
+2. **Do you want local binaries or a shared HTTP service?**
+3. **Which backend do you want?** SQLite for local single-user use, or PostgreSQL for shared/networked use?
+4. **Will the AMM server require authentication?** If yes, who will distribute and store `AMM_API_KEY`?
+5. **Who will run background workers?** Host cron/systemd, runtime hooks, or Kubernetes automation?
+6. **Where should state live?** Confirm the final `AMM_DB_PATH`, or the PostgreSQL DSN, before writing configs.
+7. **Should the install be global or project-local?** Some runtimes support both.
 
 ---
 
@@ -42,6 +57,13 @@ If the user wants to build from source, they need Go 1.21+. Use [Getting Started
 
 # Alternative: pull the official Docker image
 docker pull ghcr.io/bonztm/agent-memory-manager:latest
+
+# Initialize the default SQLite database in Docker
+docker run --rm \
+  -v ~/.amm:/data \
+  -e AMM_DB_PATH=/data/amm.db \
+  --entrypoint amm \
+  ghcr.io/bonztm/agent-memory-manager:latest init
 ```
 
 Install details (including build-from-source fallback) are documented in [Getting Started](getting-started.md).
@@ -105,7 +127,7 @@ curl -s -X POST "http://localhost:8080/v1/recall" \
 }
 ```
 
-For Kubernetes deployments, see the sidecar example at `deploy/sidecar/` or use the Helm chart at `deploy/helm/amm/`.
+For Kubernetes deployments, see the [HTTP sidecar example](../deploy/sidecar/README.md) or the [Helm quickstart](../deploy/helm/amm/README.md).
 
 ---
 
@@ -296,7 +318,7 @@ cp /path/to/agent-memory-manager/examples/claude-code/*.sh ~/.amm/hooks/
 chmod +x ~/.amm/hooks/*.sh
 ```
 
-See `docs/integration.md` for more detail on the hook-based capture loop.
+See [Integration Guide](integration.md) for more detail on the hook-based capture loop.
 
 With `UserPromptSubmit`, `AssistantResponse`, `PreToolUse`, and `PostToolUse*` enabled, AMM captures a full transcript stream: user messages, assistant responses, tool calls, and tool results (plus session-stop metadata).
 
@@ -536,4 +558,4 @@ Run through this checklist to confirm everything is working:
 
 **MCP server returns parse errors** -- Ensure you are sending one JSON-RPC message per line. The MCP server reads newline-delimited JSON from stdin.
 
-**CGO build errors** -- These typically no longer occur since the migration to a pure Go SQLite driver. If you encounter build issues, ensure you are using Go 1.21+ and have a clean environment.
+**CGO build errors** -- These typically no longer occur since the migration to a pure Go SQLite driver. If you encounter build issues, ensure you are using Go 1.26.1 or later and have a clean environment.

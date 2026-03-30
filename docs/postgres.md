@@ -16,10 +16,14 @@ SQLite remains the default when `AMM_STORAGE_BACKEND` is unset or set to `sqlite
 A pre-configured `docker-compose.postgres.yaml` is provided for local development:
 
 ```bash
-docker-compose -f docker-compose.postgres.yaml up
+docker compose -f docker-compose.postgres.yaml up
 ```
 
 This starts a PostgreSQL 16 container and AMM configured to use it.
+
+If you still use legacy Compose v1 tooling, `docker-compose -f docker-compose.postgres.yaml up` works as well.
+
+For Kubernetes deployments, see the [Helm quickstart](../deploy/helm/amm/README.md).
 
 ## Features & Parity
 

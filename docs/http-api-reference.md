@@ -58,6 +58,8 @@ The `/v1/mcp` endpoint exposes all AMM tools via the MCP Streamable HTTP protoco
 }
 ```
 
+If `AMM_API_KEY` is set on the server, configure the MCP client to send the same bearer token or API-key header it uses for the REST API.
+
 ---
 
 ## Route Table
