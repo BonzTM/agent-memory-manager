@@ -72,6 +72,21 @@ Regardless of the mechanism, the ideal integration follows this loop:
 
 ---
 
+## Recommended Ingestion Policies
+
+Before setting up event capture, configure ingestion policies to filter out tool noise. This is **strongly recommended** for all integrations.
+
+```bash
+amm policy-add --pattern-type kind --pattern "tool_call" --mode ignore --match-mode exact --priority 100
+amm policy-add --pattern-type kind --pattern "tool_result" --mode ignore --match-mode exact --priority 100
+```
+
+**Why**: Without these policies, the extraction pipeline treats raw tool invocation JSON (patch text, shell commands, API payloads) as meaningful content, producing low-quality memories that pollute recall. The meaningful information from tool interactions is already captured in `message_user` and `message_assistant` events. See [Configuration: Ingestion Policies](configuration.md#ingestion-policies) for the full reference.
+
+If your integration captures `tool_call` and `tool_result` events via hooks or plugins, these policies ensure the events are dropped at ingestion before the extraction pipeline ever sees them.
+
+---
+
 ## Minimum Capture Requirements
 
 For high-quality recall, ensure your integration provides these fields:

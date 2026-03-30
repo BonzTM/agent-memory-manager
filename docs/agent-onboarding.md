@@ -95,6 +95,37 @@ Use PostgreSQL when you want a shared/networked backend for multiple agents.
 
 ---
 
+## Step 2.5: Configure Recommended Ingestion Policies
+
+After initialization, add ingestion policies to ignore `tool_call` and `tool_result` events. This is **strongly recommended** for all deployments and should be done before setting up hooks or capture.
+
+```bash
+amm policy-add --pattern-type kind --pattern "tool_call" --mode ignore --match-mode exact --priority 100
+amm policy-add --pattern-type kind --pattern "tool_result" --mode ignore --match-mode exact --priority 100
+```
+
+**Why this matters**: Without these policies, the extraction pipeline treats raw tool invocation JSON as meaningful content. This produces low-quality memories polluted with patch text, shell commands, and API payloads instead of actual decisions, preferences, and facts. The meaningful information from tool interactions is already captured in `message_user` and `message_assistant` events, where agents describe what they did and why.
+
+Verify with:
+```bash
+amm policy-list
+```
+
+For HTTP API deployments, use the equivalent REST calls:
+```bash
+curl -X POST http://localhost:8080/v1/policies \
+  -H "Content-Type: application/json" \
+  -d '{"pattern_type":"kind","pattern":"tool_call","mode":"ignore","match_mode":"exact","priority":100}'
+
+curl -X POST http://localhost:8080/v1/policies \
+  -H "Content-Type: application/json" \
+  -d '{"pattern_type":"kind","pattern":"tool_result","mode":"ignore","match_mode":"exact","priority":100}'
+```
+
+See [Configuration: Ingestion Policies](configuration.md#ingestion-policies) for the full policy reference.
+
+---
+
 ## Step 2a: (Optional) Run as HTTP API
 
 If the runtime cannot execute local binaries directly, or you are running in a containerized environment (e.g., as a Kubernetes sidecar), deploy `amm-http` and call AMM over the network.

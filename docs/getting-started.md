@@ -96,6 +96,22 @@ amm status
 ```
 You should see `initialized: true` in the output.
 
+### 3. Configure Recommended Ingestion Policies
+
+After initialization, add ingestion policies to ignore `tool_call` and `tool_result` events. This is **strongly recommended** for all deployments. Without these policies, the extraction pipeline treats raw tool invocation JSON (patch text, shell commands, API calls) as meaningful content, producing low-quality memories that pollute recall results.
+
+```bash
+amm policy-add --pattern-type kind --pattern "tool_call" --mode ignore --match-mode exact --priority 100
+amm policy-add --pattern-type kind --pattern "tool_result" --mode ignore --match-mode exact --priority 100
+```
+
+Verify the policies are active:
+```bash
+amm policy-list
+```
+
+This is safe because agents summarize tool interactions in their `message_assistant` responses, so the meaningful context is still captured. The raw tool JSON adds noise, not signal. See [Configuration: Ingestion Policies](configuration.md#ingestion-policies) for the full policy reference.
+
 Verify all three binaries are installed:
 ```bash
 amm --help

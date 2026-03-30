@@ -1014,6 +1014,98 @@ Get an entity by ID.
 
 ---
 
+### amm_policy_list
+
+List all ingestion policies.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 40,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_policy_list",
+    "arguments": {}
+  }
+}
+```
+
+---
+
+### amm_policy_add
+
+Add an ingestion policy. **Strongly recommended**: add `ignore` policies for `tool_call` and `tool_result` event kinds after initialization. Without these, the extraction pipeline treats raw tool JSON as meaningful content, producing low-quality memories.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "pattern_type": {"type": "string", "description": "Pattern type: kind, session, source, surface, agent, project, runtime"},
+    "pattern":      {"type": "string", "description": "Pattern string to match"},
+    "mode":         {"type": "string", "description": "Ingestion mode: full, read_only, ignore"},
+    "match_mode":   {"type": "string", "description": "Match mode: exact, glob, regex"},
+    "priority":     {"type": "integer", "description": "Priority ordering (higher wins)"}
+  },
+  "required": ["pattern_type", "pattern", "mode"]
+}
+```
+
+**Recommended setup (run after initialization):**
+
+```json
+{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"amm_policy_add","arguments":{"pattern_type":"kind","pattern":"tool_call","mode":"ignore","match_mode":"exact","priority":100}}}
+{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"amm_policy_add","arguments":{"pattern_type":"kind","pattern":"tool_result","mode":"ignore","match_mode":"exact","priority":100}}}
+```
+
+---
+
+### amm_policy_remove
+
+Remove an ingestion policy by ID.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "Policy ID to remove"}
+  },
+  "required": ["id"]
+}
+```
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 43,
+  "method": "tools/call",
+  "params": {
+    "name": "amm_policy_remove",
+    "arguments": {
+      "id": "pol_abc123"
+    }
+  }
+}
+```
+
+---
+
 ### amm_jobs_run
 
 Run a maintenance job.

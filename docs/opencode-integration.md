@@ -56,6 +56,17 @@ The shipped `amm.js` plugin captures the full conversation transcript boundary e
 - `event` also handles session lifecycle markers such as `session.created` and `session.idle`
 - maintenance jobs are executed asynchronously with process timeouts and a filesystem lock (`$AMM_DB_PATH.opencode-maintenance.lock`) so OpenCode's event loop is not blocked and overlapping workers are skipped
 
+## 2.5. Configure Recommended Ingestion Policies
+
+The OpenCode plugin captures `tool_call` and `tool_result` events. To prevent these from polluting extracted memories, **strongly consider** adding ignore policies:
+
+```bash
+amm policy-add --pattern-type kind --pattern "tool_call" --mode ignore --match-mode exact --priority 100
+amm policy-add --pattern-type kind --pattern "tool_result" --mode ignore --match-mode exact --priority 100
+```
+
+Without these policies, the extraction pipeline treats raw tool invocation JSON (patch text, shell commands, API payloads) as meaningful content, producing low-quality memories. The meaningful information is already captured in `message_user` and `message_assistant` events. See [Configuration: Ingestion Policies](configuration.md#ingestion-policies) for the full reference.
+
 ## 3. Keep workers external
 
 OpenCode plugins can trigger light amm jobs, but the heavy maintenance loop still belongs outside the runtime. Because SQLite is a single-writer system, we recommend running the **conservative baseline** maintenance jobs sequentially using the shared worker runner:

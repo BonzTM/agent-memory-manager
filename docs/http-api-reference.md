@@ -303,11 +303,23 @@ List all ingestion policies.
 Add an ingestion policy.
 
 **Request Body**
-- `pattern_type`: `session`, `source`, `surface`, `agent`, `project`, or `runtime`.
+- `pattern_type`: `kind`, `session`, `source`, `surface`, `agent`, `project`, or `runtime`.
 - `pattern`: Pattern string to match.
 - `mode`: `full`, `read_only`, or `ignore`.
 - `match_mode`: (Optional) `exact`, `glob`, or `regex`.
 - `priority`: (Optional) Integer priority (higher wins).
+
+**Recommended policies** (add after initialization for all deployments):
+```bash
+# Ignore tool events to prevent tool JSON from polluting extracted memories
+curl -X POST http://localhost:8080/v1/policies \
+  -H "Content-Type: application/json" \
+  -d '{"pattern_type":"kind","pattern":"tool_call","mode":"ignore","match_mode":"exact","priority":100}'
+
+curl -X POST http://localhost:8080/v1/policies \
+  -H "Content-Type: application/json" \
+  -d '{"pattern_type":"kind","pattern":"tool_result","mode":"ignore","match_mode":"exact","priority":100}'
+```
 
 ### DELETE /v1/policies/{id}
 Remove a policy by ID.

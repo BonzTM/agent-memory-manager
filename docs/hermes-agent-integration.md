@@ -56,6 +56,17 @@ Once that is in place, Hermes can call tools such as:
 
 Keep the mental model the same as every other runtime: Hermes asks for memory, but amm remains an external service boundary exposed through stdio MCP and the CLI.
 
+## 1.5. Configure Recommended Ingestion Policies
+
+The Hermes helper scripts capture `tool_call` and `tool_result` events via `on-tool-use.sh`. To prevent these from polluting extracted memories, **strongly consider** adding ignore policies after initialization:
+
+```bash
+amm policy-add --pattern-type kind --pattern "tool_call" --mode ignore --match-mode exact --priority 100
+amm policy-add --pattern-type kind --pattern "tool_result" --mode ignore --match-mode exact --priority 100
+```
+
+Without these policies, the extraction pipeline treats raw tool invocation JSON (patch text, shell commands, API payloads) as meaningful content, producing low-quality memories. The meaningful information is already captured in `message_user` and `message_assistant` events. See [Configuration: Ingestion Policies](configuration.md#ingestion-policies) for the full reference.
+
 ## 2. Use Hook Handlers to Bridge Hermes Into amm
 
 Hermes has its own hook registration model. This repo does **not** ship a Hermes-native plugin package or a full Hermes config tree. Instead, it ships amm-side helper scripts that a Hermes hook handler can call.

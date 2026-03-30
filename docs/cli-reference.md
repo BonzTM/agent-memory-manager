@@ -605,11 +605,19 @@ amm policy add --pattern-type <type> --pattern <pattern> --mode <mode> [--priori
 
 | Flag | Required | Description |
 |---|---|---|
-| `--pattern-type` | Yes | `session`, `source`, `surface`, `agent`, `project`, or `runtime` |
+| `--pattern-type` | Yes | `kind`, `session`, `source`, `surface`, `agent`, `project`, or `runtime` |
 | `--pattern` | Yes | Pattern string to match |
 | `--mode` | Yes | `full`, `read_only`, or `ignore` |
 | `--priority` | No | Integer priority (higher wins) |
 | `--match-mode` | No | `exact`, `glob`, or `regex` |
+
+**Recommended policies** (add these after `amm init` for all deployments):
+
+```bash
+# Ignore tool_call and tool_result events to prevent tool JSON from polluting extracted memories
+amm policy-add --pattern-type kind --pattern "tool_call" --mode ignore --match-mode exact --priority 100
+amm policy-add --pattern-type kind --pattern "tool_result" --mode ignore --match-mode exact --priority 100
+```
 
 ---
 

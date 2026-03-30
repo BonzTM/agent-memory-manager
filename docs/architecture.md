@@ -81,7 +81,7 @@ AMM supports two primary storage engines, selectable via the `AMM_STORAGE_BACKEN
 
 AMM runs a staged intelligence pipeline to extract knowledge from raw history:
 
-1. **Ingest**: Raw events are appended to the history layer.
+1. **Ingest**: Raw events are appended to the history layer. Ingestion policies filter events before storage — events matching an `ignore` policy are dropped entirely, while `read_only` events are stored but skip extraction. It is **strongly recommended** to configure `ignore` policies for `tool_call` and `tool_result` event kinds to prevent tool invocation JSON from polluting extracted memories.
 2. **Reflect**: Processes events in batches to extract candidate memories (facts, preferences, etc.).
 3. **Index**: Generates text indexes and optional vector embeddings.
 4. **Compress**: Builds hierarchical summaries over event spans. Uses three-level escalation (normal → aggressive → deterministic truncate) to guarantee convergence at every level (leaf, topic, session).

@@ -145,6 +145,17 @@ chmod +x ~/.amm/hooks/codex-stop.py
 
 Codex does **not** load hooks from `config.toml`; the hooks live in `hooks.json` next to the config file. The repo example manifest is at [`examples/codex/hooks.json`](../examples/codex/hooks.json).
 
+## 3.5. Configure Recommended Ingestion Policies
+
+The Codex `Stop` hook imports `tool_call` and `tool_result` events from the transcript. To prevent these from polluting extracted memories, **strongly consider** adding ignore policies:
+
+```bash
+amm policy-add --pattern-type kind --pattern "tool_call" --mode ignore --match-mode exact --priority 100
+amm policy-add --pattern-type kind --pattern "tool_result" --mode ignore --match-mode exact --priority 100
+```
+
+Without these policies, the extraction pipeline treats raw tool invocation JSON (patch text, shell commands, API payloads) as meaningful content, producing low-quality memories. The meaningful information is already captured in `message_user` and `message_assistant` events. See [Configuration: Ingestion Policies](configuration.md#ingestion-policies) for the full reference.
+
 ## 4. Add an Agent Instructions Snippet
 
 If you want a Codex-specific instruction block, add something like this to your repo instructions or keep it in a companion doc for copy/paste:

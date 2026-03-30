@@ -24,6 +24,19 @@ AMM gives AI agents durable, structured memory that persists across sessions and
 
 For detailed setup, see [Getting Started](docs/getting-started.md).
 
+## Recommended: Filter Tool Events
+
+After initializing, **strongly consider** adding ingestion policies to ignore `tool_call` and `tool_result` events. Without these policies, the extraction pipeline treats raw tool invocation JSON as meaningful content, producing low-quality memories polluted with tool payloads, patch text, and shell commands.
+
+```bash
+amm policy-add --pattern-type kind --pattern "tool_call" --mode ignore --match-mode exact --priority 100
+amm policy-add --pattern-type kind --pattern "tool_result" --mode ignore --match-mode exact --priority 100
+```
+
+This is safe because the meaningful information from tool interactions is already captured in the surrounding `message_user` and `message_assistant` events, where agents summarize what they did and why. The raw tool JSON adds noise, not signal.
+
+See [Configuration: Ingestion Policies](docs/configuration.md#ingestion-policies) for full policy reference.
+
 ## Choose Your Path
 
 | I want to... | Start here |

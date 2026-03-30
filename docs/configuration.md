@@ -247,6 +247,96 @@ model = "nomic-embed-text"
 
 ---
 
+## Ingestion Policies
+
+Ingestion policies control how events are processed at ingestion time. They are stored in the database and persist across restarts.
+
+### Policy Modes
+
+| Mode | Behavior |
+|------|----------|
+| `full` | Store event and extract memories from it |
+| `read_only` | Store event but skip memory extraction |
+| `ignore` | Drop the event entirely — not stored, not processed |
+
+### Pattern Types
+
+Policies match events by different fields:
+
+| Pattern Type | Matches Against |
+|---|---|
+| `kind` | Event kind (e.g., `message_user`, `tool_call`, `tool_result`) |
+| `session` | Session identifier |
+| `source` | Source system identifier |
+| `surface` | Surface/interface identifier |
+| `agent` | Agent identifier |
+| `project` | Project identifier |
+| `runtime` | Runtime identifier |
+
+### Match Modes
+
+| Match Mode | Description |
+|---|---|
+| `exact` | Exact string match |
+| `glob` | Glob pattern (e.g., `tool_*`) |
+| `regex` | Regular expression |
+
+### Priority
+
+When multiple policies match the same event, the policy with the highest `priority` value wins. Explicit policies override the built-in noise heuristics.
+
+### Recommended Policies
+
+**Strongly recommended for all deployments**: Ignore `tool_call` and `tool_result` events.
+
+```bash
+amm policy-add --pattern-type kind --pattern "tool_call" --mode ignore --match-mode exact --priority 100
+amm policy-add --pattern-type kind --pattern "tool_result" --mode ignore --match-mode exact --priority 100
+```
+
+**Why**: Without these policies, the extraction pipeline treats raw tool invocation JSON as meaningful content. Tool calls contain patch text, shell commands, API payloads, and other machine-generated artifacts that the LLM extractor misinterprets as facts, decisions, or constraints. This produces large numbers of low-quality memories that pollute recall results and waste processing resources.
+
+The meaningful information from tool interactions is already captured in `message_user` and `message_assistant` events, where agents describe what they did, what they found, and why. Ignoring the raw tool JSON removes noise without losing signal.
+
+### Built-in Noise Heuristics
+
+AMM has built-in heuristics that auto-downgrade certain events to `read_only`:
+- `tool_result` events
+- Self-referential AMM `tool_call` events
+- Large JSON blobs
+- Build/test logs
+- File listings and diffs
+
+Explicit `ignore` policies are stricter than these heuristics — they drop events entirely before the extraction pipeline ever sees them.
+
+### Managing Policies
+
+```bash
+# List all active policies
+amm policy-list
+
+# Add a policy
+amm policy-add --pattern-type kind --pattern "tool_call" --mode ignore --match-mode exact --priority 100
+
+# Remove a policy by ID
+amm policy-remove <policy-id>
+```
+
+### Additional Policy Examples
+
+```bash
+# Ignore all tool-related events using a glob pattern
+amm policy-add --pattern-type kind --pattern "tool_*" --mode ignore --match-mode glob
+
+# Ignore events from a noisy source system
+amm policy-add --pattern-type source --pattern "noisy-ci-bot" --mode ignore
+
+# Store but don't extract from a specific session
+amm policy-add --pattern-type session --pattern "debug-session-123" --mode read_only
+```
+
+---
+
 ## Compression Behaviour
 
 The compression pipeline uses three-level escalation to guarantee convergence. All body
