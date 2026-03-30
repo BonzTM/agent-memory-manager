@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
@@ -15,6 +16,7 @@ const (
 )
 
 func (s *AMMService) CrossProjectTransfer(ctx context.Context) (int, error) {
+	slog.Debug("CrossProjectTransfer called")
 	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
 		Scope:  core.ScopeProject,
 		Status: core.MemoryStatusActive,
@@ -99,7 +101,7 @@ func (s *AMMService) CrossProjectTransfer(ctx context.Context) (int, error) {
 		}
 
 		globalMemory := &core.Memory{
-			ID:               generateID("mem_"),
+			ID:               core.GenerateID("mem_"),
 			Type:             best.Type,
 			Scope:            core.ScopeGlobal,
 			Subject:          best.Subject,

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
@@ -10,6 +11,7 @@ import (
 // CheckIntegrity validates cross-record links and summarizes any integrity
 // issues it finds.
 func (s *AMMService) CheckIntegrity(ctx context.Context) (*core.RepairReport, error) {
+	slog.Debug("CheckIntegrity called")
 	report := &core.RepairReport{}
 
 	// 1. Summary-source links: verify that source_span event_ids exist.
@@ -101,6 +103,7 @@ func (s *AMMService) CheckIntegrity(ctx context.Context) (*core.RepairReport, er
 // FixLinks repairs link issues that can be corrected through the repository
 // interface and reports what changed.
 func (s *AMMService) FixLinks(ctx context.Context) (*core.RepairReport, error) {
+	slog.Debug("FixLinks called")
 	report := &core.RepairReport{}
 
 	// Fix broken supersession pointers: clear supersedes/superseded_by that point to non-existent memories.

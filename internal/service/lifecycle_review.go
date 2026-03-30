@@ -38,6 +38,7 @@ func (s *AMMService) SetLifecycleReviewBatchSize(batchSize int) {
 }
 
 func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
+	slog.Debug("LifecycleReview called")
 	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
 		Status: core.MemoryStatusActive,
 		Limit:  10000,
@@ -217,11 +218,28 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 		}
 
 		for _, contradiction := range result.Contradictions {
-			slog.Info("lifecycle review contradiction detected",
-				"memory_a", contradiction.MemoryA,
-				"memory_b", contradiction.MemoryB,
-				"explanation", contradiction.Explanation,
-			)
+			if _, err := s.persistContradiction(
+				ctx,
+				contradiction.MemoryA,
+				contradiction.MemoryB,
+				contradiction.Explanation,
+				[]string{"contradiction", "lifecycle-review"},
+			); err != nil {
+				return affected, fmt.Errorf("persist lifecycle review contradiction: %w", err)
+			}
+
+			for _, id := range []string{contradiction.MemoryA, contradiction.MemoryB} {
+				mem := batchByID[id]
+				if mem == nil {
+					continue
+				}
+				latest, err := s.repo.GetMemory(ctx, id)
+				if err != nil || latest == nil {
+					continue
+				}
+				*mem = *latest
+				mutatedMemoryIDs[id] = true
+			}
 		}
 
 		for _, mem := range batch {

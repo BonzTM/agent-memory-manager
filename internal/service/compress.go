@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -86,6 +87,7 @@ type topicSummaryPlan struct {
 // CompressHistory summarizes recent event chunks into leaf summaries and
 // returns the number created.
 func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
+	slog.Debug("CompressHistory called")
 	frontier := s.jobFrontierSequenceID(ctx, "compress")
 
 	maxEvents := s.compressMaxEvents
@@ -215,7 +217,7 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 
 		now := time.Now().UTC()
 		summary := &core.Summary{
-			ID:               generateID("sum_"),
+			ID:               core.GenerateID("sum_"),
 			Kind:             "leaf",
 			Depth:            0,
 			Scope:            scope,
@@ -253,7 +255,7 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 
 	now := time.Now().UTC()
 	job := &core.Job{
-		ID:         generateID("job_"),
+		ID:         core.GenerateID("job_"),
 		Kind:       "compress",
 		Status:     "completed",
 		StartedAt:  &now,
@@ -274,6 +276,7 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 // ConsolidateSessions creates session-level summaries from grouped session
 // events and returns the number created.
 func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
+	slog.Debug("ConsolidateSessions called")
 	frontier := s.jobFrontierSequenceID(ctx, "consolidate_sessions")
 
 	opts := core.ListEventsOptions{Limit: 500}
@@ -300,7 +303,7 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 		maxSeq := maxEventSequenceID(newEvents)
 		now := time.Now().UTC()
 		job := &core.Job{
-			ID:         generateID("job_"),
+		ID:         core.GenerateID("job_"),
 			Kind:       "consolidate_sessions",
 			Status:     "completed",
 			StartedAt:  &now,
@@ -387,7 +390,7 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 
 		now := time.Now().UTC()
 		summary := &core.Summary{
-			ID:               generateID("sum_"),
+			ID:               core.GenerateID("sum_"),
 			Kind:             "session",
 			Depth:            0,
 			Scope:            scope,
@@ -435,6 +438,7 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 }
 
 func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
+	slog.Debug("BuildTopicSummaries called")
 	hasWork, err := s.hasNewLeafSummariesSinceLastTopicJob(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("check for new leaf summaries: %w", err)
@@ -457,7 +461,7 @@ func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
 	recordTopicJob := func(created int) error {
 		now := time.Now().UTC()
 		topicJob := &core.Job{
-			ID:         generateID("job_"),
+		ID:         core.GenerateID("job_"),
 			Kind:       "build_topic_summaries",
 			Status:     "completed",
 			StartedAt:  &now,
@@ -584,7 +588,7 @@ func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
 		scope, projectID := inferScopeFromSummaries(plan.group)
 		now := time.Now().UTC()
 		topicSummary := &core.Summary{
-			ID:               generateID("sum_"),
+			ID:               core.GenerateID("sum_"),
 			Kind:             "topic",
 			Depth:            1,
 			Scope:            scope,
@@ -892,7 +896,7 @@ func (s *AMMService) insertNarrativeEpisode(
 	now := time.Now().UTC()
 	startedAt, endedAt := eventTimeBounds(evts)
 	episode := &core.Episode{
-		ID:               generateID("ep_"),
+			ID:               core.GenerateID("ep_"),
 		Title:            title,
 		Summary:          summary,
 		TightDescription: func() string {
@@ -1032,7 +1036,7 @@ func (s *AMMService) insertNarrativeMemoryIfNotDuplicate(
 	}
 
 	mem := &core.Memory{
-		ID:               generateID("mem_"),
+			ID:               core.GenerateID("mem_"),
 		Type:             candidate.Type,
 		Scope:            candidate.Scope,
 		ProjectID:        candidate.ProjectID,

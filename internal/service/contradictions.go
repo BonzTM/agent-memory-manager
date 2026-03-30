@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 // DetectContradictions scans extracted claims for conflicting subject-predicate
 // pairs and records contradiction memories for conflicts it finds.
 func (s *AMMService) DetectContradictions(ctx context.Context) (int, error) {
+	slog.Debug("DetectContradictions called")
 	// List all active memories.
 	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
 		Status: core.MemoryStatusActive,
@@ -57,20 +60,6 @@ func (s *AMMService) DetectContradictions(ctx context.Context) (int, error) {
 		}
 	}
 
-	// Load existing contradiction memories so we don't duplicate.
-	existingContradictions, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
-		Type:   core.MemoryTypeContradiction,
-		Status: core.MemoryStatusActive,
-		Limit:  10000,
-	})
-	if err != nil {
-		existingContradictions = nil
-	}
-	existingBodies := make(map[string]bool, len(existingContradictions))
-	for _, ec := range existingContradictions {
-		existingBodies[ec.Body] = true
-	}
-
 	found := 0
 	for key, entries := range claimMap {
 		if len(entries) < 2 {
@@ -103,78 +92,165 @@ func (s *AMMService) DetectContradictions(ctx context.Context) (int, error) {
 			subject = strings.TrimPrefix(subject, "subject:")
 		}
 
-		body := fmt.Sprintf(
-			"Conflicting claims about %q: claim %s says %q, claim %s says %q",
-			subject, a.claim.ID, a.claim.ObjectValue, b.claim.ID, b.claim.ObjectValue,
+		explanation := fmt.Sprintf(
+			"claim %s says %q, claim %s says %q (predicate: %s)",
+			a.claim.ID, a.claim.ObjectValue, b.claim.ID, b.claim.ObjectValue, key.predicate,
 		)
+		created, err := s.persistContradiction(ctx, a.memoryID, b.memoryID, fmt.Sprintf("%s: %s", subject, explanation), []string{"contradiction", "auto-detected"})
+		if err != nil {
+			return found, err
+		}
+		if created {
+			found++
+		}
+	}
 
-		// Skip if an identical contradiction already exists.
-		if existingBodies[body] {
-			continue
+	return found, nil
+}
+
+func (s *AMMService) persistContradiction(ctx context.Context, memAID, memBID, explanation string, tags []string) (bool, error) {
+	memA, err := s.repo.GetMemory(ctx, memAID)
+	if err != nil {
+		return false, fmt.Errorf("get contradiction memory A %s: %w", memAID, err)
+	}
+	memB, err := s.repo.GetMemory(ctx, memBID)
+	if err != nil {
+		return false, fmt.Errorf("get contradiction memory B %s: %w", memBID, err)
+	}
+
+	subject := strings.TrimSpace(memA.Subject)
+	if subject == "" {
+		subject = strings.TrimSpace(memB.Subject)
+	}
+	if subject == "" {
+		subject = "memory"
+	}
+
+	body := contradictionBody(subject, *memA, *memB, explanation)
+	bodyReverse := contradictionBody(subject, *memB, *memA, explanation)
+	sourceEventIDs := s.contradictionSourceEventIDs(ctx, explanation)
+
+	existingContradictions, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
+		Type:   core.MemoryTypeContradiction,
+		Status: core.MemoryStatusActive,
+		Limit:  10000,
+	})
+	if err != nil {
+		existingContradictions = nil
+	}
+	existingBodies := make(map[string]struct{}, len(existingContradictions))
+	for _, existing := range existingContradictions {
+		existingBodies[existing.Body] = struct{}{}
+	}
+	if _, ok := existingBodies[body]; ok {
+		return false, nil
+	}
+	if _, ok := existingBodies[bodyReverse]; ok {
+		return false, nil
+	}
+
+	now := time.Now().UTC()
+	inserted := &core.Memory{
+			ID:               core.GenerateID("mem_"),
+		Type:             core.MemoryTypeContradiction,
+		Scope:            core.ScopeGlobal,
+		Subject:          subject,
+		Body:             body,
+		TightDescription: fmt.Sprintf("Contradiction: %s", subject),
+		Confidence:       0.7,
+		Importance:       0.8,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		SourceEventIDs:   sourceEventIDs,
+		Tags:             tags,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := s.repo.InsertMemory(ctx, inserted); err != nil {
+		return false, fmt.Errorf("insert contradiction memory: %w", err)
+	}
+
+	if !memA.CreatedAt.Equal(memB.CreatedAt) {
+		older := memA
+		newer := memB
+		if memB.CreatedAt.Before(memA.CreatedAt) {
+			older = memB
+			newer = memA
 		}
 
-		// Also check the reverse ordering to avoid near-duplicates.
-		bodyReverse := fmt.Sprintf(
-			"Conflicting claims about %q: claim %s says %q, claim %s says %q",
-			subject, b.claim.ID, b.claim.ObjectValue, a.claim.ID, a.claim.ObjectValue,
-		)
-		if existingBodies[bodyReverse] {
-			continue
-		}
-
-		// Combine source event IDs from both claims.
-		var sourceEventIDs []string
-		if a.claim.SourceEventID != "" {
-			sourceEventIDs = append(sourceEventIDs, a.claim.SourceEventID)
-		}
-		if b.claim.SourceEventID != "" {
-			sourceEventIDs = append(sourceEventIDs, b.claim.SourceEventID)
-		}
-
-		now := time.Now().UTC()
-		mem := &core.Memory{
-			ID:               generateID("mem_"),
-			Type:             core.MemoryTypeContradiction,
-			Scope:            core.ScopeGlobal,
-			Subject:          key.predicate,
-			Body:             body,
-			TightDescription: fmt.Sprintf("Contradiction: %s has conflicting values for %s", subject, key.predicate),
-			Confidence:       0.7,
-			Importance:       0.8,
-			PrivacyLevel:     core.PrivacyPrivate,
-			Status:           core.MemoryStatusActive,
-			SourceEventIDs:   sourceEventIDs,
-			Tags:             []string{"contradiction", "auto-detected"},
-			CreatedAt:        now,
-			UpdatedAt:        now,
-		}
-
-		if err := s.repo.InsertMemory(ctx, mem); err != nil {
-			return found, fmt.Errorf("insert contradiction memory: %w", err)
-		}
-
-		memA, errA := s.repo.GetMemory(ctx, a.memoryID)
-		memB, errB := s.repo.GetMemory(ctx, b.memoryID)
-		if errA == nil && errB == nil && !memA.CreatedAt.Equal(memB.CreatedAt) {
-			older := memA
-			newer := memB
-			if memB.CreatedAt.Before(memA.CreatedAt) {
-				older = memB
-				newer = memA
-			}
-
+		switch older.Status {
+		case core.MemoryStatusActive:
 			older.Status = core.MemoryStatusSuperseded
 			older.SupersededBy = newer.ID
 			older.SupersededAt = &now
 			older.UpdatedAt = now
 			if err := s.repo.UpdateMemory(ctx, older); err != nil {
-				return found, fmt.Errorf("supersede older conflicting memory: %w", err)
+				return false, fmt.Errorf("supersede older conflicting memory: %w", err)
 			}
+		case core.MemoryStatusSuperseded:
+			slog.Warn("skipping supersession for already superseded memory",
+				"memory_id", older.ID,
+				"current_superseded_by", older.SupersededBy,
+				"newer_memory_id", newer.ID,
+			)
+		default:
+			slog.Warn("skipping supersession for non-active memory",
+				"memory_id", older.ID,
+				"status", older.Status,
+				"newer_memory_id", newer.ID,
+			)
 		}
-
-		existingBodies[body] = true
-		found++
 	}
 
-	return found, nil
+	slog.Info("persisted contradiction memory",
+		"memory_a", memA.ID,
+		"memory_b", memB.ID,
+		"subject", subject,
+		"explanation", explanation,
+		"tags", tags,
+	)
+	return true, nil
+}
+
+func contradictionBody(subject string, memoryA core.Memory, memoryB core.Memory, explanation string) string {
+	base := fmt.Sprintf(
+		"Conflicting claims about %q: memory %s says %q, memory %s says %q",
+		subject, memoryA.ID, memoryA.Body, memoryB.ID, memoryB.Body,
+	)
+	explanation = strings.TrimSpace(explanation)
+	if explanation == "" {
+		return base
+	}
+	return fmt.Sprintf("%s (%s)", base, explanation)
+}
+
+var contradictionExplanationClaimIDPattern = regexp.MustCompile(`claim\s+([^\s]+)\s+says`)
+
+func (s *AMMService) contradictionSourceEventIDs(ctx context.Context, explanation string) []string {
+	claimMatches := contradictionExplanationClaimIDPattern.FindAllStringSubmatch(explanation, -1)
+	if len(claimMatches) == 0 {
+		return nil
+	}
+
+	sourceEventIDs := make([]string, 0, len(claimMatches))
+	for _, match := range claimMatches {
+		if len(match) < 2 {
+			continue
+		}
+		claimID := strings.TrimSpace(match[1])
+		if claimID == "" {
+			continue
+		}
+		claim, err := s.repo.GetClaim(ctx, claimID)
+		if err != nil || claim == nil {
+			continue
+		}
+		sourceEventID := strings.TrimSpace(claim.SourceEventID)
+		if sourceEventID == "" {
+			continue
+		}
+		sourceEventIDs = mergeUniqueStrings(sourceEventIDs, []string{sourceEventID})
+	}
+
+	return sourceEventIDs
 }

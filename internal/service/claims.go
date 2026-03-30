@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
@@ -30,6 +31,7 @@ var claimPatterns = []claimPattern{
 // ExtractClaims scans active memories, derives structured claims, and returns
 // the number created.
 func (s *AMMService) ExtractClaims(ctx context.Context) (int, error) {
+	slog.Debug("ExtractClaims called")
 	// List recent memories to process.
 	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
 		Status: core.MemoryStatusActive,
@@ -109,7 +111,7 @@ func extractClaimsFromBody(mem *core.Memory) []core.Claim {
 		}
 
 		claim := core.Claim{
-			ID:          generateID("clm_"),
+		ID:          core.GenerateID("clm_"),
 			MemoryID:    mem.ID,
 			Predicate:   pat.predicate,
 			ObjectValue: object,

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ const (
 )
 
 func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
+	slog.Debug("Reflect called", "job_id", jobID)
 	created := 0
 	processedCount := 0
 	claimBatchSize := s.reflectBatchSize
@@ -231,7 +233,7 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 				}
 
 				mem := &core.Memory{
-					ID:               generateID("mem_"),
+					ID:               core.GenerateID("mem_"),
 					Type:             candidateMemory.Type,
 					Scope:            candidateMemory.Scope,
 					ProjectID:        candidateMemory.ProjectID,
@@ -445,7 +447,7 @@ func (s *AMMService) createRelationshipsFromAnalysis(ctx context.Context, relati
 
 		now := time.Now().UTC()
 		relModel := &core.Relationship{
-			ID:               generateID("rel_"),
+			ID:               core.GenerateID("rel_"),
 			FromEntityID:     fromEntity.ID,
 			ToEntityID:       toEntity.ID,
 			RelationshipType: relType,
@@ -535,7 +537,7 @@ func (s *AMMService) findOrCreateEntityWithDetails(ctx context.Context, candidat
 			return nil, err
 		}
 		for i := range existing {
-			if entityMatchesTerm(existing[i], canonicalName) || entityMatchesTerm(existing[i], term) {
+			if entityMatchesTerm(&existing[i], canonicalName) || entityMatchesTerm(&existing[i], term) {
 				entity := existing[i]
 				matched = &entity
 				break
@@ -577,7 +579,7 @@ func (s *AMMService) findOrCreateEntityWithDetails(ctx context.Context, candidat
 
 	now := time.Now().UTC()
 	entity := &core.Entity{
-		ID:            generateID("ent_"),
+		ID:            core.GenerateID("ent_"),
 		Type:          inputType,
 		CanonicalName: canonicalName,
 		Aliases:       newAliases,
@@ -601,7 +603,7 @@ func (s *AMMService) findEntityByNameOrAlias(ctx context.Context, name string) (
 		return nil, err
 	}
 	for i := range existing {
-		if entityMatchesTerm(existing[i], term) {
+		if entityMatchesTerm(&existing[i], term) {
 			entity := existing[i]
 			return &entity, nil
 		}
@@ -611,22 +613,6 @@ func (s *AMMService) findEntityByNameOrAlias(ctx context.Context, name string) (
 
 func relationshipDedupKey(fromEntityID, toEntityID, relationshipType string) string {
 	return strings.TrimSpace(fromEntityID) + "|" + strings.TrimSpace(toEntityID) + "|" + strings.ToLower(strings.TrimSpace(relationshipType))
-}
-
-func entityMatchesTerm(entity core.Entity, term string) bool {
-	needle := normalizeEntityTerm(term)
-	if needle == "" {
-		return false
-	}
-	if normalizeEntityTerm(entity.CanonicalName) == needle {
-		return true
-	}
-	for _, alias := range entity.Aliases {
-		if normalizeEntityTerm(alias) == needle {
-			return true
-		}
-	}
-	return false
 }
 
 func mergeEntityAliases(existing []string, candidates ...string) []string {
@@ -650,10 +636,6 @@ func mergeEntityAliases(existing []string, candidates ...string) []string {
 	return result
 }
 
-func normalizeEntityTerm(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
-}
-
 func stringSetEqualFold(a, b []string) bool {
 	set := make(map[string]bool, len(a))
 	for _, item := range a {
@@ -674,19 +656,4 @@ func (s *AMMService) updateEntity(ctx context.Context, entity *core.Entity) erro
 		return nil
 	}
 	return s.repo.UpdateEntity(ctx, entity)
-}
-
-func extractTightDescription(content string, maxLen int) string {
-	for i, ch := range content {
-		if i >= maxLen {
-			break
-		}
-		if ch == '.' || ch == '!' || ch == '?' {
-			return content[:i+1]
-		}
-	}
-	if len(content) <= maxLen {
-		return content
-	}
-	return content[:maxLen]
 }

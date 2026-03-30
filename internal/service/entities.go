@@ -83,7 +83,11 @@ func MatchEntityAliases(extracted []string, entities []core.Entity) []string {
 	// Build a set of lower-cased extracted names for fast lookup.
 	extractedLower := make(map[string]bool, len(extracted))
 	for _, name := range extracted {
-		extractedLower[strings.ToLower(name)] = true
+		normalized := normalizeEntityTerm(name)
+		if normalized == "" {
+			continue
+		}
+		extractedLower[normalized] = true
 	}
 
 	seen := make(map[string]bool)
@@ -93,13 +97,8 @@ func MatchEntityAliases(extracted []string, entities []core.Entity) []string {
 		if seen[ent.ID] {
 			continue
 		}
-		if extractedLower[strings.ToLower(ent.CanonicalName)] {
-			seen[ent.ID] = true
-			matched = append(matched, ent.ID)
-			continue
-		}
-		for _, alias := range ent.Aliases {
-			if extractedLower[strings.ToLower(alias)] {
+		for normalized := range extractedLower {
+			if entityMatchesTerm(&ent, normalized) {
 				seen[ent.ID] = true
 				matched = append(matched, ent.ID)
 				break

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"math"
 	"time"
 
@@ -19,6 +20,7 @@ type signalAggregate struct {
 }
 
 func (s *AMMService) UpdateRankingWeights(ctx context.Context) (int, error) {
+	slog.Debug("UpdateRankingWeights called")
 	stats, err := s.repo.ListMemoryAccessStats(ctx, time.Unix(0, 0).UTC())
 	if err != nil {
 		return 0, err

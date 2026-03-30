@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +38,12 @@ var ammToolNames = map[string]struct{}{
 // CheckIngestionPolicy returns the effective ingestion mode for event based on
 // the highest-priority matching policy.
 func (s *AMMService) CheckIngestionPolicy(ctx context.Context, event *core.Event) (string, error) {
+	eventKind := ""
+	if event != nil {
+		eventKind = event.Kind
+	}
+	slog.Debug("CheckIngestionPolicy called", "event_kind", eventKind)
+
 	mode, _, err := s.checkIngestionPolicy(ctx, event)
 	if err != nil {
 		return "", err
@@ -81,14 +88,27 @@ func (s *AMMService) checkIngestionPolicy(ctx context.Context, event *core.Event
 
 // ListPolicies returns all configured ingestion policies.
 func (s *AMMService) ListPolicies(ctx context.Context) ([]core.IngestionPolicy, error) {
+	slog.Debug("ListPolicies called")
 	return s.repo.ListIngestionPolicies(ctx)
 }
 
 // AddPolicy assigns IDs and timestamps, stores policy, and returns the saved
 // policy.
 func (s *AMMService) AddPolicy(ctx context.Context, policy *core.IngestionPolicy) (*core.IngestionPolicy, error) {
+	policyID := ""
+	patternType := ""
+	pattern := ""
+	mode := ""
+	if policy != nil {
+		policyID = policy.ID
+		patternType = policy.PatternType
+		pattern = policy.Pattern
+		mode = policy.Mode
+	}
+	slog.Debug("AddPolicy called", "id", policyID, "pattern_type", patternType, "pattern", pattern, "mode", mode)
+
 	if policy.ID == "" {
-		policy.ID = generateID("pol_")
+		policy.ID = core.GenerateID("pol_")
 	}
 	now := time.Now().UTC()
 	if policy.CreatedAt.IsZero() {
@@ -104,6 +124,7 @@ func (s *AMMService) AddPolicy(ctx context.Context, policy *core.IngestionPolicy
 
 // RemovePolicy deletes the ingestion policy identified by id.
 func (s *AMMService) RemovePolicy(ctx context.Context, id string) error {
+	slog.Debug("RemovePolicy called", "id", id)
 	if err := s.repo.DeleteIngestionPolicy(ctx, id); err != nil {
 		return fmt.Errorf("delete ingestion policy: %w", err)
 	}
@@ -113,6 +134,12 @@ func (s *AMMService) RemovePolicy(ctx context.Context, id string) error {
 // ShouldIngest reports whether event should be stored and whether it should
 // trigger memory creation under the effective ingestion policy.
 func (s *AMMService) ShouldIngest(ctx context.Context, event *core.Event) (ingest bool, createMemory bool, err error) {
+	eventKind := ""
+	if event != nil {
+		eventKind = event.Kind
+	}
+	slog.Debug("ShouldIngest called", "event_kind", eventKind)
+
 	mode, matched, err := s.checkIngestionPolicy(ctx, event)
 	if err != nil {
 		return false, false, err

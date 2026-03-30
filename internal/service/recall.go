@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 	"strings"
@@ -31,6 +32,7 @@ type recallFilterOptions struct {
 // Recall retrieves items for query using the requested recall mode and the
 // package scoring pipeline.
 func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallOptions) (*core.RecallResult, error) {
+	slog.Debug("Recall called", "mode", opts.Mode, "limit", opts.Limit, "project_id", opts.ProjectID, "session_id", opts.SessionID, "query_len", len(query))
 	start := time.Now()
 
 	if opts.Mode == "" {
@@ -57,6 +59,8 @@ func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallO
 		items, err = s.recallAmbient(ctx, query, opts, sctx)
 	case core.RecallModeFacts:
 		items, err = s.recallFacts(ctx, query, opts, sctx)
+	case core.RecallModeContradictions:
+		items, err = s.recallContradictions(ctx, query, opts, sctx)
 	case core.RecallModeEpisodes:
 		items, err = s.recallEpisodes(ctx, query, opts, sctx)
 	case core.RecallModeProject:
@@ -177,10 +181,11 @@ func (s *AMMService) expandQueryEntities(ctx context.Context, queryEntities []st
 			continue
 		}
 
-		for _, entity := range entities {
-			if !entityMatchesTerm(entity, trimmed) {
+		for i := range entities {
+			if !entityMatchesTerm(&entities[i], trimmed) {
 				continue
 			}
+			entity := entities[i]
 			addWeightedEntityTerm(entity.CanonicalName, 1.0, entity.ID)
 			for _, alias := range entity.Aliases {
 				addWeightedEntityTerm(alias, 1.0, entity.ID)
@@ -288,9 +293,9 @@ func (s *AMMService) resolveEntityIDForTerm(ctx context.Context, term string) st
 	if err != nil {
 		return ""
 	}
-	for _, entity := range entities {
-		if entityMatchesTerm(entity, term) {
-			return entity.ID
+	for i := range entities {
+		if entityMatchesTerm(&entities[i], term) {
+			return entities[i].ID
 		}
 	}
 	return ""
@@ -515,6 +520,48 @@ func (s *AMMService) recallFacts(ctx context.Context, query string, opts core.Re
 			candidateIDs[id] = true
 		}
 	}
+	s.attachCandidateEmbeddings(ctx, candidates)
+	s.attachCandidateEntities(ctx, candidates)
+	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions(), opts.Explain), nil
+}
+
+func (s *AMMService) recallContradictions(ctx context.Context, query string, opts core.RecallOptions, sctx ScoringContext) ([]core.RecallItem, error) {
+	memories, err := s.repo.SearchMemories(ctx, query, core.ListMemoriesOptions{AgentID: opts.AgentID, Limit: opts.Limit * 3})
+	if err != nil {
+		return nil, fmt.Errorf("search memories: %w", err)
+	}
+
+	var candidates []ScoringCandidate
+	candidateIDs := make(map[string]bool)
+	for i, memory := range memories {
+		if memory.Type != core.MemoryTypeContradiction || !isRecallMemoryStatusAllowed(memory.Status) {
+			continue
+		}
+		candidates = append(candidates, MemoryToCandidate(memory, i))
+		candidateIDs[memory.ID] = true
+	}
+
+	if len(sctx.QueryEmbedding) > 0 {
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "memory", opts.Limit*3)
+		for _, id := range embIDs {
+			if candidateIDs[id] {
+				continue
+			}
+			memory, err := s.repo.GetMemory(ctx, id)
+			if err != nil || memory == nil || memory.Type != core.MemoryTypeContradiction || !isRecallMemoryStatusAllowed(memory.Status) || !memoryVisibleToAgent(memory, opts.AgentID) {
+				continue
+			}
+			candidates = append(candidates, MemoryToCandidate(*memory, embeddingOnlyFTSPosition))
+			candidateIDs[id] = true
+		}
+	}
+
+	slog.Debug("recall contradictions",
+		"query", query,
+		"candidate_count", len(candidates),
+		"limit", opts.Limit,
+	)
+
 	s.attachCandidateEmbeddings(ctx, candidates)
 	s.attachCandidateEntities(ctx, candidates)
 	return scoreAndConvert(candidates, sctx, defaultRecallFilterOptions(), opts.Explain), nil

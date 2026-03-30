@@ -13,6 +13,8 @@ import (
 // MergeDuplicates finds highly overlapping active memories and merges them via
 // supersession.
 func (s *AMMService) MergeDuplicates(ctx context.Context) (int, error) {
+	slog.Debug("MergeDuplicates called")
+
 	const maxMergesPerIteration = 500
 	const maxIterations = 10
 

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
@@ -13,6 +14,7 @@ const (
 )
 
 func (s *AMMService) ArchiveLowSalienceSessionTraces(ctx context.Context) (int, error) {
+	slog.Debug("ArchiveLowSalienceSessionTraces called")
 	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
 		Status: core.MemoryStatusActive,
 		Scope:  core.ScopeSession,

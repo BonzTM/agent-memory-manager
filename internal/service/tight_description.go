@@ -58,3 +58,18 @@ func sanitizeSnippet(s string) string {
 	}
 	return t
 }
+
+func extractTightDescription(content string, maxLen int) string {
+	for i, ch := range content {
+		if i >= maxLen {
+			break
+		}
+		if ch == '.' || ch == '!' || ch == '?' {
+			return content[:i+1]
+		}
+	}
+	if len(content) <= maxLen {
+		return content
+	}
+	return content[:maxLen]
+}

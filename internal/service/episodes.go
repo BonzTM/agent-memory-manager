@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
@@ -11,6 +12,7 @@ import (
 // FormEpisodes groups session events into episode records and returns the
 // number created.
 func (s *AMMService) FormEpisodes(ctx context.Context) (int, error) {
+	slog.Debug("FormEpisodes called")
 	// List recent events grouped by session_id.
 	events, err := s.repo.ListEvents(ctx, core.ListEventsOptions{
 		Limit: 500,
@@ -95,7 +97,7 @@ func (s *AMMService) FormEpisodes(ctx context.Context) (int, error) {
 		endedAt := evts[0].OccurredAt             // newest
 
 		episode := &core.Episode{
-			ID:      generateID("ep_"),
+		ID:      core.GenerateID("ep_"),
 			Title:   fmt.Sprintf("Session %s", sessionID),
 			Summary: summary,
 			TightDescription: fmt.Sprintf("Episode from session %s: %d events covering %s",

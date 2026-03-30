@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ const defaultBatchSize = 20
 // memories and superseding duplicate older ones. When reprocessAll is false, it
 // skips events already covered by LLM-extracted memories.
 func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int, error) {
+	slog.Debug("Reprocess called", "reprocess_all", reprocessAll)
 	events, err := s.repo.ListEvents(ctx, core.ListEventsOptions{
 		Limit: 50000,
 	})
@@ -250,7 +252,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 			now := time.Now().UTC()
 			method := s.extractionMethod()
 			mem := &core.Memory{
-				ID:               generateID("mem_"),
+				ID:               core.GenerateID("mem_"),
 				Type:             candidate.Type,
 				Scope:            scope,
 				ProjectID:        projectID,
@@ -315,10 +317,10 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 					old.Status = core.MemoryStatusSuperseded
 					old.SupersededBy = mem.ID
 					old.SupersededAt = &supNow
-				if err := s.repo.UpdateMemory(ctx, old); err != nil {
-					return created, superseded, fmt.Errorf("supersede memory %s: %w", old.ID, err)
-				}
-				superseded++
+					if err := s.repo.UpdateMemory(ctx, old); err != nil {
+						return created, superseded, fmt.Errorf("supersede memory %s: %w", old.ID, err)
+					}
+					superseded++
 				}
 			}
 		}
@@ -425,7 +427,7 @@ func selectAnalysisEntitiesForContent(entities []core.EntityCandidate, sourceCon
 	}
 	selected := make([]core.EntityCandidate, 0, len(entities))
 	for _, entity := range entities {
-		if analysisEntityMatchesContent(entity, content) {
+		if candidateMatchesContent(entity, content) {
 			selected = append(selected, entity)
 		}
 	}
@@ -459,14 +461,14 @@ func selectAnalysisRelationshipsForContent(relationships []core.RelationshipCand
 		fromMatches := strings.Contains(content, fromTerm)
 		if !fromMatches {
 			if fromEntity, ok := entityByCanonical[fromTerm]; ok {
-				fromMatches = analysisEntityMatchesContent(fromEntity, content)
+				fromMatches = candidateMatchesContent(fromEntity, content)
 			}
 		}
 
 		toMatches := strings.Contains(content, toTerm)
 		if !toMatches {
 			if toEntity, ok := entityByCanonical[toTerm]; ok {
-				toMatches = analysisEntityMatchesContent(toEntity, content)
+				toMatches = candidateMatchesContent(toEntity, content)
 			}
 		}
 
@@ -475,23 +477,4 @@ func selectAnalysisRelationshipsForContent(relationships []core.RelationshipCand
 		}
 	}
 	return selected
-}
-
-func analysisEntityMatchesContent(entity core.EntityCandidate, content string) bool {
-	if strings.TrimSpace(content) == "" {
-		return false
-	}
-	candidates := make([]string, 0, len(entity.Aliases)+1)
-	candidates = append(candidates, entity.CanonicalName)
-	candidates = append(candidates, entity.Aliases...)
-	for _, candidate := range candidates {
-		term := strings.ToLower(strings.TrimSpace(candidate))
-		if term == "" {
-			continue
-		}
-		if strings.Contains(content, term) {
-			return true
-		}
-	}
-	return false
 }

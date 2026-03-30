@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
@@ -26,6 +27,7 @@ const (
 // DecayStaleMemories downranks or archives stale active memories and returns
 // the number updated.
 func (s *AMMService) DecayStaleMemories(ctx context.Context) (int, error) {
+	slog.Debug("DecayStaleMemories called")
 	// List all active memories.
 	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
 		Status: core.MemoryStatusActive,

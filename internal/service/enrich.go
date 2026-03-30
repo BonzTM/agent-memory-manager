@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
@@ -13,6 +14,7 @@ import (
 //
 // This pass is additive-only: it never changes authored memory content fields.
 func (s *AMMService) EnrichMemories(ctx context.Context) (int, error) {
+	slog.Debug("EnrichMemories called")
 	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
 		Status: core.MemoryStatusActive,
 		Limit:  10000,

@@ -2,29 +2,15 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
-
-// generateID creates a random ID with the given prefix (e.g. "evt_", "mem_").
-// Panics if crypto/rand fails, which only happens when the OS entropy source
-// is broken — an unrecoverable condition where continuing would be unsafe.
-func generateID(prefix string) string {
-	b := make([]byte, 12)
-	if _, err := rand.Read(b); err != nil {
-		panic(fmt.Sprintf("crypto/rand failed: %v", err))
-	}
-	return prefix + hex.EncodeToString(b)
-}
 
 // AMMService implements core.Service by coordinating repository access,
 // summarization, and maintenance workflows for durable memory operations.
@@ -38,13 +24,14 @@ type AMMService struct {
 	reflectBatchSize                int
 	reflectLLMBatchSize             int
 	lifecycleReviewBatchSize        int
-	compressChunkSize                    int
-	compressMaxEvents                    int
-	compressBatchSize                    int
-	topicBatchSize                       int
-	escalationDeterministicMaxChars      int
+	compressChunkSize               int
+	compressMaxEvents               int
+	compressBatchSize               int
+	topicBatchSize                  int
+	escalationDeterministicMaxChars int
 	embeddingBatchSize              int
 	crossProjectSimilarityThreshold float64
+	maxExpandDepth                  int
 	scoringWeights                  ScoringWeights
 	scoringWeightsMu                sync.RWMutex
 }
@@ -64,13 +51,14 @@ func New(repo core.Repository, dbPath string, summarizer core.Summarizer, embedd
 		reflectBatchSize:                defaultReflectBatchSize,
 		reflectLLMBatchSize:             defaultReflectLLMBatchSize,
 		lifecycleReviewBatchSize:        defaultLifecycleReviewBatchSize,
-		compressChunkSize:                    defaultCompressChunkSize,
-		compressMaxEvents:                    defaultCompressMaxEvents,
-		compressBatchSize:                    defaultCompressBatchSize,
-		topicBatchSize:                       defaultTopicBatchSize,
-		escalationDeterministicMaxChars:      defaultEscalationDeterministicMaxChars,
+		compressChunkSize:               defaultCompressChunkSize,
+		compressMaxEvents:               defaultCompressMaxEvents,
+		compressBatchSize:               defaultCompressBatchSize,
+		topicBatchSize:                  defaultTopicBatchSize,
+		escalationDeterministicMaxChars: defaultEscalationDeterministicMaxChars,
 		embeddingBatchSize:              defaultEmbeddingBatchSize,
 		crossProjectSimilarityThreshold: defaultCrossProjectSimilarityThreshold,
+		maxExpandDepth:                  1,
 		scoringWeights:                  DefaultScoringWeights(),
 	}
 	if repo != nil && dbPath != "" {
@@ -168,6 +156,14 @@ func (s *AMMService) SetCrossProjectSimilarityThreshold(threshold float64) {
 	s.crossProjectSimilarityThreshold = threshold
 }
 
+func (s *AMMService) SetMaxExpandDepth(depth int) {
+	if depth < -1 {
+		s.maxExpandDepth = 1
+		return
+	}
+	s.maxExpandDepth = depth
+}
+
 func (s *AMMService) SetIntelligenceProvider(provider core.IntelligenceProvider) {
 	if provider == nil {
 		s.intelligence = s.defaultIntelligence
@@ -176,50 +172,24 @@ func (s *AMMService) SetIntelligenceProvider(provider core.IntelligenceProvider)
 	s.intelligence = provider
 }
 
-// Init initializes the database at dbPath by creating parent directories,
-// opening the repository, and running migrations.
-func (s *AMMService) Init(ctx context.Context, dbPath string) error {
-	slog.Debug("Init called", "dbPath", dbPath)
-
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		slog.Error("Init failed", "dbPath", dbPath, "error", err)
-		return fmt.Errorf("create parent directory: %w", err)
-	}
-	if err := s.repo.Open(ctx, dbPath); err != nil {
-		slog.Error("Init failed", "dbPath", dbPath, "error", err)
-		return fmt.Errorf("open database: %w", err)
-	}
-	s.dbPath = dbPath
-	if err := s.repo.Migrate(ctx); err != nil {
-		slog.Error("Init failed", "dbPath", dbPath, "error", err)
-		return fmt.Errorf("run migrations: %w", err)
-	}
-	if err := s.loadScoringWeights(ctx); err != nil {
-		slog.Error("Init failed", "dbPath", dbPath, "error", err)
-		return fmt.Errorf("load scoring weights: %w", err)
-	}
-	slog.Debug("Init completed successfully", "dbPath", dbPath)
-	return nil
-}
-
 // IngestEvent stores a raw event in history after applying ingestion policies
 // and defaulting missing identifiers, timestamps, and privacy metadata.
 func (s *AMMService) IngestEvent(ctx context.Context, event *core.Event) (*core.Event, error) {
+	if event == nil {
+		return nil, fmt.Errorf("%w: event is required", core.ErrInvalidInput)
+	}
+
 	var kind string
 	var eventID string
 	var sourceSystem string
-	if event != nil {
-		kind = event.Kind
-		eventID = event.ID
-		sourceSystem = event.SourceSystem
-	}
+	kind = event.Kind
+	eventID = event.ID
+	sourceSystem = event.SourceSystem
 	slog.Debug("IngestEvent called", "kind", kind, "sourceSystem", sourceSystem)
 
 	// Check ingestion policy.
 	shouldIngest, createMemory, err := s.ShouldIngest(ctx, event)
 	if err != nil {
-		slog.Error("IngestEvent failed", "kind", kind, "sourceSystem", sourceSystem, "error", err)
 		return nil, fmt.Errorf("check ingestion policy: %w", err)
 	}
 	if !shouldIngest {
@@ -228,7 +198,7 @@ func (s *AMMService) IngestEvent(ctx context.Context, event *core.Event) (*core.
 	}
 
 	if event.ID == "" {
-		event.ID = generateID("evt_")
+		event.ID = core.GenerateID("evt_")
 	}
 	eventID = event.ID
 	if event.PrivacyLevel == "" {
@@ -248,7 +218,6 @@ func (s *AMMService) IngestEvent(ctx context.Context, event *core.Event) (*core.
 	}
 
 	if err := s.repo.InsertEvent(ctx, event); err != nil {
-		slog.Error("IngestEvent failed", "kind", kind, "sourceSystem", sourceSystem, "id", eventID, "error", err)
 		return nil, fmt.Errorf("insert event: %w", err)
 	}
 	slog.Debug("IngestEvent completed successfully", "kind", kind, "sourceSystem", sourceSystem, "id", eventID, "ingested", true)
@@ -263,7 +232,6 @@ func (s *AMMService) IngestTranscript(ctx context.Context, events []*core.Event)
 	ingested := 0
 	for _, evt := range events {
 		if _, err := s.IngestEvent(ctx, evt); err != nil {
-			slog.Error("IngestTranscript failed", "eventCount", len(events), "ingested", ingested, "error", err)
 			return ingested, fmt.Errorf("ingest event %d: %w", ingested, err)
 		}
 		ingested++
@@ -275,17 +243,19 @@ func (s *AMMService) IngestTranscript(ctx context.Context, events []*core.Event)
 // Remember persists an explicit durable memory and updates any superseded
 // predecessor referenced by the new memory.
 func (s *AMMService) Remember(ctx context.Context, memory *core.Memory) (*core.Memory, error) {
+	if memory == nil {
+		return nil, fmt.Errorf("%w: memory is required", core.ErrInvalidInput)
+	}
+
 	var memoryType core.MemoryType
 	var memoryID string
-	if memory != nil {
-		memoryType = memory.Type
-		memoryID = memory.ID
-	}
+	memoryType = memory.Type
+	memoryID = memory.ID
 	slog.Debug("Remember called", "type", memoryType, "id", memoryID)
 
 	now := time.Now().UTC()
 	if memory.ID == "" {
-		memory.ID = generateID("mem_")
+		memory.ID = core.GenerateID("mem_")
 	}
 	if memory.CreatedAt.IsZero() {
 		memory.CreatedAt = now
@@ -322,7 +292,6 @@ func (s *AMMService) Remember(ctx context.Context, memory *core.Memory) (*core.M
 			Limit:     200,
 		})
 		if err != nil {
-			slog.Error("Remember failed", "type", memory.Type, "id", memory.ID, "error", err)
 			return nil, fmt.Errorf("list active memories for dedup: %w", err)
 		}
 
@@ -355,7 +324,6 @@ func (s *AMMService) Remember(ctx context.Context, memory *core.Memory) (*core.M
 					}
 					keeper.UpdatedAt = now
 					if err := s.repo.UpdateMemory(ctx, keeper); err != nil {
-						slog.Error("Remember failed", "type", memory.Type, "id", memory.ID, "error", err)
 						return nil, fmt.Errorf("update merged memory: %w", err)
 					}
 					slog.Debug("Remember merged into existing", "keeperID", keeper.ID, "newType", memory.Type)
@@ -374,13 +342,12 @@ func (s *AMMService) Remember(ctx context.Context, memory *core.Memory) (*core.M
 			old.SupersededAt = &now
 			old.UpdatedAt = now
 			if err := s.repo.UpdateMemory(ctx, old); err != nil {
-				slog.Error("failed to supersede memory", "old_id", old.ID, "new_id", memory.ID, "error", err)
+				slog.Warn("failed to supersede memory", "old_id", old.ID, "new_id", memory.ID, "error", err)
 			}
 		}
 	}
 
 	if err := s.repo.InsertMemory(ctx, memory); err != nil {
-		slog.Error("Remember failed", "type", memory.Type, "id", memory.ID, "error", err)
 		return nil, fmt.Errorf("insert memory: %w", err)
 	}
 	s.upsertMemoryEmbeddingBestEffort(ctx, memory)
@@ -393,7 +360,6 @@ func (s *AMMService) GetMemory(ctx context.Context, id string) (*core.Memory, er
 	slog.Debug("GetMemory called", "id", id)
 	memory, err := s.repo.GetMemory(ctx, id)
 	if err != nil {
-		slog.Error("GetMemory failed", "id", id, "error", err)
 		return nil, err
 	}
 	slog.Debug("GetMemory completed successfully", "id", id, "found", true)
@@ -405,7 +371,6 @@ func (s *AMMService) ShareMemory(ctx context.Context, id string, privacy core.Pr
 
 	if strings.TrimSpace(id) == "" {
 		err := fmt.Errorf("%w: id is required", core.ErrInvalidInput)
-		slog.Error("ShareMemory failed", "id", id, "privacy", privacy, "error", err)
 		return nil, err
 	}
 
@@ -413,7 +378,6 @@ func (s *AMMService) ShareMemory(ctx context.Context, id string, privacy core.Pr
 	case core.PrivacyPrivate, core.PrivacyShared, core.PrivacyPublicSafe:
 	default:
 		err := fmt.Errorf("%w: invalid privacy_level %q: must be one of private, shared, public_safe", core.ErrInvalidInput, privacy)
-		slog.Error("ShareMemory failed", "id", id, "privacy", privacy, "error", err)
 		return nil, err
 	}
 
@@ -422,7 +386,6 @@ func (s *AMMService) ShareMemory(ctx context.Context, id string, privacy core.Pr
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
 			err = fmt.Errorf("%w: memory %q", core.ErrNotFound, id)
 		}
-		slog.Error("ShareMemory failed", "id", id, "privacy", privacy, "error", err)
 		return nil, err
 	}
 
@@ -430,7 +393,6 @@ func (s *AMMService) ShareMemory(ctx context.Context, id string, privacy core.Pr
 	memory.UpdatedAt = time.Now().UTC()
 
 	if err := s.repo.UpdateMemory(ctx, memory); err != nil {
-		slog.Error("ShareMemory failed", "id", id, "privacy", privacy, "error", err)
 		return nil, fmt.Errorf("update memory: %w", err)
 	}
 
@@ -439,6 +401,8 @@ func (s *AMMService) ShareMemory(ctx context.Context, id string, privacy core.Pr
 }
 
 func (s *AMMService) ForgetMemory(ctx context.Context, id string) (*core.Memory, error) {
+	slog.Debug("ForgetMemory called", "id", id)
+
 	if strings.TrimSpace(id) == "" {
 		return nil, fmt.Errorf("%w: id is required", core.ErrInvalidInput)
 	}
@@ -473,7 +437,6 @@ func (s *AMMService) GetSummary(ctx context.Context, id string) (*core.Summary, 
 	slog.Debug("GetSummary called", "id", id)
 	summary, err := s.repo.GetSummary(ctx, id)
 	if err != nil {
-		slog.Error("GetSummary failed", "id", id, "error", err)
 		return nil, err
 	}
 	slog.Debug("GetSummary completed successfully", "id", id, "found", true)
@@ -485,7 +448,6 @@ func (s *AMMService) GetEpisode(ctx context.Context, id string) (*core.Episode, 
 	slog.Debug("GetEpisode called", "id", id)
 	episode, err := s.repo.GetEpisode(ctx, id)
 	if err != nil {
-		slog.Error("GetEpisode failed", "id", id, "error", err)
 		return nil, err
 	}
 	slog.Debug("GetEpisode completed successfully", "id", id, "found", true)
@@ -497,7 +459,6 @@ func (s *AMMService) GetEntity(ctx context.Context, id string) (*core.Entity, er
 	slog.Debug("GetEntity called", "id", id)
 	entity, err := s.repo.GetEntity(ctx, id)
 	if err != nil {
-		slog.Error("GetEntity failed", "id", id, "error", err)
 		return nil, err
 	}
 	slog.Debug("GetEntity completed successfully", "id", id, "found", true)
@@ -507,10 +468,12 @@ func (s *AMMService) GetEntity(ctx context.Context, id string) (*core.Entity, er
 // UpdateMemory persists changes to an existing memory after refreshing its
 // UpdatedAt timestamp.
 func (s *AMMService) UpdateMemory(ctx context.Context, memory *core.Memory) (*core.Memory, error) {
-	var memoryID string
-	if memory != nil {
-		memoryID = memory.ID
+	if memory == nil {
+		return nil, fmt.Errorf("%w: memory is required", core.ErrInvalidInput)
 	}
+
+	var memoryID string
+	memoryID = memory.ID
 	slog.Debug("UpdateMemory called", "id", memoryID)
 
 	now := time.Now().UTC()
@@ -524,13 +487,12 @@ func (s *AMMService) UpdateMemory(ctx context.Context, memory *core.Memory) (*co
 			old.SupersededAt = &now
 			old.UpdatedAt = now
 			if err := s.repo.UpdateMemory(ctx, old); err != nil {
-				slog.Error("failed to supersede memory", "old_id", old.ID, "new_id", memory.ID, "error", err)
+				slog.Warn("failed to supersede memory", "old_id", old.ID, "new_id", memory.ID, "error", err)
 			}
 		}
 	}
 
 	if err := s.repo.UpdateMemory(ctx, memory); err != nil {
-		slog.Error("UpdateMemory failed", "id", memory.ID, "error", err)
 		return nil, fmt.Errorf("update memory: %w", err)
 	}
 	s.upsertMemoryEmbeddingBestEffort(ctx, memory)
@@ -591,6 +553,10 @@ func (s *AMMService) Describe(ctx context.Context, ids []string) ([]core.Describ
 // including linked children where available.
 func (s *AMMService) Expand(ctx context.Context, id string, kind string, opts core.ExpandOptions) (*core.ExpandResult, error) {
 	slog.Debug("Expand called", "id", id, "kind", kind)
+	if s.maxExpandDepth >= 0 && opts.DelegationDepth > 0 && opts.DelegationDepth >= s.maxExpandDepth {
+		slog.Warn("expansion recursion blocked", "delegation_depth", opts.DelegationDepth, "max_expand_depth", s.maxExpandDepth)
+		return nil, core.ErrExpansionRecursionBlocked
+	}
 
 	result := &core.ExpandResult{}
 
@@ -598,7 +564,6 @@ func (s *AMMService) Expand(ctx context.Context, id string, kind string, opts co
 	case "memory":
 		mem, err := s.repo.GetMemory(ctx, id)
 		if err != nil {
-			slog.Error("Expand failed", "id", id, "kind", kind, "error", err)
 			return nil, fmt.Errorf("get memory: %w", err)
 		}
 		result.Memory = mem
@@ -610,7 +575,6 @@ func (s *AMMService) Expand(ctx context.Context, id string, kind string, opts co
 	case "summary":
 		sum, err := s.repo.GetSummary(ctx, id)
 		if err != nil {
-			slog.Error("Expand failed", "id", id, "kind", kind, "error", err)
 			return nil, fmt.Errorf("get summary: %w", err)
 		}
 		result.Summary = sum
@@ -654,7 +618,6 @@ func (s *AMMService) Expand(ctx context.Context, id string, kind string, opts co
 	case "episode":
 		ep, err := s.repo.GetEpisode(ctx, id)
 		if err != nil {
-			slog.Error("Expand failed", "id", id, "kind", kind, "error", err)
 			return nil, fmt.Errorf("get episode: %w", err)
 		}
 		result.Episode = ep
@@ -671,7 +634,6 @@ func (s *AMMService) Expand(ctx context.Context, id string, kind string, opts co
 
 	default:
 		err := fmt.Errorf("%w: unknown kind %q", core.ErrInvalidInput, kind)
-		slog.Error("Expand failed", "id", id, "kind", kind, "error", err)
 		return nil, err
 	}
 
@@ -688,7 +650,7 @@ func (s *AMMService) Expand(ctx context.Context, id string, kind string, opts co
 // History returns raw events filtered by session, query, or the provided
 // history options.
 func (s *AMMService) History(ctx context.Context, query string, opts core.HistoryOptions) ([]core.Event, error) {
-	slog.Debug("History called", "query", query, "sessionID", opts.SessionID)
+	slog.Debug("History called", "query_len", len(query), "sessionID", opts.SessionID)
 
 	if opts.Limit == 0 {
 		opts.Limit = 50
@@ -718,10 +680,9 @@ func (s *AMMService) History(ctx context.Context, query string, opts core.Histor
 		})
 	}
 	if err != nil {
-		slog.Error("History failed", "query", query, "sessionID", opts.SessionID, "error", err)
 		return nil, err
 	}
-	slog.Debug("History completed successfully", "query", query, "sessionID", opts.SessionID, "resultCount", len(events))
+	slog.Debug("History completed successfully", "query_len", len(query), "sessionID", opts.SessionID, "resultCount", len(events))
 	return events, nil
 }
 
@@ -734,14 +695,13 @@ func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error)
 
 	now := time.Now().UTC()
 	job := &core.Job{
-		ID:        generateID("job_"),
+		ID:        core.GenerateID("job_"),
 		Kind:      kind,
 		Status:    "running",
 		StartedAt: &now,
 		CreatedAt: now,
 	}
 	if err := s.repo.InsertJob(ctx, job); err != nil {
-		slog.Error("RunJob failed", "kind", kind, "jobID", job.ID, "error", err)
 		return nil, fmt.Errorf("insert job: %w", err)
 	}
 
@@ -923,11 +883,9 @@ func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error)
 		job.Status = "completed"
 	}
 	if err := s.repo.UpdateJob(bookkeepingCtx, job); err != nil {
-		slog.Error("RunJob failed", "kind", kind, "jobID", job.ID, "status", job.Status, "error", err)
 		return job, fmt.Errorf("update job: %w", err)
 	}
 	if jobErr != nil {
-		slog.Error("RunJob failed", "kind", kind, "jobID", job.ID, "status", job.Status, "error", jobErr)
 		return job, jobErr
 	}
 	slog.Debug("RunJob completed successfully", "kind", kind, "jobID", job.ID, "status", job.Status)
@@ -943,7 +901,6 @@ func (s *AMMService) Repair(ctx context.Context, check bool, fix string) (*core.
 	if check {
 		integrityReport, err := s.CheckIntegrity(ctx)
 		if err != nil {
-			slog.Error("Repair failed", "check", check, "fix", fix, "error", err)
 			return report, fmt.Errorf("check integrity: %w", err)
 		}
 		report.Checked = integrityReport.Checked
@@ -955,11 +912,9 @@ func (s *AMMService) Repair(ctx context.Context, check bool, fix string) (*core.
 		switch fix {
 		case "indexes":
 			if err := s.repo.RebuildFTSIndexes(ctx); err != nil {
-				slog.Error("Repair failed", "check", check, "fix", fix, "error", err)
 				return report, fmt.Errorf("rebuild FTS indexes: %w", err)
 			}
 			if err := s.rebuildEmbeddings(ctx, true); err != nil {
-				slog.Error("Repair failed", "check", check, "fix", fix, "error", err)
 				return report, fmt.Errorf("rebuild embeddings: %w", err)
 			}
 			report.Fixed++
@@ -967,7 +922,6 @@ func (s *AMMService) Repair(ctx context.Context, check bool, fix string) (*core.
 		case "links":
 			fixReport, err := s.FixLinks(ctx)
 			if err != nil {
-				slog.Error("Repair failed", "check", check, "fix", fix, "error", err)
 				return report, fmt.Errorf("fix links: %w", err)
 			}
 			report.Fixed += fixReport.Fixed
@@ -975,14 +929,12 @@ func (s *AMMService) Repair(ctx context.Context, check bool, fix string) (*core.
 		case "recall_history":
 			cleaned, err := s.repo.CleanupRecallHistory(ctx, 7)
 			if err != nil {
-				slog.Error("Repair failed", "check", check, "fix", fix, "error", err)
 				return report, fmt.Errorf("cleanup recall history: %w", err)
 			}
 			report.Fixed += int(cleaned)
 			report.Details = append(report.Details, fmt.Sprintf("cleaned %d recall history entries", cleaned))
 		default:
 			err := fmt.Errorf("%w: unknown fix type %q", core.ErrInvalidInput, fix)
-			slog.Error("Repair failed", "check", check, "fix", fix, "error", err)
 			return report, err
 		}
 	}
@@ -994,7 +946,7 @@ func (s *AMMService) Repair(ctx context.Context, check bool, fix string) (*core.
 // ExplainRecall returns the scoring breakdown that would cause itemID to surface
 // for query.
 func (s *AMMService) ExplainRecall(ctx context.Context, query string, itemID string) (map[string]interface{}, error) {
-	slog.Debug("ExplainRecall called", "query", query, "itemID", itemID)
+	slog.Debug("ExplainRecall called", "query_len", len(query), "itemID", itemID)
 
 	// Build scoring context.
 	queryEntities := ExtractEntities(query)
@@ -1030,7 +982,6 @@ func (s *AMMService) ExplainRecall(ctx context.Context, query string, itemID str
 
 	if !found {
 		err := fmt.Errorf("%w: item %q", core.ErrNotFound, itemID)
-		slog.Error("ExplainRecall failed", "query", query, "itemID", itemID, "error", err)
 		return nil, err
 	}
 
@@ -1049,7 +1000,7 @@ func (s *AMMService) ExplainRecall(ctx context.Context, query string, itemID str
 		"signal_breakdown": breakdown,
 		"final_score":      breakdown.FinalScore,
 	}
-	slog.Debug("ExplainRecall completed successfully", "query", query, "itemID", itemID, "itemKind", candidate.Kind)
+	slog.Debug("ExplainRecall completed successfully", "query_len", len(query), "itemID", itemID, "itemKind", candidate.Kind)
 	return result, nil
 }
 
@@ -1059,49 +1010,49 @@ func (s *AMMService) Status(ctx context.Context) (*core.StatusResult, error) {
 
 	initialized, err := s.repo.IsInitialized(ctx)
 	if err != nil {
-		slog.Error("Status failed", "error", err)
 		return nil, fmt.Errorf("check initialized: %w", err)
 	}
 
 	evtCount, err := s.repo.CountEvents(ctx)
 	if err != nil {
-		slog.Error("Status failed", "error", err)
 		return nil, fmt.Errorf("count events: %w", err)
+	}
+	pendingCount, err := s.repo.CountUnreflectedEvents(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("count unreflected events: %w", err)
 	}
 	memCount, err := s.repo.CountMemories(ctx)
 	if err != nil {
-		slog.Error("Status failed", "error", err)
 		return nil, fmt.Errorf("count memories: %w", err)
 	}
 	sumCount, err := s.repo.CountSummaries(ctx)
 	if err != nil {
-		slog.Error("Status failed", "error", err)
 		return nil, fmt.Errorf("count summaries: %w", err)
 	}
 	epCount, err := s.repo.CountEpisodes(ctx)
 	if err != nil {
-		slog.Error("Status failed", "error", err)
 		return nil, fmt.Errorf("count episodes: %w", err)
 	}
 	entCount, err := s.repo.CountEntities(ctx)
 	if err != nil {
-		slog.Error("Status failed", "error", err)
 		return nil, fmt.Errorf("count entities: %w", err)
 	}
 
 	result := &core.StatusResult{
-		DBPath:       s.dbPath,
-		Initialized:  initialized,
-		EventCount:   evtCount,
-		MemoryCount:  memCount,
-		SummaryCount: sumCount,
-		EpisodeCount: epCount,
-		EntityCount:  entCount,
+		DBPath:            s.dbPath,
+		Initialized:       initialized,
+		EventCount:        evtCount,
+		PendingEventCount: pendingCount,
+		MemoryCount:       memCount,
+		SummaryCount:      sumCount,
+		EpisodeCount:      epCount,
+		EntityCount:       entCount,
 	}
-	slog.Debug("Status completed successfully", "initialized", initialized, "eventCount", evtCount, "memoryCount", memCount, "summaryCount", sumCount, "episodeCount", epCount, "entityCount", entCount)
+	slog.Debug("Status completed successfully", "initialized", initialized, "eventCount", evtCount, "pendingEventCount", pendingCount, "memoryCount", memCount, "summaryCount", sumCount, "episodeCount", epCount, "entityCount", entCount)
 	return result, nil
 }
 
 func (s *AMMService) ResetDerived(ctx context.Context) (*core.ResetDerivedResult, error) {
+	slog.Debug("ResetDerived called")
 	return s.repo.ResetDerived(ctx)
 }
