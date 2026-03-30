@@ -178,7 +178,7 @@ def _build_event(
         "project_id": project_id,
         "actor_type": actor_type,
         "content": content,
-        "metadata": metadata,
+        "metadata": json.dumps(metadata) if isinstance(metadata, dict) else str(metadata),
         "occurred_at": _now_rfc3339(),
     }
 
