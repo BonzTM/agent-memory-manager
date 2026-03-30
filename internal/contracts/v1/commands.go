@@ -14,8 +14,11 @@ const (
 	CmdDescribe = "describe"
 	// CmdExpand expands a single item to full detail.
 	CmdExpand = "expand"
+	// CmdFormatContextWindow assembles context from summaries plus fresh events.
+	CmdFormatContextWindow = "format_context_window"
 	// CmdHistory queries raw interaction history.
 	CmdHistory = "history"
+	CmdGrep    = "grep"
 	// CmdGetMemory retrieves a single memory by ID.
 	CmdGetMemory = "get_memory"
 	// CmdUpdateMemory updates an existing memory.
@@ -97,9 +100,17 @@ var CommandRegistry = map[string]CommandInfo{
 		Name:        CmdExpand,
 		Description: "Return the full expansion of a single item.",
 	},
+	CmdFormatContextWindow: {
+		Name:        CmdFormatContextWindow,
+		Description: "Assemble a deterministic context window from summaries and fresh events.",
+	},
 	CmdHistory: {
 		Name:        CmdHistory,
 		Description: "Retrieve raw history by query or session.",
+	},
+	CmdGrep: {
+		Name:        CmdGrep,
+		Description: "Search events and group matches by covering summary.",
 	},
 	CmdGetMemory: {
 		Name:        CmdGetMemory,

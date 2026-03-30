@@ -153,9 +153,10 @@ type DescribeItemResponse struct {
 // It identifies which item should be expanded and, when known, the item kind
 // used to resolve the correct expansion path.
 type ExpandRequest struct {
-	ID        string `json:"id"`
-	Kind      string `json:"kind"`
-	SessionID string `json:"session_id,omitempty"`
+	ID              string `json:"id"`
+	Kind            string `json:"kind"`
+	SessionID       string `json:"session_id,omitempty"`
+	DelegationDepth int    `json:"delegation_depth,omitempty"`
 }
 
 // ExpandResponse is the response payload returned by expand.
@@ -169,6 +170,32 @@ type ExpandResponse struct {
 	Claims   []interface{} `json:"claims,omitempty"`
 	Events   []interface{} `json:"events,omitempty"`
 	Children []interface{} `json:"children,omitempty"`
+}
+
+// FormatContextWindowRequest is the request payload for format_context_window.
+type FormatContextWindowRequest struct {
+	SessionID         string `json:"session_id,omitempty"`
+	ProjectID         string `json:"project_id,omitempty"`
+	FreshTailCount    int    `json:"fresh_tail_count,omitempty"`
+	MaxSummaryDepth   int    `json:"max_summary_depth,omitempty"`
+	IncludeParentRefs bool   `json:"include_parent_refs,omitempty"`
+}
+
+// FormatContextWindowResponse is the response payload returned by format_context_window.
+type FormatContextWindowResponse struct {
+	Content      string                             `json:"content"`
+	SummaryCount int                                `json:"summary_count"`
+	FreshCount   int                                `json:"fresh_count"`
+	EstTokens    int                                `json:"est_tokens"`
+	Manifest     []FormatContextWindowManifestEntry `json:"manifest"`
+}
+
+// FormatContextWindowManifestEntry describes one source item in the context window.
+type FormatContextWindowManifestEntry struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	StableRef string `json:"stable_ref"`
+	Depth     int    `json:"depth,omitempty"`
 }
 
 // HistoryRequest is the request payload for the history command.
@@ -189,6 +216,36 @@ type HistoryRequest struct {
 // It returns matching raw events in the order chosen by the service.
 type HistoryResponse struct {
 	Events []HistoryEventResponse `json:"events"`
+}
+
+type GrepRequest struct {
+	Pattern         string `json:"pattern"`
+	SessionID       string `json:"session_id,omitempty"`
+	ProjectID       string `json:"project_id,omitempty"`
+	MaxGroupDepth   int    `json:"max_group_depth,omitempty"`
+	GroupLimit      int    `json:"group_limit,omitempty"`
+	MatchesPerGroup int    `json:"matches_per_group,omitempty"`
+}
+
+type GrepResponse struct {
+	Pattern       string              `json:"pattern"`
+	TotalHits     int                 `json:"total_hits"`
+	SampleLimited bool                `json:"sample_limited"`
+	Groups        []GrepGroupResponse `json:"groups"`
+}
+
+type GrepGroupResponse struct {
+	Summary     interface{}         `json:"summary,omitempty"`
+	SummaryID   string              `json:"summary_id,omitempty"`
+	SummaryText string              `json:"summary_text,omitempty"`
+	Matches     []GrepMatchResponse `json:"matches"`
+}
+
+type GrepMatchResponse struct {
+	EventID    string `json:"event_id"`
+	Kind       string `json:"kind"`
+	Content    string `json:"content"`
+	OccurredAt string `json:"occurred_at,omitempty"`
 }
 
 // HistoryEventResponse is a single raw event returned in a HistoryResponse.
@@ -236,7 +293,7 @@ type RunJobResponse struct {
 // It controls whether integrity checks should be read-only and which repair
 // target, if any, should be fixed.
 type RepairRequest struct {
-	Check bool   `json:"check"`
+	Check bool   `json:"check,omitempty"`
 	Fix   string `json:"fix,omitempty"`
 }
 
@@ -306,6 +363,7 @@ type UpdateMemoryRequest struct {
 	ID               string            `json:"id"`
 	Body             string            `json:"body,omitempty"`
 	TightDescription string            `json:"tight_description,omitempty"`
+	Subject          string            `json:"subject,omitempty"`
 	Type             string            `json:"type,omitempty"`
 	Scope            string            `json:"scope,omitempty"`
 	Status           string            `json:"status,omitempty"`

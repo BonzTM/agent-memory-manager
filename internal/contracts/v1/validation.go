@@ -3,6 +3,8 @@ package v1
 import (
 	"fmt"
 	"strings"
+
+	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
 // Known valid values for validated fields.
@@ -33,15 +35,16 @@ var (
 	}
 
 	validRecallModes = map[string]bool{
-		"ambient":  true,
-		"facts":    true,
-		"episodes": true,
-		"timeline": true,
-		"project":  true,
-		"entity":   true,
-		"active":   true,
-		"history":  true,
-		"hybrid":   true,
+		"ambient":        true,
+		"facts":          true,
+		"contradictions": true,
+		"episodes":       true,
+		"timeline":       true,
+		"project":        true,
+		"entity":         true,
+		"active":         true,
+		"history":        true,
+		"hybrid":         true,
 	}
 
 	validPrivacyLevels = map[string]bool{
@@ -156,7 +159,7 @@ func ValidateRemember(req *RememberRequest) error {
 		return fmt.Errorf("type is required")
 	}
 	if !validMemoryTypes[req.Type] {
-		return fmt.Errorf("invalid type %q", req.Type)
+		return fmt.Errorf("invalid type %q: %w", req.Type, core.ErrInvalidType)
 	}
 	if strings.TrimSpace(req.Body) == "" {
 		return fmt.Errorf("body is required")
@@ -165,7 +168,7 @@ func ValidateRemember(req *RememberRequest) error {
 		return fmt.Errorf("tight_description is required")
 	}
 	if req.Scope != "" && !validScopes[req.Scope] {
-		return fmt.Errorf("invalid scope %q: must be one of global, project, session", req.Scope)
+		return fmt.Errorf("%w %q: must be one of global, project, session", core.ErrInvalidScope, req.Scope)
 	}
 	if req.PrivacyLevel != "" && !validPrivacyLevels[req.PrivacyLevel] {
 		return fmt.Errorf("invalid privacy_level %q: must be one of private, shared, public_safe", req.PrivacyLevel)
@@ -215,16 +218,34 @@ func ValidateExpand(req *ExpandRequest) error {
 	if strings.TrimSpace(req.ID) == "" {
 		return fmt.Errorf("id is required")
 	}
-	if strings.TrimSpace(req.Kind) == "" {
-		return fmt.Errorf("kind is required")
-	}
 	validKinds := map[string]bool{
 		"memory":  true,
 		"summary": true,
 		"episode": true,
 	}
-	if !validKinds[req.Kind] {
+	if req.Kind != "" && !validKinds[req.Kind] {
 		return fmt.Errorf("invalid kind %q: must be one of memory, summary, episode", req.Kind)
+	}
+	if req.DelegationDepth < 0 {
+		return fmt.Errorf("delegation_depth must be non-negative")
+	}
+	return nil
+}
+
+// ValidateFormatContextWindow validates a FormatContextWindowRequest before
+// context window assembly is run.
+func ValidateFormatContextWindow(req *FormatContextWindowRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.SessionID) == "" && strings.TrimSpace(req.ProjectID) == "" {
+		return fmt.Errorf("session_id or project_id is required")
+	}
+	if req.FreshTailCount < 0 {
+		return fmt.Errorf("fresh_tail_count must be non-negative")
+	}
+	if req.MaxSummaryDepth < 0 {
+		return fmt.Errorf("max_summary_depth must be non-negative")
 	}
 	return nil
 }
@@ -239,6 +260,25 @@ func ValidateHistory(req *HistoryRequest) error {
 	// but we allow empty requests to return recent history.
 	if req.Limit < 0 {
 		return fmt.Errorf("limit must be non-negative")
+	}
+	return nil
+}
+
+func ValidateGrep(req *GrepRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	if strings.TrimSpace(req.Pattern) == "" {
+		return fmt.Errorf("pattern is required")
+	}
+	if req.MaxGroupDepth < 0 {
+		return fmt.Errorf("max_group_depth must be non-negative")
+	}
+	if req.GroupLimit < 0 {
+		return fmt.Errorf("group_limit must be non-negative")
+	}
+	if req.MatchesPerGroup < 0 {
+		return fmt.Errorf("matches_per_group must be non-negative")
 	}
 	return nil
 }
@@ -324,13 +364,13 @@ func ValidateUpdateMemory(req *UpdateMemoryRequest) error {
 		return fmt.Errorf("id is required")
 	}
 	if req.Type != "" && !validMemoryTypes[req.Type] {
-		return fmt.Errorf("invalid type %q: must be one of identity, preference, fact, decision, episode, todo, relationship, procedure, constraint, incident, artifact, summary, active_context, open_loop, assumption, contradiction", req.Type)
+		return fmt.Errorf("invalid type %q: %w; must be one of identity, preference, fact, decision, episode, todo, relationship, procedure, constraint, incident, artifact, summary, active_context, open_loop, assumption, contradiction", req.Type, core.ErrInvalidType)
 	}
 	if req.Scope != "" && !validScopes[req.Scope] {
-		return fmt.Errorf("invalid scope %q: must be one of global, project, session", req.Scope)
+		return fmt.Errorf("invalid scope %q: %w; must be one of global, project, session", req.Scope, core.ErrInvalidScope)
 	}
 	if req.Status != "" && !validMemoryStatuses[req.Status] {
-		return fmt.Errorf("invalid status %q: must be one of active, superseded, archived, retracted", req.Status)
+		return fmt.Errorf("invalid status %q: %w; must be one of active, superseded, archived, retracted", req.Status, core.ErrInvalidStatus)
 	}
 	return nil
 }
