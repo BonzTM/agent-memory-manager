@@ -23,20 +23,22 @@ const (
 	defaultEmbeddingBatchSize              = 64
 	defaultCrossProjectSimilarity          = 0.7
 	defaultEscalationDeterministicMaxChars = 2048
+	defaultMaxExpandDepth                  = 1
 )
 
 // Config holds all runtime configuration for amm.
 // Matches blueprint section 15.
 type Config struct {
-	Storage     StorageConfig     `json:"storage"`
-	Retrieval   RetrievalConfig   `json:"retrieval"`
-	Privacy     PrivacyConfig     `json:"privacy"`
-	Maintenance MaintenanceConfig `json:"maintenance"`
-	Compression CompressionConfig `json:"compression"`
-	Summarizer  SummarizerConfig  `json:"summarizer"`
-	Embeddings  EmbeddingsConfig  `json:"embeddings"`
-	HTTP        HTTPConfig        `json:"http"`
-	API         APIConfig         `json:"api"`
+	Storage        StorageConfig     `json:"storage"`
+	Retrieval      RetrievalConfig   `json:"retrieval"`
+	Privacy        PrivacyConfig     `json:"privacy"`
+	Maintenance    MaintenanceConfig `json:"maintenance"`
+	Compression    CompressionConfig `json:"compression"`
+	Summarizer     SummarizerConfig  `json:"summarizer"`
+	Embeddings     EmbeddingsConfig  `json:"embeddings"`
+	MaxExpandDepth int               `json:"max_expand_depth"`
+	HTTP           HTTPConfig        `json:"http"`
+	API            APIConfig         `json:"api"`
 }
 
 // APIConfig controls remote API client mode. When URL is set, CLI and MCP
@@ -156,6 +158,7 @@ func DefaultConfig() Config {
 		Embeddings: EmbeddingsConfig{
 			Enabled: false,
 		},
+		MaxExpandDepth: defaultMaxExpandDepth,
 		HTTP: HTTPConfig{
 			Addr: ":8080",
 		},
@@ -212,7 +215,7 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 		}
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
-			slog.Warn("ignoring malformed config line", "line", lineNum, "content", line)
+			slog.Warn("ignoring malformed config line", "line_number", lineNum)
 			continue
 		}
 		key := strings.TrimSpace(parts[0])
@@ -330,6 +333,10 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			cfg.Embeddings.APIKey = val
 		case "embeddings.model":
 			cfg.Embeddings.Model = val
+		case "max_expand_depth":
+			if n, err := strconv.Atoi(val); err == nil && n >= -1 {
+				cfg.MaxExpandDepth = n
+			}
 		case "http.addr":
 			cfg.HTTP.Addr = val
 		case "http.cors_origins":
@@ -547,6 +554,11 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_EMBEDDINGS_MODEL"); v != "" {
 		base.Embeddings.Model = v
 	}
+	if v := os.Getenv("AMM_MAX_EXPAND_DEPTH"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= -1 {
+			base.MaxExpandDepth = n
+		}
+	}
 	if v := os.Getenv("AMM_HTTP_ADDR"); v != "" {
 		base.HTTP.Addr = v
 	}
@@ -569,5 +581,8 @@ func applyConfigDefaults(cfg *Config) {
 	}
 	if cfg.Compression.EscalationDeterministicMaxChars <= 0 {
 		cfg.Compression.EscalationDeterministicMaxChars = defaultEscalationDeterministicMaxChars
+	}
+	if cfg.MaxExpandDepth < -1 {
+		cfg.MaxExpandDepth = defaultMaxExpandDepth
 	}
 }

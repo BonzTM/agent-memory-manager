@@ -116,6 +116,7 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	svc.SetEmbeddingBatchSize(cfg.Summarizer.EmbeddingBatchSize)
 	svc.SetCrossProjectSimilarityThreshold(cfg.Summarizer.CrossProjectSimilarityThreshold)
 	svc.SetEscalationDeterministicMaxChars(cfg.Compression.EscalationDeterministicMaxChars)
+	svc.SetMaxExpandDepth(cfg.MaxExpandDepth)
 
 	return svc, cleanup, nil
 }
