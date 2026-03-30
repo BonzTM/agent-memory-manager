@@ -74,134 +74,27 @@ func Run(args []string) error {
 	}
 
 	cmd := args[0]
-	cmdArgs := args[1:]
-
 	switch cmd {
-	case "init":
-		return runInit(cmdArgs)
-	case "ingest":
-		if len(cmdArgs) == 0 {
-			return fmt.Errorf("ingest requires a subcommand: event, transcript")
-		}
-		switch cmdArgs[0] {
-		case "event":
-			return runIngestEvent(cmdArgs[1:])
-		case "transcript":
-			return runIngestTranscript(cmdArgs[1:])
-		default:
-			return fmt.Errorf("unknown ingest subcommand: %s", cmdArgs[0])
-		}
-	case "remember":
-		return runRemember(cmdArgs)
-	case "recall":
-		return runRecall(cmdArgs)
-	case "describe":
-		return runDescribe(cmdArgs)
-	case "expand":
-		return runExpand(cmdArgs)
-	case "history":
-		return runHistory(cmdArgs)
-	case "memory":
-		if len(cmdArgs) > 0 {
-			switch cmdArgs[0] {
-			case "show":
-				return runGetMemory(cmdArgs[1:])
-			case "update":
-				return runUpdateMemory(cmdArgs[1:])
-			}
-		}
-		return runGetMemory(cmdArgs)
-	case "share":
-		return runShare(cmdArgs)
-	case "forget":
-		return runForget(cmdArgs)
-	case "policy":
-		if len(cmdArgs) == 0 {
-			return fmt.Errorf("policy requires subcommand: list, add, remove")
-		}
-		switch cmdArgs[0] {
-		case "list":
-			return runPolicyList(cmdArgs[1:])
-		case "add":
-			return runPolicyAdd(cmdArgs[1:])
-		case "remove":
-			return runPolicyRemove(cmdArgs[1:])
-		default:
-			return fmt.Errorf("unknown policy subcommand: %s", cmdArgs[0])
-		}
-	case "project":
-		if len(cmdArgs) == 0 {
-			return fmt.Errorf("project requires subcommand: add, show, list, remove")
-		}
-		switch cmdArgs[0] {
-		case "add":
-			return runProjectAdd(cmdArgs[1:])
-		case "show":
-			return runProjectShow(cmdArgs[1:])
-		case "list":
-			return runProjectList(cmdArgs[1:])
-		case "remove":
-			return runProjectRemove(cmdArgs[1:])
-		default:
-			return fmt.Errorf("unknown project subcommand: %s", cmdArgs[0])
-		}
-	case "relationship":
-		if len(cmdArgs) == 0 {
-			return fmt.Errorf("relationship requires subcommand: add, show, list, remove")
-		}
-		switch cmdArgs[0] {
-		case "add":
-			return runRelationshipAdd(cmdArgs[1:])
-		case "show":
-			return runRelationshipShow(cmdArgs[1:])
-		case "list":
-			return runRelationshipList(cmdArgs[1:])
-		case "remove":
-			return runRelationshipRemove(cmdArgs[1:])
-		default:
-			return fmt.Errorf("unknown relationship subcommand: %s", cmdArgs[0])
-		}
-	case "summary":
-		if len(cmdArgs) > 0 && cmdArgs[0] == "show" {
-			return runSummaryShow(cmdArgs[1:])
-		}
-		return runSummaryShow(cmdArgs)
-	case "episode":
-		if len(cmdArgs) > 0 && cmdArgs[0] == "show" {
-			return runEpisodeShow(cmdArgs[1:])
-		}
-		return runEpisodeShow(cmdArgs)
-	case "entity":
-		if len(cmdArgs) > 0 && cmdArgs[0] == "show" {
-			return runEntityShow(cmdArgs[1:])
-		}
-		return runEntityShow(cmdArgs)
-	case "jobs":
-		if len(cmdArgs) > 0 && cmdArgs[0] == "run" {
-			return runJob(cmdArgs[1:])
-		}
-		return fmt.Errorf("jobs requires subcommand: run")
-	case "explain-recall":
-		return runExplainRecall(cmdArgs)
-	case "repair":
-		return runRepair(cmdArgs)
-	case "status":
-		return runStatus(cmdArgs)
-	case "reset-derived":
-		return runResetDerived(cmdArgs)
 	case "run":
-		return runEnvelope(cmdArgs)
+		return runEnvelope(args[1:])
 	case "validate":
-		return validateEnvelope(cmdArgs)
+		return validateEnvelope(args[1:])
 	case "version", "--version", "-v":
 		printVersion()
 		return nil
 	case "help", "--help", "-h":
 		printUsage()
 		return nil
-	default:
-		return fmt.Errorf("unknown command: %s", cmd)
 	}
+
+	entry, cmdArgs, err := resolveTopLevelCommand(args)
+	if err != nil {
+		return err
+	}
+	if entry.runCLI == nil {
+		return fmt.Errorf("unsupported command: %s", entry.name)
+	}
+	return entry.runCLI(cmdArgs)
 }
 
 func getService() (core.Service, func(), error) {
@@ -228,10 +121,11 @@ func parseFlags(args []string) map[string]string {
 }
 
 var boolFlags = map[string]bool{
-	"json":    true,
-	"check":   true,
-	"confirm": true,
-	"explain": true,
+	"json":                true,
+	"check":               true,
+	"confirm":             true,
+	"explain":             true,
+	"include-parent-refs": true,
 }
 
 func positionalArgs(args []string) []string {
@@ -261,8 +155,10 @@ Core Commands:
   remember                Commit a durable memory
   recall                  Retrieve memories
   describe                Describe items by ID
-  expand                  Expand an item to full detail
-  history                 Query raw history
+	  expand                  Expand an item to full detail
+	  context-window          Assemble deterministic context window
+	  history                 Query raw history
+	  grep                    Search events grouped by summary
   memory [show] <id>      Show a memory
   memory update <id>      Update a memory
   share <id>              Change memory privacy level
@@ -541,6 +437,18 @@ func runRecall(args []string) error {
 		mode = core.RecallModeHybrid
 	}
 	slog.Debug("cli recall start", "query", query, "mode", mode)
+	if err := v1.ValidateRecall(&v1.RecallRequest{
+		Query:     query,
+		Mode:      string(mode),
+		ProjectID: flags["project"],
+		SessionID: flags["session"],
+		AgentID:   flags["agent-id"],
+		Explain:   flags["explain"] == "true",
+	}); err != nil {
+		logCLIError("cli recall failed", err, "query", query, "mode", mode)
+		fail("recall", "VALIDATION_ERROR", err.Error())
+		return err
+	}
 
 	opts := core.RecallOptions{
 		Mode:      mode,
@@ -604,31 +512,99 @@ func runExpand(args []string) error {
 	defer cleanup()
 
 	kind := flags["kind"]
-	if kind == "" {
-		// Infer kind from ID prefix
-		id := pos[0]
-		switch {
-		case strings.HasPrefix(id, "mem_"):
-			kind = "memory"
-		case strings.HasPrefix(id, "sum_"):
-			kind = "summary"
-		case strings.HasPrefix(id, "ep_"):
-			kind = "episode"
-		default:
-			kind = "memory"
+	delegationDepth := 0
+	if raw := strings.TrimSpace(flags["delegation-depth"]); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || parsed < 0 {
+			if parseErr == nil {
+				parseErr = fmt.Errorf("delegation-depth must be a non-negative integer")
+			}
+			logCLIError("cli expand failed", parseErr, "delegation_depth", raw)
+			fail("expand", "VALIDATION_ERROR", "delegation-depth must be a non-negative integer")
+			return fmt.Errorf("delegation-depth must be a non-negative integer")
 		}
+		delegationDepth = parsed
+	}
+	if kind == "" {
+		kind = "memory"
 	}
 	slog.Debug("cli expand start", "id", pos[0], "kind", kind)
 
 	ctx := context.Background()
-	result, err := svc.Expand(ctx, pos[0], kind, core.ExpandOptions{SessionID: flags["session-id"]})
+	result, err := svc.Expand(ctx, pos[0], kind, core.ExpandOptions{SessionID: flags["session-id"], DelegationDepth: delegationDepth})
 	if err != nil {
 		logCLIError("cli expand failed", err, "id", pos[0], "kind", kind)
+		if errors.Is(err, core.ErrExpansionRecursionBlocked) {
+			fail("expand", "EXPANSION_RECURSION_BLOCKED", err.Error())
+			return err
+		}
 		fail("expand", "EXPAND_ERROR", err.Error())
 		return err
 	}
 	slog.Debug("cli expand succeeded", "id", pos[0], "kind", kind)
 	success("expand", result)
+	return nil
+}
+
+func runContextWindow(args []string) error {
+	flags := parseFlags(args)
+
+	freshTailCount := 0
+	if raw := strings.TrimSpace(flags["fresh-tail-count"]); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			logCLIError("cli context_window failed", err, "fresh_tail_count", raw)
+			fail("context_window", "VALIDATION_ERROR", "fresh-tail-count must be an integer")
+			return fmt.Errorf("fresh-tail-count must be an integer")
+		}
+		freshTailCount = parsed
+	}
+
+	maxSummaryDepth := 0
+	if raw := strings.TrimSpace(flags["max-summary-depth"]); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			logCLIError("cli context_window failed", err, "max_summary_depth", raw)
+			fail("context_window", "VALIDATION_ERROR", "max-summary-depth must be an integer")
+			return fmt.Errorf("max-summary-depth must be an integer")
+		}
+		maxSummaryDepth = parsed
+	}
+
+	req := &v1.FormatContextWindowRequest{
+		SessionID:         flags["session-id"],
+		ProjectID:         flags["project-id"],
+		FreshTailCount:    freshTailCount,
+		MaxSummaryDepth:   maxSummaryDepth,
+		IncludeParentRefs: flags["include-parent-refs"] == "true",
+	}
+	if err := v1.ValidateFormatContextWindow(req); err != nil {
+		logCLIError("cli context_window failed", err, "session_id", req.SessionID, "project_id", req.ProjectID)
+		fail("context_window", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli context_window failed", err)
+		fail("context_window", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	result, err := svc.FormatContextWindow(context.Background(), core.FormatContextWindowOptions{
+		SessionID:         req.SessionID,
+		ProjectID:         req.ProjectID,
+		FreshTailCount:    req.FreshTailCount,
+		MaxSummaryDepth:   req.MaxSummaryDepth,
+		IncludeParentRefs: req.IncludeParentRefs,
+	})
+	if err != nil {
+		logCLIError("cli context_window failed", err, "session_id", req.SessionID, "project_id", req.ProjectID)
+		fail("context_window", "CONTEXT_WINDOW_ERROR", err.Error())
+		return err
+	}
+	success("context_window", result)
 	return nil
 }
 
@@ -660,6 +636,83 @@ func runHistory(args []string) error {
 	}
 	slog.Debug("cli history succeeded", "query", query, "result_count", len(events))
 	success("history", map[string]interface{}{"events": events, "count": len(events)})
+	return nil
+}
+
+func runGrep(args []string) error {
+	flags := parseFlags(args)
+	pos := positionalArgs(args)
+	pattern := strings.Join(pos, " ")
+
+	maxGroupDepth := 0
+	if raw := strings.TrimSpace(flags["max-group-depth"]); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			logCLIError("cli grep failed", err, "max_group_depth", raw)
+			fail("grep", "VALIDATION_ERROR", "max-group-depth must be an integer")
+			return fmt.Errorf("max-group-depth must be an integer")
+		}
+		maxGroupDepth = parsed
+	}
+
+	groupLimit := 0
+	if raw := strings.TrimSpace(flags["group-limit"]); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			logCLIError("cli grep failed", err, "group_limit", raw)
+			fail("grep", "VALIDATION_ERROR", "group-limit must be an integer")
+			return fmt.Errorf("group-limit must be an integer")
+		}
+		groupLimit = parsed
+	}
+
+	matchesPerGroup := 0
+	if raw := strings.TrimSpace(flags["matches-per-group"]); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			logCLIError("cli grep failed", err, "matches_per_group", raw)
+			fail("grep", "VALIDATION_ERROR", "matches-per-group must be an integer")
+			return fmt.Errorf("matches-per-group must be an integer")
+		}
+		matchesPerGroup = parsed
+	}
+
+	req := &v1.GrepRequest{
+		Pattern:         pattern,
+		SessionID:       flags["session-id"],
+		ProjectID:       flags["project-id"],
+		MaxGroupDepth:   maxGroupDepth,
+		GroupLimit:      groupLimit,
+		MatchesPerGroup: matchesPerGroup,
+	}
+	if err := v1.ValidateGrep(req); err != nil {
+		logCLIError("cli grep failed", err, "pattern", pattern)
+		fail("grep", "VALIDATION_ERROR", err.Error())
+		return err
+	}
+
+	svc, cleanup, err := getService()
+	if err != nil {
+		logCLIError("cli grep failed", err, "pattern", pattern)
+		fail("grep", "SERVICE_ERROR", err.Error())
+		return err
+	}
+	defer cleanup()
+
+	result, err := svc.Grep(context.Background(), req.Pattern, core.GrepOptions{
+		SessionID:       req.SessionID,
+		ProjectID:       req.ProjectID,
+		MaxGroupDepth:   req.MaxGroupDepth,
+		GroupLimit:      req.GroupLimit,
+		MatchesPerGroup: req.MatchesPerGroup,
+	})
+	if err != nil {
+		logCLIError("cli grep failed", err, "pattern", pattern)
+		fail("grep", "GREP_ERROR", err.Error())
+		return err
+	}
+
+	success("grep", result)
 	return nil
 }
 
@@ -706,14 +759,16 @@ func runUpdateMemory(args []string) error {
 	}
 	slog.Debug("cli memory update start", "id", pos[0])
 
-	if err := v1.ValidateUpdateMemory(&v1.UpdateMemoryRequest{
+	updateReq := v1.UpdateMemoryRequest{
 		ID:               pos[0],
 		Body:             flags["body"],
 		TightDescription: flags["tight"],
+		Subject:          flags["subject"],
 		Type:             flags["type"],
 		Scope:            flags["scope"],
 		Status:           flags["status"],
-	}); err != nil {
+	}
+	if err := v1.ValidateUpdateMemory(&updateReq); err != nil {
 		logCLIError("cli memory update failed", err, "id", pos[0])
 		fail("memory_update", "VALIDATION_ERROR", err.Error())
 		return err
@@ -735,21 +790,7 @@ func runUpdateMemory(args []string) error {
 		return err
 	}
 
-	if v := flags["body"]; v != "" {
-		existing.Body = v
-	}
-	if v := flags["tight"]; v != "" {
-		existing.TightDescription = v
-	}
-	if v := flags["status"]; v != "" {
-		existing.Status = core.MemoryStatus(v)
-	}
-	if v := flags["type"]; v != "" {
-		existing.Type = core.MemoryType(v)
-	}
-	if v := flags["scope"]; v != "" {
-		existing.Scope = core.Scope(v)
-	}
+	v1.ApplyMemoryUpdate(existing, updateReq)
 
 	updated, err := svc.UpdateMemory(ctx, existing)
 	if err != nil {
@@ -1600,454 +1641,11 @@ func validateEnvelope(args []string) error {
 }
 
 func dispatchEnvelope(ctx context.Context, svc core.Service, envelope CommandEnvelope) error {
-	switch envelope.Command {
-	case "init":
-		status, err := svc.Status(ctx)
-		if err != nil {
-			fail("run", "INIT_ERROR", err.Error())
-			return err
-		}
-		success("run", map[string]string{"status": "initialized", "db_path": status.DBPath})
-
-	case "ingest_event":
-		var evt core.Event
-		if err := json.Unmarshal(envelope.Payload, &evt); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.IngestEvent(ctx, &evt)
-		if err != nil {
-			fail("run", "INGEST_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "ingest_transcript":
-		var payload struct {
-			Events []*core.Event `json:"events"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		slog.Debug("cli run envelope ingest_transcript", "event_count", len(payload.Events))
-		count, err := svc.IngestTranscript(ctx, payload.Events)
-		if err != nil {
-			fail("run", "INGEST_ERROR", err.Error())
-			return err
-		}
-		success("run", map[string]int{"ingested": count})
-
-	case "remember":
-		var mem core.Memory
-		if err := json.Unmarshal(envelope.Payload, &mem); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.Remember(ctx, &mem)
-		if err != nil {
-			fail("run", "REMEMBER_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "recall":
-		var payload struct {
-			Query string             `json:"query"`
-			Opts  core.RecallOptions `json:"opts"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.Recall(ctx, payload.Query, payload.Opts)
-		if err != nil {
-			fail("run", "RECALL_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "describe":
-		var payload struct {
-			IDs []string `json:"ids"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		results, err := svc.Describe(ctx, payload.IDs)
-		if err != nil {
-			fail("run", "DESCRIBE_ERROR", err.Error())
-			return err
-		}
-		success("run", results)
-
-	case "expand":
-		var payload struct {
-			ID        string `json:"id"`
-			Kind      string `json:"kind"`
-			SessionID string `json:"session_id,omitempty"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.Expand(ctx, payload.ID, payload.Kind, core.ExpandOptions{SessionID: payload.SessionID})
-		if err != nil {
-			fail("run", "EXPAND_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "history":
-		var payload struct {
-			Query string              `json:"query"`
-			Opts  core.HistoryOptions `json:"opts"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		events, err := svc.History(ctx, payload.Query, payload.Opts)
-		if err != nil {
-			fail("run", "HISTORY_ERROR", err.Error())
-			return err
-		}
-		success("run", map[string]interface{}{"events": events, "count": len(events)})
-
-	case "get_memory":
-		var payload struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		mem, err := svc.GetMemory(ctx, payload.ID)
-		if err != nil {
-			fail("run", "GET_ERROR", err.Error())
-			return err
-		}
-		success("run", mem)
-
-	case "update_memory":
-		var mem core.Memory
-		if err := json.Unmarshal(envelope.Payload, &mem); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		updated, err := svc.UpdateMemory(ctx, &mem)
-		if err != nil {
-			fail("run", "UPDATE_ERROR", err.Error())
-			return err
-		}
-		success("run", updated)
-
-	case "share":
-		var payload v1.ShareRequest
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		if err := v1.ValidateShare(payload); err != nil {
-			fail("run", "VALIDATION_ERROR", err.Error())
-			return err
-		}
-		updated, err := svc.ShareMemory(ctx, payload.ID, core.PrivacyLevel(payload.Privacy))
-		if err != nil {
-			fail("run", "SHARE_ERROR", err.Error())
-			return err
-		}
-		success("run", updated)
-
-	case "forget":
-		var payload v1.ForgetRequest
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		if err := v1.ValidateForget(&payload); err != nil {
-			fail("run", "VALIDATION_ERROR", err.Error())
-			return err
-		}
-		forgotten, err := svc.ForgetMemory(ctx, payload.ID)
-		if err != nil {
-			fail("run", "FORGET_ERROR", err.Error())
-			return err
-		}
-		success("run", forgotten)
-
-	case "policy_list":
-		policies, err := svc.ListPolicies(ctx)
-		if err != nil {
-			fail("run", "LIST_ERROR", err.Error())
-			return err
-		}
-		success("run", policies)
-
-	case "policy_add":
-		var policy core.IngestionPolicy
-		if err := json.Unmarshal(envelope.Payload, &policy); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.AddPolicy(ctx, &policy)
-		if err != nil {
-			fail("run", "ADD_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "policy_remove":
-		var payload struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		if err := svc.RemovePolicy(ctx, payload.ID); err != nil {
-			fail("run", "REMOVE_ERROR", err.Error())
-			return err
-		}
-		success("run", map[string]string{"id": payload.ID, "status": "removed"})
-
-	case "register_project":
-		var project core.Project
-		if err := json.Unmarshal(envelope.Payload, &project); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.RegisterProject(ctx, &project)
-		if err != nil {
-			fail("run", "ADD_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "get_project":
-		var payload struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.GetProject(ctx, payload.ID)
-		if err != nil {
-			fail("run", "GET_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "list_projects":
-		result, err := svc.ListProjects(ctx)
-		if err != nil {
-			fail("run", "LIST_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "remove_project":
-		var payload struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		if err := svc.RemoveProject(ctx, payload.ID); err != nil {
-			fail("run", "REMOVE_ERROR", err.Error())
-			return err
-		}
-		success("run", map[string]string{"id": payload.ID, "status": "removed"})
-
-	case "add_relationship":
-		var rel core.Relationship
-		if err := json.Unmarshal(envelope.Payload, &rel); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.AddRelationship(ctx, &rel)
-		if err != nil {
-			fail("run", "ADD_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "get_relationship":
-		var payload struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.GetRelationship(ctx, payload.ID)
-		if err != nil {
-			fail("run", "GET_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "list_relationships":
-		var payload struct {
-			EntityID         string `json:"entity_id,omitempty"`
-			RelationshipType string `json:"relationship_type,omitempty"`
-			Limit            int    `json:"limit,omitempty"`
-		}
-		if len(envelope.Payload) > 0 {
-			if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-				fail("run", "PARSE_ERROR", err.Error())
-				return err
-			}
-		}
-		result, err := svc.ListRelationships(ctx, core.ListRelationshipsOptions{
-			EntityID:         payload.EntityID,
-			RelationshipType: payload.RelationshipType,
-			Limit:            payload.Limit,
-		})
-		if err != nil {
-			fail("run", "LIST_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "remove_relationship":
-		var payload struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		if err := svc.RemoveRelationship(ctx, payload.ID); err != nil {
-			fail("run", "REMOVE_ERROR", err.Error())
-			return err
-		}
-		success("run", map[string]string{"id": payload.ID, "status": "removed"})
-
-	case "get_summary":
-		var payload struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.GetSummary(ctx, payload.ID)
-		if err != nil {
-			fail("run", "GET_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "get_episode":
-		var payload struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.GetEpisode(ctx, payload.ID)
-		if err != nil {
-			fail("run", "GET_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "get_entity":
-		var payload struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.GetEntity(ctx, payload.ID)
-		if err != nil {
-			fail("run", "GET_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "run_job":
-		var payload struct {
-			Kind string `json:"kind"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		job, err := svc.RunJob(ctx, payload.Kind)
-		if err != nil {
-			fail("run", "JOB_ERROR", err.Error())
-			return err
-		}
-		success("run", job)
-
-	case "explain_recall":
-		var payload struct {
-			Query  string `json:"query"`
-			ItemID string `json:"item_id"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.ExplainRecall(ctx, payload.Query, payload.ItemID)
-		if err != nil {
-			fail("run", "EXPLAIN_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	case "repair":
-		var payload struct {
-			Check bool   `json:"check"`
-			Fix   string `json:"fix"`
-		}
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		report, err := svc.Repair(ctx, payload.Check, payload.Fix)
-		if err != nil {
-			fail("run", "REPAIR_ERROR", err.Error())
-			return err
-		}
-		success("run", report)
-
-	case "status":
-		status, err := svc.Status(ctx)
-		if err != nil {
-			fail("run", "STATUS_ERROR", err.Error())
-			return err
-		}
-		success("run", status)
-
-	case "reset_derived":
-		var payload v1.ResetDerivedRequest
-		if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-			fail("run", "PARSE_ERROR", err.Error())
-			return err
-		}
-		if err := v1.ValidateResetDerived(&payload); err != nil {
-			fail("run", "VALIDATION_ERROR", err.Error())
-			return err
-		}
-		result, err := svc.ResetDerived(ctx)
-		if err != nil {
-			fail("run", "RESET_DERIVED_ERROR", err.Error())
-			return err
-		}
-		success("run", result)
-
-	default:
+	entry, ok := commandByName(envelope.Command)
+	if !ok || entry.runEnvelope == nil {
 		fail("run", "UNKNOWN_COMMAND", fmt.Sprintf("unknown command: %s", envelope.Command))
 		return fmt.Errorf("unknown command: %s", envelope.Command)
 	}
 
-	return nil
+	return entry.runEnvelope(ctx, svc, envelope.Payload)
 }
