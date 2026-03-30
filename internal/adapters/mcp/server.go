@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
-	v1 "github.com/bonztm/agent-memory-manager/internal/contracts/v1"
 	"github.com/bonztm/agent-memory-manager/internal/core"
 	"github.com/bonztm/agent-memory-manager/internal/runtime"
 )
@@ -42,43 +42,6 @@ type Tool struct {
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
 	InputSchema interface{} `json:"inputSchema"`
-}
-
-// tools returns the list of amm MCP tools matching CLI commands.
-func tools() []Tool {
-	return []Tool{
-		{Name: "amm_init", Description: "Initialize the amm database", InputSchema: emptySchema()},
-		{Name: "amm_ingest_event", Description: "Append a raw event to history", InputSchema: eventSchema()},
-		{Name: "amm_remember", Description: "Commit a durable memory", InputSchema: rememberSchema()},
-		{Name: "amm_recall", Description: "Retrieve memories using various modes", InputSchema: recallSchema()},
-		{Name: "amm_describe", Description: "Get thin descriptions of items", InputSchema: describeSchema()},
-		{Name: "amm_expand", Description: "Expand an item to full detail", InputSchema: expandSchema()},
-		{Name: "amm_history", Description: "Query raw interaction history", InputSchema: historySchema()},
-		{Name: "amm_get_memory", Description: "Get a single memory by ID", InputSchema: idSchema()},
-		{Name: "amm_jobs_run", Description: "Run a maintenance job", InputSchema: jobSchema()},
-		{Name: "amm_share", Description: "Update a memory privacy level", InputSchema: shareSchema()},
-		{Name: "amm_explain_recall", Description: "Explain why an item surfaced", InputSchema: explainSchema()},
-		{Name: "amm_repair", Description: "Run integrity checks and repairs", InputSchema: repairSchema()},
-		{Name: "amm_status", Description: "Get system status", InputSchema: emptySchema()},
-		{Name: "amm_ingest_transcript", Description: "Bulk ingest a sequence of events", InputSchema: transcriptSchema()},
-		{Name: "amm_update_memory", Description: "Update an existing memory", InputSchema: updateMemorySchema()},
-		{Name: "amm_policy_list", Description: "List all ingestion policies", InputSchema: policyListSchema()},
-		{Name: "amm_policy_add", Description: "Add an ingestion policy", InputSchema: policyAddSchema()},
-		{Name: "amm_policy_remove", Description: "Remove an ingestion policy by ID", InputSchema: policyRemoveSchema()},
-		{Name: "amm_register_project", Description: "Register a new project", InputSchema: projectSchema()},
-		{Name: "amm_get_project", Description: "Get a project by ID", InputSchema: idSchema()},
-		{Name: "amm_list_projects", Description: "List all projects", InputSchema: emptySchema()},
-		{Name: "amm_remove_project", Description: "Remove a project by ID", InputSchema: idSchema()},
-		{Name: "amm_add_relationship", Description: "Add an entity relationship", InputSchema: addRelationshipSchema()},
-		{Name: "amm_get_relationship", Description: "Get a relationship by ID", InputSchema: idSchema()},
-		{Name: "amm_list_relationships", Description: "List relationships", InputSchema: listRelationshipsSchema()},
-		{Name: "amm_remove_relationship", Description: "Remove a relationship by ID", InputSchema: idSchema()},
-		{Name: "amm_get_summary", Description: "Get a summary by ID", InputSchema: idSchema()},
-		{Name: "amm_get_episode", Description: "Get an episode by ID", InputSchema: idSchema()},
-		{Name: "amm_get_entity", Description: "Get an entity by ID", InputSchema: idSchema()},
-		{Name: "amm_forget", Description: "Forget (retract) a memory by ID", InputSchema: idSchema()},
-		{Name: "amm_reset_derived", Description: "Purge all derived data while preserving events", InputSchema: resetDerivedSchema()},
-	}
 }
 
 // Serve runs the amm MCP server over stdin/stdout using JSON-RPC and dispatches
@@ -168,321 +131,31 @@ func handleToolCall(svc core.Service, req jsonrpcRequest) jsonrpcResponse {
 	}
 
 	ctx := context.Background()
-	var result interface{}
-	var callErr error
 	slog.Debug("mcp tool call start", "tool", params.Name)
-	invalidArgs := func(err error) jsonrpcResponse {
-		slog.Error("mcp tool call failed", "tool", params.Name, "error", err)
-		return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, err))
-	}
-
-	switch params.Name {
-	case "amm_init":
-		status, err := svc.Status(ctx)
-		if err != nil {
-			callErr = err
-			break
+	result, callErr := dispatchTool(ctx, svc, params.Name, params.Arguments)
+	if callErr != nil {
+		var argErr invalidToolArgsError
+		if errors.As(callErr, &argErr) {
+			slog.Error("mcp tool call failed", "tool", params.Name, "error", argErr)
+			return errorResponse(req.ID, -32602, fmt.Sprintf("invalid arguments for %s: %v", params.Name, argErr))
 		}
-		result = map[string]interface{}{
-			"message": "already initialized",
-			"status":  status,
+		if errors.Is(callErr, errUnknownTool) {
+			slog.Error("mcp tool call failed", "tool", params.Name, "error", fmt.Sprintf("unknown tool: %s", params.Name))
+			return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
 		}
-
-	case "amm_ingest_event":
-		var evt core.Event
-		if err := json.Unmarshal(params.Arguments, &evt); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.IngestEvent(ctx, &evt)
-
-	case "amm_ingest_transcript":
-		var args struct {
-			Events []*core.Event `json:"events"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.IngestTranscript(ctx, args.Events)
-
-	case "amm_remember":
-		var mem core.Memory
-		if err := json.Unmarshal(params.Arguments, &mem); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.Remember(ctx, &mem)
-
-	case "amm_recall":
-		var args struct {
-			Query   string             `json:"query"`
-			AgentID string             `json:"agent_id"`
-			Explain bool               `json:"explain"`
-			Opts    core.RecallOptions `json:"opts"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		if args.Opts.AgentID == "" && args.AgentID != "" {
-			args.Opts.AgentID = args.AgentID
-		}
-		if args.Explain {
-			args.Opts.Explain = true
-		}
-		result, callErr = svc.Recall(ctx, args.Query, args.Opts)
-
-	case "amm_describe":
-		var args struct {
-			IDs []string `json:"ids"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.Describe(ctx, args.IDs)
-
-	case "amm_expand":
-		var args struct {
-			ID        string `json:"id"`
-			Kind      string `json:"kind"`
-			SessionID string `json:"session_id,omitempty"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.Expand(ctx, args.ID, args.Kind, core.ExpandOptions{SessionID: args.SessionID})
-
-	case "amm_history":
-		var args struct {
-			Query string              `json:"query"`
-			Opts  core.HistoryOptions `json:"opts"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.History(ctx, args.Query, args.Opts)
-
-	case "amm_get_memory":
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.GetMemory(ctx, args.ID)
-
-	case "amm_update_memory":
-		var mem core.Memory
-		if err := json.Unmarshal(params.Arguments, &mem); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.UpdateMemory(ctx, &mem)
-
-	case "amm_share":
-		var args v1.ShareRequest
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		if err := v1.ValidateShare(args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.ShareMemory(ctx, args.ID, core.PrivacyLevel(args.Privacy))
-
-	case "amm_forget":
-		var args v1.ForgetRequest
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		if err := v1.ValidateForget(&args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.ForgetMemory(ctx, args.ID)
-
-	case "amm_policy_list":
-		result, callErr = svc.ListPolicies(ctx)
-
-	case "amm_policy_add":
-		var policy core.IngestionPolicy
-		if err := json.Unmarshal(params.Arguments, &policy); err != nil {
-			return invalidArgs(err)
-		}
-		if err := v1.ValidatePolicyAdd(&v1.PolicyAddRequest{
-			PatternType: policy.PatternType,
-			Pattern:     policy.Pattern,
-			Mode:        policy.Mode,
-			Priority:    policy.Priority,
-			MatchMode:   policy.MatchMode,
-			Metadata:    policy.Metadata,
-		}); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.AddPolicy(ctx, &policy)
-
-	case "amm_policy_remove":
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		callErr = svc.RemovePolicy(ctx, args.ID)
-		if callErr == nil {
-			result = map[string]string{"id": args.ID, "status": "removed"}
-		}
-
-	case "amm_register_project":
-		var project core.Project
-		if err := json.Unmarshal(params.Arguments, &project); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.RegisterProject(ctx, &project)
-
-	case "amm_get_project":
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.GetProject(ctx, args.ID)
-
-	case "amm_list_projects":
-		result, callErr = svc.ListProjects(ctx)
-
-	case "amm_remove_project":
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		callErr = svc.RemoveProject(ctx, args.ID)
-		if callErr == nil {
-			result = map[string]string{"id": args.ID, "status": "removed"}
-		}
-
-	case "amm_add_relationship":
-		var rel core.Relationship
-		if err := json.Unmarshal(params.Arguments, &rel); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.AddRelationship(ctx, &rel)
-
-	case "amm_get_relationship":
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.GetRelationship(ctx, args.ID)
-
-	case "amm_list_relationships":
-		var args struct {
-			EntityID         string `json:"entity_id"`
-			RelationshipType string `json:"relationship_type"`
-			Limit            int    `json:"limit"`
-		}
-		_ = json.Unmarshal(params.Arguments, &args)
-		result, callErr = svc.ListRelationships(ctx, core.ListRelationshipsOptions{
-			EntityID:         args.EntityID,
-			RelationshipType: args.RelationshipType,
-			Limit:            args.Limit,
-		})
-
-	case "amm_remove_relationship":
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		callErr = svc.RemoveRelationship(ctx, args.ID)
-		if callErr == nil {
-			result = map[string]string{"id": args.ID, "status": "removed"}
-		}
-
-	case "amm_get_summary":
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.GetSummary(ctx, args.ID)
-
-	case "amm_get_episode":
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.GetEpisode(ctx, args.ID)
-
-	case "amm_get_entity":
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.GetEntity(ctx, args.ID)
-
-	case "amm_jobs_run":
-		var args struct {
-			Kind string `json:"kind"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.RunJob(ctx, args.Kind)
-
-	case "amm_explain_recall":
-		var args struct {
-			Query  string `json:"query"`
-			ItemID string `json:"item_id"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.ExplainRecall(ctx, args.Query, args.ItemID)
-
-	case "amm_repair":
-		var args struct {
-			Check bool   `json:"check"`
-			Fix   string `json:"fix"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		result, callErr = svc.Repair(ctx, args.Check, args.Fix)
-
-	case "amm_status":
-		result, callErr = svc.Status(ctx)
-
-	case "amm_reset_derived":
-		var args struct {
-			Confirm bool `json:"confirm"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return invalidArgs(err)
-		}
-		if !args.Confirm {
-			callErr = fmt.Errorf("confirm must be true to reset derived data")
-			break
-		}
-		result, callErr = svc.ResetDerived(ctx)
-
-	default:
-		slog.Error("mcp tool call failed", "tool", params.Name, "error", fmt.Sprintf("unknown tool: %s", params.Name))
-		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
 	}
 
 	if callErr != nil {
 		slog.Error("mcp tool call failed", "tool", params.Name, "error", callErr)
+		errText := fmt.Sprintf("error: %v", callErr)
+		if errors.Is(callErr, core.ErrExpansionRecursionBlocked) {
+			errText = fmt.Sprintf("EXPANSION_RECURSION_BLOCKED: %v", callErr)
+		}
 		return jsonrpcResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
 			Result: map[string]interface{}{
-				"content": []map[string]string{{"type": "text", "text": fmt.Sprintf("error: %v", callErr)}},
+				"content": []map[string]string{{"type": "text", "text": errText}},
 				"isError": true,
 			},
 		}
@@ -587,8 +260,13 @@ func expandSchema() map[string]interface{} {
 		"type": "object",
 		"properties": map[string]interface{}{
 			"id":         map[string]string{"type": "string", "description": "Item ID to expand"},
-			"kind":       map[string]string{"type": "string", "description": "Item kind: memory, summary, episode"},
+			"kind":       map[string]string{"type": "string", "description": "Item kind: memory, summary, episode (defaults to 'memory' if omitted)"},
 			"session_id": map[string]string{"type": "string", "description": "Session identifier for relevance feedback"},
+			"delegation_depth": map[string]interface{}{
+				"type":        "integer",
+				"minimum":     0,
+				"description": "Current delegation depth for recursion control",
+			},
 		},
 		"required": []string{"id"},
 	}
@@ -607,6 +285,34 @@ func historySchema() map[string]interface{} {
 					"limit":      map[string]string{"type": "integer"},
 				},
 			},
+		},
+	}
+}
+
+func grepSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"pattern":           map[string]string{"type": "string"},
+			"session_id":        map[string]string{"type": "string"},
+			"project_id":        map[string]string{"type": "string"},
+			"max_group_depth":   map[string]string{"type": "integer"},
+			"group_limit":       map[string]string{"type": "integer"},
+			"matches_per_group": map[string]string{"type": "integer"},
+		},
+		"required": []string{"pattern"},
+	}
+}
+
+func formatContextWindowSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"session_id":          map[string]string{"type": "string"},
+			"project_id":          map[string]string{"type": "string"},
+			"fresh_tail_count":    map[string]string{"type": "integer"},
+			"max_summary_depth":   map[string]string{"type": "integer"},
+			"include_parent_refs": map[string]string{"type": "boolean"},
 		},
 	}
 }
