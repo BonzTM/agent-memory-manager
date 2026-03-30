@@ -85,7 +85,8 @@ const (
 	// RecallModeAmbient returns low-latency associative recall.
 	RecallModeAmbient RecallMode = "ambient"
 	// RecallModeFacts returns factual memories.
-	RecallModeFacts RecallMode = "facts"
+	RecallModeFacts          RecallMode = "facts"
+	RecallModeContradictions RecallMode = "contradictions"
 	// RecallModeEpisodes returns narrative episodes.
 	RecallModeEpisodes RecallMode = "episodes"
 	// RecallModeTimeline returns chronologically ordered results.
@@ -323,7 +324,65 @@ type ExpandResult struct {
 }
 
 type ExpandOptions struct {
-	SessionID string `json:"session_id,omitempty"`
+	SessionID       string `json:"session_id,omitempty"`
+	DelegationDepth int    `json:"delegation_depth,omitempty"`
+}
+
+type GrepOptions struct {
+	SessionID       string `json:"session_id,omitempty"`
+	ProjectID       string `json:"project_id,omitempty"`
+	MaxGroupDepth   int    `json:"max_group_depth,omitempty"`
+	GroupLimit      int    `json:"group_limit,omitempty"`
+	MatchesPerGroup int    `json:"matches_per_group,omitempty"`
+}
+
+type GrepResult struct {
+	Pattern string `json:"pattern"`
+	// TotalHits counts matches within the sampled SearchEvents result set, not
+	// the true total number of matching rows in the database.
+	TotalHits     int         `json:"total_hits"`
+	SampleLimited bool        `json:"sample_limited"`
+	Groups        []GrepGroup `json:"groups"`
+}
+
+type GrepGroup struct {
+	Summary     *Summary    `json:"summary,omitempty"`
+	SummaryID   string      `json:"summary_id,omitempty"`
+	SummaryText string      `json:"summary_text,omitempty"`
+	Matches     []GrepMatch `json:"matches"`
+}
+
+type GrepMatch struct {
+	EventID    string `json:"event_id"`
+	Kind       string `json:"kind"`
+	Content    string `json:"content"`
+	OccurredAt string `json:"occurred_at,omitempty"`
+}
+
+// FormatContextWindowOptions configures context window assembly.
+type FormatContextWindowOptions struct {
+	SessionID         string `json:"session_id,omitempty"`
+	ProjectID         string `json:"project_id,omitempty"`
+	FreshTailCount    int    `json:"fresh_tail_count,omitempty"`    // default 32
+	MaxSummaryDepth   int    `json:"max_summary_depth,omitempty"`   // max depth of summary nodes to include
+	IncludeParentRefs bool   `json:"include_parent_refs,omitempty"` // include parent summary references
+}
+
+// ContextWindowResult is the response from FormatContextWindow.
+type ContextWindowResult struct {
+	Content      string                       `json:"content"`
+	SummaryCount int                          `json:"summary_count"`
+	FreshCount   int                          `json:"fresh_count"`
+	EstTokens    int                          `json:"est_tokens"`
+	Manifest     []ContextWindowManifestEntry `json:"manifest"`
+}
+
+// ContextWindowManifestEntry describes one item in the assembled context window.
+type ContextWindowManifestEntry struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`       // "summary" or "event"
+	StableRef string `json:"stable_ref"` // e.g., "summary:abc123" or "event:def456"
+	Depth     int    `json:"depth,omitempty"`
 }
 
 // DescribeResult is a thin description of one item.
@@ -347,13 +406,14 @@ type RepairReport struct {
 
 // StatusResult contains system status information.
 type StatusResult struct {
-	DBPath       string `json:"db_path"`
-	Initialized  bool   `json:"initialized"`
-	EventCount   int64  `json:"event_count"`
-	MemoryCount  int64  `json:"memory_count"`
-	SummaryCount int64  `json:"summary_count"`
-	EpisodeCount int64  `json:"episode_count"`
-	EntityCount  int64  `json:"entity_count"`
+	DBPath            string `json:"db_path"`
+	Initialized       bool   `json:"initialized"`
+	EventCount        int64  `json:"event_count"`
+	PendingEventCount int64  `json:"pending_event_count"`
+	MemoryCount       int64  `json:"memory_count"`
+	SummaryCount      int64  `json:"summary_count"`
+	EpisodeCount      int64  `json:"episode_count"`
+	EntityCount       int64  `json:"entity_count"`
 }
 
 type ResetDerivedResult struct {

@@ -43,6 +43,8 @@ type Repository interface {
 	SearchSummaries(ctx context.Context, query string, limit int) ([]Summary, error)
 	// GetSummaryChildren returns the children of a summary node.
 	GetSummaryChildren(ctx context.Context, parentID string) ([]SummaryEdge, error)
+	// GetSummaryParents returns the parent edges for a given child (inverse of GetSummaryChildren).
+	GetSummaryParents(ctx context.Context, childID string) ([]SummaryEdge, error)
 	ListParentedSummaryIDs(ctx context.Context) (map[string]bool, error)
 	// InsertSummaryEdge stores a summary hierarchy edge.
 	InsertSummaryEdge(ctx context.Context, edge *SummaryEdge) error

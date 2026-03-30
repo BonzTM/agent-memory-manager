@@ -5,9 +5,6 @@ import "context"
 // Service is the single entry point for all amm business logic.
 // CLI, MCP, and HTTP are adapters that call through this interface.
 type Service interface {
-	// Init initializes the database and runs migrations.
-	Init(ctx context.Context, dbPath string) error
-
 	// IngestEvent appends a raw event to history.
 	IngestEvent(ctx context.Context, event *Event) (*Event, error)
 
@@ -25,6 +22,10 @@ type Service interface {
 
 	// Expand returns the full expansion of a single item.
 	Expand(ctx context.Context, id string, kind string, opts ExpandOptions) (*ExpandResult, error)
+
+	// FormatContextWindow assembles a deterministic context window from summaries and fresh events.
+	FormatContextWindow(ctx context.Context, opts FormatContextWindowOptions) (*ContextWindowResult, error)
+	Grep(ctx context.Context, pattern string, opts GrepOptions) (*GrepResult, error)
 
 	// History retrieves raw history by query or session.
 	History(ctx context.Context, query string, opts HistoryOptions) ([]Event, error)
