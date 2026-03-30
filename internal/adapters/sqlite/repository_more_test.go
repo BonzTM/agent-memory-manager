@@ -2,12 +2,177 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
+
+func TestNotFoundErrorsMatchSentinel(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		fn   func() error
+	}{
+		{name: "memory", fn: func() error { _, err := repo.GetMemory(ctx, "mem_missing_notfound"); return err }},
+		{name: "summary", fn: func() error { _, err := repo.GetSummary(ctx, "sum_missing_notfound"); return err }},
+		{name: "episode", fn: func() error { _, err := repo.GetEpisode(ctx, "epi_missing_notfound"); return err }},
+		{name: "entity", fn: func() error { _, err := repo.GetEntity(ctx, "ent_missing_notfound"); return err }},
+		{name: "project", fn: func() error { _, err := repo.GetProject(ctx, "prj_missing_notfound"); return err }},
+		{name: "relationship", fn: func() error { _, err := repo.GetRelationship(ctx, "rel_missing_notfound"); return err }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.fn()
+			if err == nil {
+				t.Fatal("expected not found error")
+			}
+			if !errors.Is(err, core.ErrNotFound) {
+				t.Fatalf("expected errors.Is(err, core.ErrNotFound)=true, got err=%v", err)
+			}
+		})
+	}
+}
+
+func TestCorruptJSONDecodeFallsBackSafely(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	mem := &core.Memory{
+		ID:               "mem_corrupt_json",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "memory body",
+		TightDescription: "memory tight",
+		Confidence:       0.7,
+		Importance:       0.4,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		Metadata:         map[string]string{"ok": "yes"},
+		Tags:             []string{"one"},
+	}
+	if err := repo.InsertMemory(ctx, mem); err != nil {
+		t.Fatalf("insert memory: %v", err)
+	}
+	if _, err := repo.ExecContext(ctx, `UPDATE memories SET metadata_json = '{bad', tags_json = '{bad' WHERE id = ?`, mem.ID); err != nil {
+		t.Fatalf("corrupt memory json fields: %v", err)
+	}
+
+	gotMemory, err := repo.GetMemory(ctx, mem.ID)
+	if err != nil {
+		t.Fatalf("get memory with corrupt json: %v", err)
+	}
+	if len(gotMemory.Metadata) != 0 {
+		t.Fatalf("expected metadata fallback to empty map, got %+v", gotMemory.Metadata)
+	}
+	if len(gotMemory.Tags) != 0 {
+		t.Fatalf("expected tags fallback to empty slice, got %+v", gotMemory.Tags)
+	}
+
+	summary := &core.Summary{
+		ID:               "sum_corrupt_json",
+		Kind:             "leaf",
+		Scope:            core.ScopeGlobal,
+		Body:             "summary body",
+		TightDescription: "summary tight",
+		PrivacyLevel:     core.PrivacyPrivate,
+		SourceSpan:       core.SourceSpan{EventIDs: []string{"evt_a"}},
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := repo.InsertSummary(ctx, summary); err != nil {
+		t.Fatalf("insert summary: %v", err)
+	}
+	if _, err := repo.ExecContext(ctx, `UPDATE summaries SET source_span_json = '{bad', metadata_json = '{bad' WHERE id = ?`, summary.ID); err != nil {
+		t.Fatalf("corrupt summary json fields: %v", err)
+	}
+
+	gotSummary, err := repo.GetSummary(ctx, summary.ID)
+	if err != nil {
+		t.Fatalf("get summary with corrupt json: %v", err)
+	}
+	if len(gotSummary.SourceSpan.EventIDs) != 0 {
+		t.Fatalf("expected source span fallback to empty, got %+v", gotSummary.SourceSpan)
+	}
+	if len(gotSummary.Metadata) != 0 {
+		t.Fatalf("expected metadata fallback to empty map, got %+v", gotSummary.Metadata)
+	}
+}
+
+func TestResetDerivedEdgeCases(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+
+	empty, err := repo.ResetDerived(ctx)
+	if err != nil {
+		t.Fatalf("reset derived on empty db: %v", err)
+	}
+	if empty.EventsReset != 0 || empty.MemoriesDeleted != 0 || empty.SummariesDeleted != 0 || empty.EpisodesDeleted != 0 {
+		t.Fatalf("expected zero counts on empty reset, got %+v", empty)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := repo.InsertEvent(ctx, &core.Event{ID: "evt_reset_edge", Kind: "message_user", SourceSystem: "test", PrivacyLevel: core.PrivacyPrivate, Content: "x", OccurredAt: now, IngestedAt: now}); err != nil {
+		t.Fatalf("insert event for reset edge: %v", err)
+	}
+	if err := repo.InsertMemory(ctx, &core.Memory{ID: "mem_reset_edge", Type: core.MemoryTypeFact, Scope: core.ScopeGlobal, Body: "x", TightDescription: "x", Confidence: 0.5, Importance: 0.5, PrivacyLevel: core.PrivacyPrivate, Status: core.MemoryStatusActive, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("insert memory for reset edge: %v", err)
+	}
+
+	first, err := repo.ResetDerived(ctx)
+	if err != nil {
+		t.Fatalf("first reset derived: %v", err)
+	}
+	if first.MemoriesDeleted == 0 {
+		t.Fatalf("expected first reset to delete memories, got %+v", first)
+	}
+
+	second, err := repo.ResetDerived(ctx)
+	if err != nil {
+		t.Fatalf("second reset derived: %v", err)
+	}
+	if second.MemoriesDeleted != 0 || second.SummariesDeleted != 0 || second.EpisodesDeleted != 0 {
+		t.Fatalf("expected second reset to be idempotent for derived tables, got %+v", second)
+	}
+	if second.EventsReset == 0 {
+		t.Fatalf("expected second reset to still report event updates, got %+v", second)
+	}
+}
+
+func TestInsertRelationshipsBatchRollsBackOnFailure(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	from := &core.Entity{ID: "ent_rb_from", Type: "service", CanonicalName: "from", CreatedAt: now, UpdatedAt: now}
+	to := &core.Entity{ID: "ent_rb_to", Type: "service", CanonicalName: "to", CreatedAt: now, UpdatedAt: now}
+	if err := repo.InsertEntity(ctx, from); err != nil {
+		t.Fatalf("insert from entity: %v", err)
+	}
+	if err := repo.InsertEntity(ctx, to); err != nil {
+		t.Fatalf("insert to entity: %v", err)
+	}
+
+	err := repo.InsertRelationshipsBatch(ctx, []*core.Relationship{
+		{ID: "rel_rb_ok", FromEntityID: from.ID, ToEntityID: to.ID, RelationshipType: "uses", CreatedAt: now, UpdatedAt: now},
+		{ID: "rel_rb_bad", FromEntityID: from.ID, ToEntityID: "ent_rb_missing", RelationshipType: "uses", CreatedAt: now, UpdatedAt: now},
+	})
+	if err == nil {
+		t.Fatal("expected batch insert failure due to invalid foreign key")
+	}
+
+	if _, err := repo.GetRelationship(ctx, "rel_rb_ok"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("expected first relationship rollback with ErrNotFound, got %v", err)
+	}
+}
 
 func TestRepositoryLifecycleAndInitialization(t *testing.T) {
 	ctx := context.Background()
@@ -51,7 +216,7 @@ func TestRepositoryLifecycleAndInitialization(t *testing.T) {
 }
 
 func TestGenerateIDHasPrefix(t *testing.T) {
-	id := generateID("mem_")
+	id := core.GenerateID("mem_")
 	if len(id) <= len("mem_") || id[:4] != "mem_" {
 		t.Fatalf("unexpected generated id: %q", id)
 	}
@@ -113,6 +278,88 @@ func TestSummaryEdgesAndListSummaries(t *testing.T) {
 	}
 	if len(listed) != 1 || listed[0].ID != child.ID {
 		t.Fatalf("unexpected summaries list: %+v", listed)
+	}
+}
+
+func TestGetSummaryParents_ReturnsParentEdges(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	parent := &core.Summary{ID: "sum_parent_single", Kind: "session", Scope: core.ScopeProject, ProjectID: "proj_parent_single", Body: "parent", TightDescription: "parent", PrivacyLevel: core.PrivacyPrivate, CreatedAt: now, UpdatedAt: now}
+	child := &core.Summary{ID: "sum_child_single", Kind: "leaf", Scope: core.ScopeProject, ProjectID: "proj_parent_single", Body: "child", TightDescription: "child", PrivacyLevel: core.PrivacyPrivate, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
+
+	if err := repo.InsertSummary(ctx, parent); err != nil {
+		t.Fatalf("insert parent summary: %v", err)
+	}
+	if err := repo.InsertSummary(ctx, child); err != nil {
+		t.Fatalf("insert child summary: %v", err)
+	}
+	if err := repo.InsertSummaryEdge(ctx, &core.SummaryEdge{ParentSummaryID: parent.ID, ChildKind: "summary", ChildID: child.ID, EdgeOrder: 1}); err != nil {
+		t.Fatalf("insert summary edge: %v", err)
+	}
+
+	edges, err := repo.GetSummaryParents(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetSummaryParents: %v", err)
+	}
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 parent edge, got %+v", edges)
+	}
+	if edges[0].ParentSummaryID != parent.ID || edges[0].ChildID != child.ID || edges[0].ChildKind != "summary" {
+		t.Fatalf("unexpected parent edge: %+v", edges[0])
+	}
+}
+
+func TestGetSummaryParents_MultipleParents(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	parentOne := &core.Summary{ID: "sum_parent_one", Kind: "session", Scope: core.ScopeProject, ProjectID: "proj_parent_multi", Body: "parent one", TightDescription: "parent one", PrivacyLevel: core.PrivacyPrivate, CreatedAt: now, UpdatedAt: now}
+	parentTwo := &core.Summary{ID: "sum_parent_two", Kind: "session", Scope: core.ScopeProject, ProjectID: "proj_parent_multi", Body: "parent two", TightDescription: "parent two", PrivacyLevel: core.PrivacyPrivate, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
+	child := &core.Summary{ID: "sum_child_multi", Kind: "leaf", Scope: core.ScopeProject, ProjectID: "proj_parent_multi", Body: "child", TightDescription: "child", PrivacyLevel: core.PrivacyPrivate, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)}
+
+	for _, summary := range []*core.Summary{parentOne, parentTwo, child} {
+		if err := repo.InsertSummary(ctx, summary); err != nil {
+			t.Fatalf("insert summary %s: %v", summary.ID, err)
+		}
+	}
+	if err := repo.InsertSummaryEdge(ctx, &core.SummaryEdge{ParentSummaryID: parentOne.ID, ChildKind: "summary", ChildID: child.ID, EdgeOrder: 1}); err != nil {
+		t.Fatalf("insert summary edge one: %v", err)
+	}
+	if err := repo.InsertSummaryEdge(ctx, &core.SummaryEdge{ParentSummaryID: parentTwo.ID, ChildKind: "summary", ChildID: child.ID, EdgeOrder: 2}); err != nil {
+		t.Fatalf("insert summary edge two: %v", err)
+	}
+
+	edges, err := repo.GetSummaryParents(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetSummaryParents: %v", err)
+	}
+	if len(edges) != 2 {
+		t.Fatalf("expected 2 parent edges, got %+v", edges)
+	}
+	if edges[0].ParentSummaryID != parentOne.ID || edges[1].ParentSummaryID != parentTwo.ID {
+		t.Fatalf("unexpected parent edges order/content: %+v", edges)
+	}
+}
+
+func TestGetSummaryParents_NoParents(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	orphan := &core.Summary{ID: "sum_orphan", Kind: "leaf", Scope: core.ScopeProject, ProjectID: "proj_orphan", Body: "orphan", TightDescription: "orphan", PrivacyLevel: core.PrivacyPrivate, CreatedAt: now, UpdatedAt: now}
+	if err := repo.InsertSummary(ctx, orphan); err != nil {
+		t.Fatalf("insert orphan summary: %v", err)
+	}
+
+	edges, err := repo.GetSummaryParents(ctx, orphan.ID)
+	if err != nil {
+		t.Fatalf("GetSummaryParents: %v", err)
+	}
+	if len(edges) != 0 {
+		t.Fatalf("expected no parent edges, got %+v", edges)
 	}
 }
 

@@ -4183,7 +4183,7 @@ func TestMergeDuplicates(t *testing.T) {
 	// Insert two nearly identical memories directly (bypassing Remember dedup).
 	now := time.Now().UTC()
 	if err := repo.InsertMemory(ctx, &core.Memory{
-		ID:               generateID("mem_"),
+			ID:               core.GenerateID("mem_"),
 		Type:             core.MemoryTypeFact,
 		Scope:            core.ScopeGlobal,
 		Body:             "The deployment pipeline uses GitHub Actions for CI and CD",
@@ -4198,7 +4198,7 @@ func TestMergeDuplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := repo.InsertMemory(ctx, &core.Memory{
-		ID:               generateID("mem_"),
+			ID:               core.GenerateID("mem_"),
 		Type:             core.MemoryTypeFact,
 		Scope:            core.ScopeGlobal,
 		Body:             "The deployment pipeline uses GitHub Actions for CI and CD workflows",

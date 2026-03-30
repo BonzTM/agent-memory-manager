@@ -214,10 +214,39 @@ func TestHandlersHappyPaths(t *testing.T) {
 		}
 	})
 
+	t.Run("expand_default_kind", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(nethttp.MethodGet, "/v1/expand/"+mem.ID, nil)
+		req.SetPathValue("id", mem.ID)
+		srv.handleExpand(w, req)
+		if w.Code != nethttp.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("expand_delegation_depth_blocked", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(nethttp.MethodGet, "/v1/expand/"+mem.ID+"?kind=memory&delegation_depth=1", nil)
+		req.SetPathValue("id", mem.ID)
+		srv.handleExpand(w, req)
+		if w.Code != nethttp.StatusForbidden {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+	})
+
 	t.Run("history", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := jsonRequest(t, nethttp.MethodPost, "/v1/history", map[string]interface{}{"query": "hello", "opts": map[string]interface{}{"limit": 10}})
 		srv.handleHistory(w, req)
+		if w.Code != nethttp.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("grep", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(nethttp.MethodGet, "/v1/grep?pattern=remembered", nil)
+		srv.handleGrep(w, req)
 		if w.Code != nethttp.StatusOK {
 			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 		}
@@ -495,9 +524,31 @@ func TestHandlersErrorPaths(t *testing.T) {
 		assertStatus(t, w.Code, nethttp.StatusBadRequest, w.Body.String())
 	})
 
+	t.Run("grep_missing_pattern", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(nethttp.MethodGet, "/v1/grep", nil)
+		srv.handleGrep(w, req)
+		assertStatus(t, w.Code, nethttp.StatusBadRequest, w.Body.String())
+	})
+
+	t.Run("grep_bad_group_limit", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(nethttp.MethodGet, "/v1/grep?pattern=hello&group_limit=bad", nil)
+		srv.handleGrep(w, req)
+		assertStatus(t, w.Code, nethttp.StatusBadRequest, w.Body.String())
+	})
+
 	t.Run("expand_invalid_kind", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(nethttp.MethodGet, "/v1/expand/id?kind=invalid", nil)
+		req.SetPathValue("id", "id")
+		srv.handleExpand(w, req)
+		assertStatus(t, w.Code, nethttp.StatusBadRequest, w.Body.String())
+	})
+
+	t.Run("expand_invalid_delegation_depth", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(nethttp.MethodGet, "/v1/expand/id?kind=memory&delegation_depth=-1", nil)
 		req.SetPathValue("id", "id")
 		srv.handleExpand(w, req)
 		assertStatus(t, w.Code, nethttp.StatusBadRequest, w.Body.String())
@@ -540,4 +591,85 @@ func TestHandlersErrorPaths(t *testing.T) {
 		srv.handleShareMemory(w, req)
 		assertStatus(t, w.Code, nethttp.StatusBadRequest, w.Body.String())
 	})
+}
+
+func TestHTTPValidation_RememberInvalidType(t *testing.T) {
+	srv, _, _ := testHTTPEnv(t)
+	w := httptest.NewRecorder()
+	req := jsonRequest(t, nethttp.MethodPost, "/v1/memories", map[string]interface{}{
+		"type":              "not_a_type",
+		"scope":             string(core.ScopeGlobal),
+		"body":              "remembered body",
+		"tight_description": "remembered",
+	})
+
+	srv.handleRemember(w, req)
+
+	if w.Code != nethttp.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHTTPValidation_RecallInvalidMode(t *testing.T) {
+	srv, _, _ := testHTTPEnv(t)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(nethttp.MethodGet, "/v1/recall?query=test&mode=not_a_mode", nil)
+
+	srv.handleRecall(w, req)
+
+	if w.Code != nethttp.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHTTPValidation_IngestEventMissingKind(t *testing.T) {
+	srv, _, _ := testHTTPEnv(t)
+	w := httptest.NewRecorder()
+	req := jsonRequest(t, nethttp.MethodPost, "/v1/events", map[string]interface{}{
+		"source_system": "test",
+		"content":       "hello",
+	})
+
+	srv.handleIngestEvent(w, req)
+
+	if w.Code != nethttp.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHTTPValidation_ExpandNegativeDepth(t *testing.T) {
+	srv, _, _ := testHTTPEnv(t)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(nethttp.MethodGet, "/v1/expand/x?kind=memory&delegation_depth=-1", nil)
+	req.SetPathValue("id", "x")
+
+	srv.handleExpand(w, req)
+
+	if w.Code != nethttp.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHTTPValidation_GrepMissingPattern(t *testing.T) {
+	srv, _, _ := testHTTPEnv(t)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(nethttp.MethodGet, "/v1/grep", nil)
+
+	srv.handleGrep(w, req)
+
+	if w.Code != nethttp.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHTTPValidation_ContextWindowMissingSession(t *testing.T) {
+	srv, _, _ := testHTTPEnv(t)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(nethttp.MethodGet, "/v1/context-window", nil)
+
+	srv.handleFormatContextWindow(w, req)
+
+	if w.Code != nethttp.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
 }

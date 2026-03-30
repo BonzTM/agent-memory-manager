@@ -88,6 +88,9 @@ func TestDefaultConfig_AllDefaults(t *testing.T) {
 	if cfg.Embeddings.Enabled {
 		t.Fatal("expected embeddings disabled by default")
 	}
+	if cfg.MaxExpandDepth != defaultMaxExpandDepth {
+		t.Fatalf("expected default max expand depth %d, got %d", defaultMaxExpandDepth, cfg.MaxExpandDepth)
+	}
 	if cfg.HTTP.Addr != ":8080" {
 		t.Fatalf("expected default HTTP addr :8080, got %q", cfg.HTTP.Addr)
 	}
@@ -327,7 +330,7 @@ func TestConfigFromEnv_OverridesAllFields(t *testing.T) {
 		"AMM_SUMMARIZER_ENDPOINT":                "https://summary.env/v1",
 		"AMM_SUMMARIZER_API_KEY":                 "summary-env-key",
 		"AMM_SUMMARIZER_MODEL":                   "summary-env-model",
-		"AMM_REPROCESS_BATCH_SIZE":                "90",
+		"AMM_REPROCESS_BATCH_SIZE":               "90",
 		"AMM_REVIEW_ENDPOINT":                    "https://review.env/v1",
 		"AMM_REVIEW_API_KEY":                     "review-env-key",
 		"AMM_REVIEW_MODEL":                       "review-env-model",
@@ -443,7 +446,7 @@ func TestConfigFromEnv_InvalidAndEmptyValuesDoNotOverride(t *testing.T) {
 		"AMM_SUMMARIZER_ENDPOINT":                "",
 		"AMM_SUMMARIZER_API_KEY":                 "",
 		"AMM_SUMMARIZER_MODEL":                   "",
-		"AMM_REPROCESS_BATCH_SIZE":                "0",
+		"AMM_REPROCESS_BATCH_SIZE":               "0",
 		"AMM_REVIEW_ENDPOINT":                    "",
 		"AMM_REVIEW_API_KEY":                     "",
 		"AMM_REVIEW_MODEL":                       "",

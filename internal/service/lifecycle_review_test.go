@@ -1,8 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
@@ -336,5 +340,151 @@ func TestLifecycleReview_ConflictPrecedence(t *testing.T) {
 	}
 	if updatedC.Status != core.MemoryStatusActive {
 		t.Fatalf("expected merge keep memory C to stay active, got %s", updatedC.Status)
+	}
+}
+
+func TestLifecycleReview_PersistsContradictions(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	memA, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "contradiction A",
+		TightDescription: "contradiction A",
+		Importance:       0.6,
+		Confidence:       0.9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+
+	memB, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "contradiction B",
+		TightDescription: "contradiction B",
+		Importance:       0.6,
+		Confidence:       0.9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc.SetIntelligenceProvider(&lifecycleReviewIntelligenceStub{
+		reviewFn: func([]core.MemoryReview) *core.ReviewResult {
+			return &core.ReviewResult{Contradictions: []core.ContradictionPair{{
+				MemoryA:     memA.ID,
+				MemoryB:     memB.ID,
+				Explanation: "same subject, opposite claim",
+			}}}
+		},
+	})
+
+	_, err = svc.LifecycleReview(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	contradictions, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Type: core.MemoryTypeContradiction, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contradictions) != 1 {
+		t.Fatalf("expected one persisted contradiction memory, got %d", len(contradictions))
+	}
+	if contradictions[0].Type != core.MemoryTypeContradiction {
+		t.Fatalf("expected contradiction memory type, got %q", contradictions[0].Type)
+	}
+	if !containsString(contradictions[0].Tags, "lifecycle-review") {
+		t.Fatalf("expected lifecycle-review tag on contradiction memory, got %v", contradictions[0].Tags)
+	}
+
+	updatedA, err := repo.GetMemory(ctx, memA.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedA.Status != core.MemoryStatusSuperseded {
+		t.Fatalf("expected memory A to be superseded, got %s", updatedA.Status)
+	}
+	if updatedA.SupersededBy != memB.ID {
+		t.Fatalf("expected memory A superseded_by=%q, got %q", memB.ID, updatedA.SupersededBy)
+	}
+
+	updatedB, err := repo.GetMemory(ctx, memB.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedB.Status != core.MemoryStatusActive {
+		t.Fatalf("expected memory B to remain active, got %s", updatedB.Status)
+	}
+	if updatedB.SupersededBy != "" {
+		t.Fatalf("expected memory B to remain unsuperseded, got superseded_by=%q", updatedB.SupersededBy)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestLifecycleReview_ContradictionsLogged(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	memA, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "logged contradiction A",
+		TightDescription: "logged contradiction A",
+		Importance:       0.5,
+		Confidence:       0.9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	memB, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "logged contradiction B",
+		TightDescription: "logged contradiction B",
+		Importance:       0.5,
+		Confidence:       0.9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc.SetIntelligenceProvider(&lifecycleReviewIntelligenceStub{
+		reviewFn: func([]core.MemoryReview) *core.ReviewResult {
+			return &core.ReviewResult{Contradictions: []core.ContradictionPair{{
+				MemoryA:     memA.ID,
+				MemoryB:     memB.ID,
+				Explanation: "opposing assertions",
+			}}}
+		},
+	})
+
+	var logBuffer bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(previousDefault) })
+
+	_, err = svc.LifecycleReview(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logged := logBuffer.String()
+	if !strings.Contains(logged, "persisted contradiction memory") {
+		t.Fatalf("expected contradiction log message, got logs: %s", logged)
+	}
+	if !strings.Contains(logged, memA.ID) || !strings.Contains(logged, memB.ID) {
+		t.Fatalf("expected contradiction log to include both memory IDs, got logs: %s", logged)
+	}
+	if !strings.Contains(logged, "opposing assertions") {
+		t.Fatalf("expected contradiction log to include explanation, got logs: %s", logged)
 	}
 }

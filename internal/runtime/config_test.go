@@ -257,6 +257,31 @@ func TestDefaultConfig_APIConfigEmpty(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_MaxExpandDepth(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.MaxExpandDepth != defaultMaxExpandDepth {
+		t.Fatalf("expected max expand depth default %d, got %d", defaultMaxExpandDepth, cfg.MaxExpandDepth)
+	}
+}
+
+func TestConfigFromEnv_OverridesMaxExpandDepth(t *testing.T) {
+	t.Setenv("AMM_MAX_EXPAND_DEPTH", "-1")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.MaxExpandDepth != -1 {
+		t.Fatalf("expected max expand depth -1, got %d", cfg.MaxExpandDepth)
+	}
+}
+
+func TestConfigFromEnv_IgnoresInvalidMaxExpandDepth(t *testing.T) {
+	t.Setenv("AMM_MAX_EXPAND_DEPTH", "-2")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.MaxExpandDepth != defaultMaxExpandDepth {
+		t.Fatalf("expected invalid max expand depth to keep default %d, got %d", defaultMaxExpandDepth, cfg.MaxExpandDepth)
+	}
+}
+
 func TestConfigFromEnv_OverridesAPIConfig(t *testing.T) {
 	t.Setenv("AMM_API_URL", "http://localhost:8080")
 	t.Setenv("AMM_API_KEY", "test-key-123")

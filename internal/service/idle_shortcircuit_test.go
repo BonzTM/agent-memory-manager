@@ -35,7 +35,7 @@ func TestIdle_CompressHistory_NoNewEventsAfterFrontier(t *testing.T) {
 
 	now := time.Now().UTC()
 	if err := repo.InsertJob(ctx, &core.Job{
-		ID:         generateID("job_"),
+		ID:         core.GenerateID("job_"),
 		Kind:       "compress",
 		Status:     "completed",
 		StartedAt:  &now,
@@ -90,7 +90,7 @@ func TestIdle_ConsolidateSessions_NoNewEventsAfterFrontier(t *testing.T) {
 
 	now := time.Now().UTC()
 	if err := repo.InsertJob(ctx, &core.Job{
-		ID:         generateID("job_"),
+		ID:         core.GenerateID("job_"),
 		Kind:       "consolidate_sessions",
 		Status:     "completed",
 		StartedAt:  &now,
@@ -139,7 +139,7 @@ func TestIdle_ConsolidateSessions_AllSessionsAlreadySummarized(t *testing.T) {
 
 		now := time.Now().UTC().Add(time.Duration(i) * time.Second)
 		if err := repo.InsertSummary(ctx, &core.Summary{
-			ID:               generateID("sum_"),
+			ID:               core.GenerateID("sum_"),
 			Kind:             "session",
 			SessionID:        sessionID,
 			Scope:            core.ScopeGlobal,
@@ -178,7 +178,7 @@ func TestIdle_BuildTopicSummaries_AllLeavesAlreadyParented(t *testing.T) {
 		"Bob asked Alice about AMM SQLite recovery details",
 		"AMM SQLite incident notes by Alice and Bob",
 	} {
-		leafIDs[i] = generateID("sum_")
+		leafIDs[i] = core.GenerateID("sum_")
 		now := time.Now().UTC().Add(-10*time.Minute + time.Duration(i)*time.Second)
 		if err := repo.InsertSummary(ctx, &core.Summary{
 			ID:               leafIDs[i],
@@ -194,7 +194,7 @@ func TestIdle_BuildTopicSummaries_AllLeavesAlreadyParented(t *testing.T) {
 		}
 	}
 
-	parentID := generateID("sum_")
+	parentID := core.GenerateID("sum_")
 	parentNow := time.Now().UTC().Add(-5 * time.Minute)
 	if err := repo.InsertSummary(ctx, &core.Summary{
 		ID:               parentID,
@@ -240,7 +240,7 @@ func TestIdle_BuildTopicSummaries_UngroupableLeavesRecordNoOpJob(t *testing.T) {
 
 	now := time.Now().UTC()
 	if err := repo.InsertSummary(ctx, &core.Summary{
-		ID:               generateID("sum_"),
+			ID:               core.GenerateID("sum_"),
 		Kind:             "leaf",
 		Scope:            core.ScopeGlobal,
 		Body:             "single isolated leaf about unique topic xyz",
@@ -285,7 +285,7 @@ func TestIdle_EnrichMemories_AllAlreadyExtracted(t *testing.T) {
 	now := time.Now().UTC()
 	for i := 0; i < 2; i++ {
 		if err := repo.InsertMemory(ctx, &core.Memory{
-			ID:               generateID("mem_"),
+			ID:               core.GenerateID("mem_"),
 			Type:             core.MemoryTypeFact,
 			Scope:            core.ScopeGlobal,
 			Body:             fmt.Sprintf("already enriched memory %d", i),
@@ -379,7 +379,7 @@ func TestIdle_CompressHistory_LegacyJobFallsBackToFinishedAt(t *testing.T) {
 
 	legacyFinished := time.Now().UTC()
 	if err := repo.InsertJob(ctx, &core.Job{
-		ID:         generateID("job_"),
+		ID:         core.GenerateID("job_"),
 		Kind:       "compress",
 		Status:     "completed",
 		StartedAt:  &legacyFinished,

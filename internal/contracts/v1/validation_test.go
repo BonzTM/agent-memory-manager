@@ -146,6 +146,9 @@ func TestValidateExpand(t *testing.T) {
 			t.Fatalf("expected valid kind %q, got %v", kind, err)
 		}
 	}
+	if err := ValidateExpand(&ExpandRequest{ID: "x"}); err != nil {
+		t.Fatalf("expected empty kind to be valid, got %v", err)
+	}
 
 	tests := []struct {
 		name     string
@@ -154,8 +157,8 @@ func TestValidateExpand(t *testing.T) {
 	}{
 		{name: "nil request", req: nil, contains: "request is nil"},
 		{name: "missing id", req: &ExpandRequest{Kind: "memory"}, contains: "id is required"},
-		{name: "missing kind", req: &ExpandRequest{ID: "x"}, contains: "kind is required"},
 		{name: "invalid kind", req: &ExpandRequest{ID: "x", Kind: "entity"}, contains: "invalid kind"},
+		{name: "negative delegation depth", req: &ExpandRequest{ID: "x", Kind: "memory", DelegationDepth: -1}, contains: "delegation_depth must be non-negative"},
 	}
 
 	for _, tt := range tests {

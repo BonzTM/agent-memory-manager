@@ -31,26 +31,28 @@ func testService(t *testing.T) core.Service {
 	return svc
 }
 
-func TestInit(t *testing.T) {
+func TestServiceStatusInitialized(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "init_test.db")
 
-	repo := sqlite.NewSQLiteRepository()
-	svc := service.New(repo, dbPath, nil, nil)
-
 	ctx := context.Background()
-	if err := svc.Init(ctx, dbPath); err != nil {
-		t.Fatalf("Init: %v", err)
+	db, err := sqlite.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
 	}
-	defer repo.Close()
+	if err := sqlite.Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate sqlite: %v", err)
+	}
+	repo := &sqlite.SQLiteRepository{DB: db}
+	svc := service.New(repo, dbPath, nil, nil)
+	defer db.Close()
 
-	// Verify we can get status (proves DB is up and migrated).
 	status, err := svc.Status(ctx)
 	if err != nil {
-		t.Fatalf("Status after Init: %v", err)
+		t.Fatalf("Status: %v", err)
 	}
 	if !status.Initialized {
-		t.Error("expected Initialized=true after Init")
+		t.Error("expected Initialized=true")
 	}
 	if status.DBPath != dbPath {
 		t.Errorf("expected DBPath=%s, got %s", dbPath, status.DBPath)
@@ -922,6 +924,9 @@ func TestStatus(t *testing.T) {
 	}
 	if status.EventCount != 1 {
 		t.Errorf("expected EventCount=1, got %d", status.EventCount)
+	}
+	if status.PendingEventCount != 1 {
+		t.Errorf("expected PendingEventCount=1, got %d", status.PendingEventCount)
 	}
 	if status.MemoryCount != 1 {
 		t.Errorf("expected MemoryCount=1, got %d", status.MemoryCount)

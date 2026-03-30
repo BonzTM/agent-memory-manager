@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bonztm/agent-memory-manager/internal/adapters/sqlite"
@@ -175,6 +176,21 @@ func TestHandleToolCallPolicyAddValidation(t *testing.T) {
 	}
 }
 
+func TestHandleToolCallGrepValidationMissingPattern(t *testing.T) {
+	svc := testMCPService(t)
+
+	resp := handleToolCall(svc, toolReq(t, "amm_grep", map[string]interface{}{
+		"session_id": "sess-1",
+	}))
+
+	if resp.Error == nil {
+		t.Fatalf("expected rpc error for invalid grep args")
+	}
+	if resp.Error.Code != -32602 {
+		t.Fatalf("expected invalid params code -32602, got %d", resp.Error.Code)
+	}
+}
+
 func TestHandleToolCallShareMemory(t *testing.T) {
 	svc := testMCPService(t)
 
@@ -212,4 +228,117 @@ func TestHandleToolCallShareMemory(t *testing.T) {
 	if badPrivacy.Error.Code != -32602 {
 		t.Fatalf("expected invalid params code -32602, got %d", badPrivacy.Error.Code)
 	}
+}
+
+func TestHandleToolCallExpandDelegationDepthBlocked(t *testing.T) {
+	svc := testMCPService(t)
+
+	rememberResp := handleToolCall(svc, toolReq(t, "amm_remember", map[string]interface{}{
+		"type":              string(core.MemoryTypeFact),
+		"body":              "expand depth guard memory",
+		"tight_description": "expand depth guard",
+	}))
+	var created core.Memory
+	if err := json.Unmarshal([]byte(decodeToolResultText(t, rememberResp)), &created); err != nil {
+		t.Fatalf("decode remember result: %v", err)
+	}
+
+	expandResp := handleToolCall(svc, toolReq(t, "amm_expand", map[string]interface{}{
+		"id":               created.ID,
+		"kind":             "memory",
+		"delegation_depth": 1,
+	}))
+	if expandResp.Error != nil {
+		t.Fatalf("expected tool-level error response, got rpc error: %+v", expandResp.Error)
+	}
+	expandMap, ok := expandResp.Result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected result type: %T", expandResp.Result)
+	}
+	isError, _ := expandMap["isError"].(bool)
+	if !isError {
+		t.Fatalf("expected isError=true for blocked expansion, got %#v", expandMap)
+	}
+	text := decodeToolResultText(t, expandResp)
+	if text == "" || !containsAll(text, "EXPANSION_RECURSION_BLOCKED", core.ErrExpansionRecursionBlocked.Error()) {
+		t.Fatalf("expected blocked expansion marker in text, got %q", text)
+	}
+}
+
+func TestHandleToolCallExpandDefaultsKindToMemory(t *testing.T) {
+	svc := testMCPService(t)
+
+	rememberResp := handleToolCall(svc, toolReq(t, "amm_remember", map[string]interface{}{
+		"type":              string(core.MemoryTypeFact),
+		"body":              "expand default kind memory",
+		"tight_description": "expand default kind",
+	}))
+	var created core.Memory
+	if err := json.Unmarshal([]byte(decodeToolResultText(t, rememberResp)), &created); err != nil {
+		t.Fatalf("decode remember result: %v", err)
+	}
+
+	expandResp := handleToolCall(svc, toolReq(t, "amm_expand", map[string]interface{}{
+		"id": created.ID,
+	}))
+	var expanded core.ExpandResult
+	if err := json.Unmarshal([]byte(decodeToolResultText(t, expandResp)), &expanded); err != nil {
+		t.Fatalf("decode expand result: %v", err)
+	}
+	if expanded.Memory == nil || expanded.Memory.ID != created.ID {
+		t.Fatalf("unexpected expand result: %+v", expanded)
+	}
+}
+
+func TestHandleToolCallUpdateMemoryPartialPayloadPreservesExistingFields(t *testing.T) {
+	svc := testMCPService(t)
+
+	rememberResp := handleToolCall(svc, toolReq(t, "amm_remember", map[string]interface{}{
+		"type":              string(core.MemoryTypeFact),
+		"scope":             string(core.ScopeProject),
+		"body":              "initial body",
+		"tight_description": "initial tight",
+		"subject":           "initial subject",
+		"project_id":        "proj-mcp",
+	}))
+	var created core.Memory
+	if err := json.Unmarshal([]byte(decodeToolResultText(t, rememberResp)), &created); err != nil {
+		t.Fatalf("decode remember result: %v", err)
+	}
+
+	updateResp := handleToolCall(svc, toolReq(t, "amm_update_memory", map[string]interface{}{
+		"id":   created.ID,
+		"body": "updated body",
+	}))
+	var updated core.Memory
+	if err := json.Unmarshal([]byte(decodeToolResultText(t, updateResp)), &updated); err != nil {
+		t.Fatalf("decode update result: %v", err)
+	}
+	if updated.Body != "updated body" {
+		t.Fatalf("expected updated body, got %q", updated.Body)
+	}
+	if updated.Type != created.Type {
+		t.Fatalf("expected type to be preserved (%q), got %q", created.Type, updated.Type)
+	}
+	if updated.Scope != created.Scope {
+		t.Fatalf("expected scope to be preserved (%q), got %q", created.Scope, updated.Scope)
+	}
+	if updated.Subject != created.Subject {
+		t.Fatalf("expected subject to be preserved (%q), got %q", created.Subject, updated.Subject)
+	}
+	if updated.TightDescription != created.TightDescription {
+		t.Fatalf("expected tight_description to be preserved (%q), got %q", created.TightDescription, updated.TightDescription)
+	}
+}
+
+func containsAll(s string, parts ...string) bool {
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		if !strings.Contains(s, p) {
+			return false
+		}
+	}
+	return true
 }

@@ -296,6 +296,88 @@ func TestRepositorySummaries(t *testing.T) {
 	}
 }
 
+func TestGetSummaryParents_ReturnsParentEdges(t *testing.T) {
+	repo, _ := testRepo(t)
+	ctx := context.Background()
+	now := nowUTC()
+
+	parent := &core.Summary{ID: "sum_parent_single", Kind: "session", Scope: core.ScopeProject, ProjectID: "proj_parent_single", Body: "parent", TightDescription: "parent", PrivacyLevel: core.PrivacyPrivate, CreatedAt: now, UpdatedAt: now}
+	child := &core.Summary{ID: "sum_child_single", Kind: "leaf", Scope: core.ScopeProject, ProjectID: "proj_parent_single", Body: "child", TightDescription: "child", PrivacyLevel: core.PrivacyPrivate, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
+
+	if err := repo.InsertSummary(ctx, parent); err != nil {
+		t.Fatalf("InsertSummary parent: %v", err)
+	}
+	if err := repo.InsertSummary(ctx, child); err != nil {
+		t.Fatalf("InsertSummary child: %v", err)
+	}
+	if err := repo.InsertSummaryEdge(ctx, &core.SummaryEdge{ParentSummaryID: parent.ID, ChildKind: "summary", ChildID: child.ID, EdgeOrder: 1}); err != nil {
+		t.Fatalf("InsertSummaryEdge: %v", err)
+	}
+
+	edges, err := repo.GetSummaryParents(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetSummaryParents: %v", err)
+	}
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 parent edge, got %#v", edges)
+	}
+	if edges[0].ParentSummaryID != parent.ID || edges[0].ChildID != child.ID || edges[0].ChildKind != "summary" {
+		t.Fatalf("unexpected parent edge: %#v", edges[0])
+	}
+}
+
+func TestGetSummaryParents_MultipleParents(t *testing.T) {
+	repo, _ := testRepo(t)
+	ctx := context.Background()
+	now := nowUTC()
+
+	parentOne := &core.Summary{ID: "sum_parent_one", Kind: "session", Scope: core.ScopeProject, ProjectID: "proj_parent_multi", Body: "parent one", TightDescription: "parent one", PrivacyLevel: core.PrivacyPrivate, CreatedAt: now, UpdatedAt: now}
+	parentTwo := &core.Summary{ID: "sum_parent_two", Kind: "session", Scope: core.ScopeProject, ProjectID: "proj_parent_multi", Body: "parent two", TightDescription: "parent two", PrivacyLevel: core.PrivacyPrivate, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
+	child := &core.Summary{ID: "sum_child_multi", Kind: "leaf", Scope: core.ScopeProject, ProjectID: "proj_parent_multi", Body: "child", TightDescription: "child", PrivacyLevel: core.PrivacyPrivate, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)}
+
+	for _, summary := range []*core.Summary{parentOne, parentTwo, child} {
+		if err := repo.InsertSummary(ctx, summary); err != nil {
+			t.Fatalf("InsertSummary %s: %v", summary.ID, err)
+		}
+	}
+	if err := repo.InsertSummaryEdge(ctx, &core.SummaryEdge{ParentSummaryID: parentOne.ID, ChildKind: "summary", ChildID: child.ID, EdgeOrder: 1}); err != nil {
+		t.Fatalf("InsertSummaryEdge one: %v", err)
+	}
+	if err := repo.InsertSummaryEdge(ctx, &core.SummaryEdge{ParentSummaryID: parentTwo.ID, ChildKind: "summary", ChildID: child.ID, EdgeOrder: 2}); err != nil {
+		t.Fatalf("InsertSummaryEdge two: %v", err)
+	}
+
+	edges, err := repo.GetSummaryParents(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetSummaryParents: %v", err)
+	}
+	if len(edges) != 2 {
+		t.Fatalf("expected 2 parent edges, got %#v", edges)
+	}
+	if edges[0].ParentSummaryID != parentOne.ID || edges[1].ParentSummaryID != parentTwo.ID {
+		t.Fatalf("unexpected parent edges order/content: %#v", edges)
+	}
+}
+
+func TestGetSummaryParents_NoParents(t *testing.T) {
+	repo, _ := testRepo(t)
+	ctx := context.Background()
+	now := nowUTC()
+
+	orphan := &core.Summary{ID: "sum_orphan", Kind: "leaf", Scope: core.ScopeProject, ProjectID: "proj_orphan", Body: "orphan", TightDescription: "orphan", PrivacyLevel: core.PrivacyPrivate, CreatedAt: now, UpdatedAt: now}
+	if err := repo.InsertSummary(ctx, orphan); err != nil {
+		t.Fatalf("InsertSummary orphan: %v", err)
+	}
+
+	edges, err := repo.GetSummaryParents(ctx, orphan.ID)
+	if err != nil {
+		t.Fatalf("GetSummaryParents: %v", err)
+	}
+	if len(edges) != 0 {
+		t.Fatalf("expected no parent edges, got %#v", edges)
+	}
+}
+
 func TestRepositoryEpisodes(t *testing.T) {
 	repo, _ := testRepo(t)
 	ctx := context.Background()
@@ -947,7 +1029,7 @@ func TestRepositoryHelperFunctions(t *testing.T) {
 		t.Fatalf("defaultLimit(7)=%d want 7", got)
 	}
 
-	id := generateID("evt_")
+	id := core.GenerateID("evt_")
 	if len(id) <= len("evt_") || id[:4] != "evt_" {
 		t.Fatalf("generateID prefix mismatch: %q", id)
 	}

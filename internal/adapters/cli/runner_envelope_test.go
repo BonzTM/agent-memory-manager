@@ -316,7 +316,7 @@ func TestRunEnvelopeDispatchAllCommands(t *testing.T) {
 	expandEnv := runEnvelopeFile(t, CommandEnvelope{
 		Version: "amm.v1",
 		Command: v1.CmdExpand,
-		Payload: mustRawJSON(t, map[string]any{"id": memoryID, "kind": "memory", "session_id": "sess-expand"}),
+		Payload: mustRawJSON(t, map[string]any{"id": memoryID, "session_id": "sess-expand"}),
 	})
 	expandResult, _ := expandEnv["result"].(map[string]interface{})
 	if _, ok := expandResult["memory"].(map[string]interface{}); !ok {
@@ -328,7 +328,7 @@ func TestRunEnvelopeDispatchAllCommands(t *testing.T) {
 		Command: v1.CmdHistory,
 		Payload: mustRawJSON(t, map[string]any{
 			"query": "envelope",
-			"opts": core.HistoryOptions{ProjectID: "proj-history", SessionID: "sess-history", Limit: 10},
+			"opts":  core.HistoryOptions{ProjectID: "proj-history", SessionID: "sess-history", Limit: 10},
 		}),
 	})
 	historyResult, _ := historyEnv["result"].(map[string]interface{})
@@ -350,21 +350,21 @@ func TestRunEnvelopeDispatchAllCommands(t *testing.T) {
 	updateEnv := runEnvelopeFile(t, CommandEnvelope{
 		Version: "amm.v1",
 		Command: v1.CmdUpdateMemory,
-		Payload: mustRawJSON(t, core.Memory{
-			ID:               memoryID,
-			Type:             core.MemoryTypeDecision,
-			Scope:            core.ScopeProject,
-			ProjectID:        "proj-env",
-			AgentID:          "agent-env",
-			Body:             "updated envelope memory body",
-			TightDescription: "updated envelope memory tight",
-			PrivacyLevel:     core.PrivacyPrivate,
-			Status:           core.MemoryStatusArchived,
+		Payload: mustRawJSON(t, map[string]any{
+			"id":     memoryID,
+			"body":   "updated envelope memory body",
+			"status": string(core.MemoryStatusArchived),
 		}),
 	})
 	updateResult, _ := updateEnv["result"].(map[string]interface{})
 	if updateResult["status"] != "archived" {
 		t.Fatalf("expected archived status, got %v", updateResult["status"])
+	}
+	if updateResult["type"] != string(core.MemoryTypeFact) {
+		t.Fatalf("expected type to remain %q, got %v", core.MemoryTypeFact, updateResult["type"])
+	}
+	if updateResult["tight_description"] != "envelope memory tight" {
+		t.Fatalf("expected tight_description to remain unchanged, got %v", updateResult["tight_description"])
 	}
 
 	shareEnv := runEnvelopeFile(t, CommandEnvelope{

@@ -259,7 +259,7 @@ func TestAPIKeyAuth_BypassHealthz(t *testing.T) {
 	}
 }
 
-func TestAPIKeyAuth_BypassStatus(t *testing.T) {
+func TestAPIKeyAuth_StatusRequiresKey(t *testing.T) {
 	next := nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
 		w.WriteHeader(nethttp.StatusOK)
 	})
@@ -269,8 +269,8 @@ func TestAPIKeyAuth_BypassStatus(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != nethttp.StatusOK {
-		t.Fatalf("status=%d want=%d", w.Code, nethttp.StatusOK)
+	if w.Code != nethttp.StatusUnauthorized {
+		t.Fatalf("status=%d want=%d", w.Code, nethttp.StatusUnauthorized)
 	}
 }
 

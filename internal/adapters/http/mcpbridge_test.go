@@ -70,7 +70,7 @@ func mustRememberViaTool(t *testing.T, bridge *mcpserver.MCPServer, body string)
 func TestMCPBridge_RegistersAllTools(t *testing.T) {
 	srv, _, _ := testHTTPEnv(t)
 	bridge := newMCPBridge(srv.svc, "1.0.0")
-	if got, want := len(bridge.ListTools()), 31; got != want {
+	if got, want := len(bridge.ListTools()), 33; got != want {
 		t.Fatalf("tool count=%d want=%d", got, want)
 	}
 }
@@ -262,7 +262,7 @@ func TestMCPBridge_Expand(t *testing.T) {
 	bridge := newMCPBridge(srv.svc, "1.0.0")
 	mem := mustRememberViaTool(t, bridge, "bridge expand memory")
 
-	result := callBridgeTool(t, bridge, "amm_expand", map[string]any{"id": mem.ID, "kind": "memory"})
+	result := callBridgeTool(t, bridge, "amm_expand", map[string]any{"id": mem.ID})
 	if result.IsError {
 		t.Fatalf("expand returned error: %s", toolResultText(t, result))
 	}
@@ -289,6 +289,92 @@ func TestMCPBridge_History(t *testing.T) {
 	events := decodeToolResult[[]core.Event](t, result)
 	if len(events) == 0 {
 		t.Fatal("expected history events")
+	}
+}
+
+func TestMCPBridge_FormatContextWindow_ValidationError(t *testing.T) {
+	srv, _, _ := testHTTPEnv(t)
+	bridge := newMCPBridge(srv.svc, "1.0.0")
+
+	result := callBridgeTool(t, bridge, "amm_format_context_window", map[string]any{})
+	if !result.IsError {
+		t.Fatal("expected validation error")
+	}
+	if got := toolResultText(t, result); got == "" {
+		t.Fatal("expected validation error text")
+	}
+}
+
+func TestMCPBridge_Grep_ValidationError(t *testing.T) {
+	srv, _, _ := testHTTPEnv(t)
+	bridge := newMCPBridge(srv.svc, "1.0.0")
+
+	result := callBridgeTool(t, bridge, "amm_grep", map[string]any{"pattern": "   "})
+	if !result.IsError {
+		t.Fatal("expected validation error")
+	}
+	if got := toolResultText(t, result); got == "" {
+		t.Fatal("expected validation error text")
+	}
+}
+
+func TestMCPBridge_Expand_RejectsFractionalDelegationDepth(t *testing.T) {
+	srv, _, _ := testHTTPEnv(t)
+	bridge := newMCPBridge(srv.svc, "1.0.0")
+	mem := mustRememberViaTool(t, bridge, "bridge expand fractional depth")
+
+	result := callBridgeTool(t, bridge, "amm_expand", map[string]any{
+		"id":               mem.ID,
+		"kind":             "memory",
+		"delegation_depth": 0.5,
+	})
+	if !result.IsError {
+		t.Fatal("expected fractional delegation_depth to be rejected")
+	}
+}
+
+func TestMCPBridge_FormatContextWindow_RejectsInvalidNumericArgs(t *testing.T) {
+	srv, _, _ := testHTTPEnv(t)
+	bridge := newMCPBridge(srv.svc, "1.0.0")
+
+	badType := callBridgeTool(t, bridge, "amm_format_context_window", map[string]any{
+		"session_id":       "sess_numeric_validation",
+		"fresh_tail_count": "bad",
+	})
+	if !badType.IsError {
+		t.Fatal("expected non-integer fresh_tail_count to be rejected")
+	}
+
+	negative := callBridgeTool(t, bridge, "amm_format_context_window", map[string]any{
+		"session_id":        "sess_numeric_validation",
+		"max_summary_depth": -1,
+	})
+	if !negative.IsError {
+		t.Fatal("expected negative max_summary_depth to be rejected")
+	}
+}
+
+func TestMCPBridge_Grep_RejectsInvalidNumericArgs(t *testing.T) {
+	srv, _, _ := testHTTPEnv(t)
+	bridge := newMCPBridge(srv.svc, "1.0.0")
+
+	fractional := callBridgeTool(t, bridge, "amm_grep", map[string]any{
+		"pattern":         "alpha",
+		"max_group_depth": 0.5,
+	})
+	if !fractional.IsError {
+		t.Fatal("expected fractional max_group_depth to be rejected")
+	}
+
+	negative := callBridgeTool(t, bridge, "amm_grep", map[string]any{
+		"pattern":         "alpha",
+		"group_limit":     -1,
+		"session_id":      "sess_numeric_validation",
+		"project_id":      "prj_numeric_validation",
+		"max_group_depth": 0,
+	})
+	if !negative.IsError {
+		t.Fatal("expected negative group_limit to be rejected")
 	}
 }
 

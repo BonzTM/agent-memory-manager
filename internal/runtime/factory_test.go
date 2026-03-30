@@ -2,9 +2,11 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
+	"github.com/bonztm/agent-memory-manager/internal/core"
 	"github.com/bonztm/agent-memory-manager/internal/service"
 )
 
@@ -67,5 +69,31 @@ func TestNewService_DefaultConfigSafeWithoutEmbeddingProvider(t *testing.T) {
 	}
 	if !status.Initialized {
 		t.Fatal("expected initialized service")
+	}
+}
+
+func TestNewService_AppliesMaxExpandDepth(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Storage.DBPath = filepath.Join(t.TempDir(), "runtime-depth.db")
+	cfg.MaxExpandDepth = 1
+
+	svc, cleanup, err := NewService(cfg)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	mem, err := svc.Remember(context.Background(), &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Body:             "runtime max expand depth",
+		TightDescription: "runtime max expand depth",
+	})
+	if err != nil {
+		t.Fatalf("remember: %v", err)
+	}
+
+	_, err = svc.Expand(context.Background(), mem.ID, "memory", core.ExpandOptions{DelegationDepth: 1})
+	if !errors.Is(err, core.ErrExpansionRecursionBlocked) {
+		t.Fatalf("expected ErrExpansionRecursionBlocked, got %v", err)
 	}
 }

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -486,7 +485,7 @@ func TestRepairInternalCheckHelpersCoverage(t *testing.T) {
 	}
 }
 
-func TestCheckSupersessionChainsAndInitErrorCoverage(t *testing.T) {
+func TestCheckSupersessionChainsCoverage(t *testing.T) {
 	svc, repo := testServiceAndRepo(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -506,12 +505,6 @@ func TestCheckSupersessionChainsAndInitErrorCoverage(t *testing.T) {
 	}
 	if checked == 0 || issues == 0 {
 		t.Fatalf("expected supersession issues, got issues=%d checked=%d", issues, checked)
-	}
-
-	badPath := filepath.Join(string([]byte{0}), "bad.db")
-	repo2 := &AMMService{repo: repo}
-	if err := repo2.Init(ctx, badPath); err == nil {
-		t.Fatal("expected Init to fail for invalid path")
 	}
 }
 

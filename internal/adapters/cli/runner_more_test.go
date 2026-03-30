@@ -217,6 +217,32 @@ func TestRunErrorPaths(t *testing.T) {
 		assertEnvelope(t, stderr, false, "expand")
 	})
 
+	t.Run("expand invalid delegation depth", func(t *testing.T) {
+		memoryID := rememberForTest(t, "cli invalid delegation depth")
+		_, stderr, err := captureRun(t, []string{"expand", memoryID, "--delegation-depth", "-1"})
+		if err == nil {
+			t.Fatal("expected invalid delegation depth error")
+		}
+		env := assertEnvelope(t, stderr, false, "expand")
+		errObj, _ := env["error"].(map[string]interface{})
+		if errObj["code"] != "VALIDATION_ERROR" {
+			t.Fatalf("expected VALIDATION_ERROR, got %v", errObj["code"])
+		}
+	})
+
+	t.Run("expand recursion blocked", func(t *testing.T) {
+		memoryID := rememberForTest(t, "cli recursion blocked")
+		_, stderr, err := captureRun(t, []string{"expand", memoryID, "--delegation-depth", "1"})
+		if err == nil {
+			t.Fatal("expected recursion blocked error")
+		}
+		env := assertEnvelope(t, stderr, false, "expand")
+		errObj, _ := env["error"].(map[string]interface{})
+		if errObj["code"] != "EXPANSION_RECURSION_BLOCKED" {
+			t.Fatalf("expected EXPANSION_RECURSION_BLOCKED, got %v", errObj["code"])
+		}
+	})
+
 	t.Run("memory show missing id", func(t *testing.T) {
 		_, stderr, err := captureRun(t, []string{"memory", "show"})
 		if err == nil {
