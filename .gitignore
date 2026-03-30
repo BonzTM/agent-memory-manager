@@ -52,3 +52,7 @@ excalidraw.log
 # Python cache artifacts
 __pycache__/
 *.pyc
+
+# Local review/planning artifacts
+ROADMAP.md
+REVIEW.md

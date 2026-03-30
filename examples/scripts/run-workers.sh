@@ -5,6 +5,7 @@ set -euo pipefail
 AMM="${AMM_BIN:-/usr/local/bin/amm}"
 export AMM_DB_PATH="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
 LOCK_DIR="${AMM_DB_PATH}.maintenance.lock"
+LAST_RUN_MARKER="${AMM_DB_PATH}.last-full-maintenance"
 
 # Skip if DB doesn't exist
 [ -f "$AMM_DB_PATH" ] || exit 0
@@ -36,6 +37,29 @@ cleanup_lock() {
   rm -rf "$LOCK_DIR" 2>/dev/null || true
 }
 trap cleanup_lock EXIT INT TERM
+
+run_housekeeping() {
+  $AMM jobs run cleanup_recall_history >/dev/null 2>&1 || true
+  $AMM jobs run purge_old_events >/dev/null 2>&1 || true
+  $AMM jobs run purge_old_jobs >/dev/null 2>&1 || true
+  $AMM jobs run expire_retrieval_cache >/dev/null 2>&1 || true
+  $AMM jobs run purge_relevance_feedback >/dev/null 2>&1 || true
+  $AMM jobs run vacuum_analyze >/dev/null 2>&1 || true
+}
+
+# Skip the full pipeline if the DB hasn't been modified since the last
+# successful full run. The DB file's mtime changes on every write (event
+# ingestion, reflect creating memories, etc.), so comparing it against a
+# marker file tells us whether anything happened since we last processed.
+db_changed_since_last_run() {
+  [ ! -f "$LAST_RUN_MARKER" ] && return 0
+  [ "$AMM_DB_PATH" -nt "$LAST_RUN_MARKER" ]
+}
+
+if ! db_changed_since_last_run; then
+  run_housekeeping
+  exit 0
+fi
 
 # Phase 1: Extract memories from events (LLM calls, no embeddings).
 $AMM jobs run reflect >/dev/null 2>&1 || true
@@ -76,3 +100,5 @@ $AMM jobs run purge_old_jobs >/dev/null 2>&1 || true
 $AMM jobs run expire_retrieval_cache >/dev/null 2>&1 || true
 $AMM jobs run purge_relevance_feedback >/dev/null 2>&1 || true
 $AMM jobs run vacuum_analyze >/dev/null 2>&1 || true
+
+touch "$LAST_RUN_MARKER"

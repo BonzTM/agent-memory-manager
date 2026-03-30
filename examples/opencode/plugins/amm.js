@@ -170,6 +170,7 @@ function ingestEvent(event) {
 let maintenanceRunning = false;
 const maintenanceBySession = new Map();
 const emittedMessageVersions = new Map();
+const activitySinceLastIdle = new Map();
 
 function runMaintenanceAsync() {
   if (maintenanceRunning) return;
@@ -253,6 +254,7 @@ export const AMMMemoryPlugin = async ({ project }) => {
     },
 
     "tool.execute.before": async (input) => {
+      activitySinceLastIdle.set(input.sessionID, true);
       ingestEvent({
         kind: "tool_call",
         source_system: "opencode",
@@ -303,6 +305,7 @@ export const AMMMemoryPlugin = async ({ project }) => {
 
             if (emittedMessageVersions.get(versionKey) !== fingerprint) {
               emittedMessageVersions.set(versionKey, fingerprint);
+              activitySinceLastIdle.set(event.properties?.sessionID ?? "unknown", true);
               ingestEvent({
                 kind: role === "user" ? "message_user" : "message_assistant",
                 source_system: "opencode",
@@ -339,17 +342,27 @@ export const AMMMemoryPlugin = async ({ project }) => {
       }
 
       if (event.type === "session.idle") {
-        const lastRun = maintenanceBySession.get(event.properties.sessionID) ?? 0;
+        const sessionID = event.properties.sessionID;
+        const lastRun = maintenanceBySession.get(sessionID) ?? 0;
         const now = Date.now();
         if (now - lastRun < 60_000) {
           return;
         }
-        maintenanceBySession.set(event.properties.sessionID, now);
+        maintenanceBySession.set(sessionID, now);
+
+        // Only ingest idle event and run maintenance if there was real
+        // activity (messages or tool calls) since the last idle. This
+        // prevents the self-feeding loop where idle events create
+        // unreflected events that reflect then processes with LLM calls.
+        if (!activitySinceLastIdle.get(sessionID)) {
+          return;
+        }
+        activitySinceLastIdle.set(sessionID, false);
 
         ingestEvent({
           kind: "session_idle",
           source_system: "opencode",
-          session_id: event.properties.sessionID,
+          session_id: sessionID,
           project_id: projectID,
           content: "OpenCode session became idle.",
           metadata: stringifyRecord({ hook_event: event.type }),
