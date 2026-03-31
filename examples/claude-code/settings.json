@@ -30,26 +30,6 @@
         ]
       }
     ],
-    "PostToolUseFailure": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.amm/hooks/on-tool-use.sh failure"
-          }
-        ]
-      }
-    ],
-    "AssistantResponse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.amm/hooks/on-assistant-message.sh"
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [
