@@ -41,7 +41,7 @@ helm upgrade --install amm ./deploy/helm/amm --set image.tag=1.0.1
 
 ## Known Issues
 
-- The built-in ONNX embedding provider still uses a hash-based stub for vector generation. It produces consistent vectors for identical strings but does not capture semantic meaning. Production deployments should use an external embedding API endpoint until real ONNX inference is integrated.
+- The built-in embedding provider uses GloVe word-vector averaging (~60-70% quality of transformer models). It captures genuine semantic similarity but doesn't understand word order or sentence structure. For highest quality, use an external embedding API endpoint (e.g., OpenAI `text-embedding-3-small` via OpenRouter).
 - PostgreSQL ANN vector search requires manual operator setup (column and HNSW index creation) after the extension is enabled by migration 3.
 
 ## Compatibility and Migration
