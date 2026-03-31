@@ -1,3 +1,5 @@
+//go:build builtin_embeddings
+
 package service
 
 import (
@@ -10,20 +12,17 @@ func TestBuiltinEmbeddingAvailability(t *testing.T) {
 	available := BuiltinEmbeddingAvailable()
 	provider := NewBuiltinEmbeddingProvider()
 
-	if available {
-		if provider == nil {
-			t.Fatal("expected non-nil provider when builtin_embeddings tag is active")
-		}
-		if provider.Name() == "" {
-			t.Error("provider name should not be empty")
-		}
-		if provider.Model() == "" {
-			t.Error("provider model should not be empty")
-		}
-	} else {
-		if provider != nil {
-			t.Fatal("expected nil provider without builtin_embeddings tag")
-		}
+	if !available {
+		t.Fatal("expected builtin embeddings to be available when builtin_embeddings tag is active")
+	}
+	if provider == nil {
+		t.Fatal("expected non-nil provider when builtin_embeddings tag is active")
+	}
+	if provider.Name() == "" {
+		t.Error("provider name should not be empty")
+	}
+	if provider.Model() == "" {
+		t.Error("provider model should not be empty")
 	}
 }
 

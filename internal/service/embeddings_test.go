@@ -210,3 +210,79 @@ func TestEmbeddings_RebuildIndexesRepopulatesDeletedEmbeddings(t *testing.T) {
 		t.Fatalf("GetEmbedding summary after rebuild: %v", err)
 	}
 }
+
+func TestEmbeddings_RememberSkipsZeroMagnitudeVectors(t *testing.T) {
+	candidate := &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Subject:          "oov subject",
+		Body:             "oov body",
+		TightDescription: "oov tight description",
+	}
+	provider := staticEmbeddingProvider{
+		model: "zero-model",
+		vectors: map[string][]float32{
+			buildMemoryEmbeddingText(candidate): {0, 0},
+		},
+	}
+	svc, repo := testServiceAndRepoWithEmbeddingProvider(t, provider)
+	ctx := context.Background()
+
+	memory, err := svc.Remember(ctx, candidate)
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+
+	if _, err := repo.GetEmbedding(ctx, memory.ID, "memory", provider.Model()); err == nil {
+		t.Fatal("expected zero-magnitude embedding to be skipped")
+	}
+}
+
+func TestEmbeddings_RebuildFullDeletesZeroMagnitudeVectors(t *testing.T) {
+	candidate := &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Subject:          "persisted subject",
+		Body:             "persisted body",
+		TightDescription: "persisted tight description",
+	}
+	text := buildMemoryEmbeddingText(candidate)
+	provider := staticEmbeddingProvider{
+		model: "rebuild-zero-model",
+		vectors: map[string][]float32{
+			text: {1, 0},
+		},
+	}
+	svc, repo := testServiceAndRepoWithEmbeddingProvider(t, provider)
+	ctx := context.Background()
+
+	memory, err := svc.Remember(ctx, candidate)
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+	if _, err := repo.GetEmbedding(ctx, memory.ID, "memory", provider.Model()); err != nil {
+		t.Fatalf("expected initial embedding: %v", err)
+	}
+
+	provider.vectors[text] = []float32{0, 0}
+	svc.embeddingProvider = provider
+
+	if _, err := svc.RunJob(ctx, "rebuild_indexes_full"); err != nil {
+		t.Fatalf("RunJob rebuild_indexes_full: %v", err)
+	}
+	if _, err := repo.GetEmbedding(ctx, memory.ID, "memory", provider.Model()); err == nil {
+		t.Fatal("expected rebuild_indexes_full to delete zero-magnitude embeddings")
+	}
+}
+
+func TestBuildQueryEmbedding_SkipsZeroMagnitudeVectors(t *testing.T) {
+	provider := staticEmbeddingProvider{
+		model: "query-zero-model",
+		vectors: map[string][]float32{
+			"all oov query": {0, 0},
+		},
+	}
+	svc, _ := testServiceAndRepoWithEmbeddingProvider(t, provider)
+
+	if vec := svc.buildQueryEmbedding(context.Background(), "all oov query"); vec != nil {
+		t.Fatalf("expected nil query embedding for zero-magnitude vector, got %#v", vec)
+	}
+}

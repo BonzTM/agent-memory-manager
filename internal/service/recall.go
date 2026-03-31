@@ -804,7 +804,7 @@ func (s *AMMService) buildQueryEmbedding(ctx context.Context, query string) []fl
 		return nil
 	}
 	vectors, err := s.embeddingProvider.Embed(ctx, []string{query})
-	if err != nil || len(vectors) == 0 || len(vectors[0]) == 0 {
+	if err != nil || len(vectors) == 0 || len(vectors[0]) == 0 || !embeddingHasMagnitude(vectors[0]) {
 		return nil
 	}
 	return vectors[0]

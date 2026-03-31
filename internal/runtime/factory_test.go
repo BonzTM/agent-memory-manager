@@ -13,6 +13,7 @@ import (
 func TestBuildEmbeddingProvider_DefaultOff(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Embeddings.Enabled = false
+	cfg.Embeddings.ExplicitlyDisabled = true
 	provider := buildEmbeddingProvider(cfg)
 	if provider != nil {
 		t.Fatalf("expected nil embedding provider when disabled, got %#v", provider)
@@ -20,6 +21,10 @@ func TestBuildEmbeddingProvider_DefaultOff(t *testing.T) {
 }
 
 func TestBuildEmbeddingProvider_EnabledUsesNoop(t *testing.T) {
+	if service.BuiltinEmbeddingAvailable() {
+		t.Skip("noop embedding provider path is unavailable when builtin embeddings are compiled in")
+	}
+
 	cfg := DefaultConfig()
 	cfg.Embeddings.Enabled = true
 	cfg.Embeddings.Provider = "local-noop"
@@ -34,6 +39,23 @@ func TestBuildEmbeddingProvider_EnabledUsesNoop(t *testing.T) {
 	}
 	if provider.Model() != "test-model" {
 		t.Fatalf("expected provider model test-model, got %q", provider.Model())
+	}
+}
+
+func TestBuildEmbeddingProvider_DefaultsToBuiltinWhenAvailable(t *testing.T) {
+	if !service.BuiltinEmbeddingAvailable() {
+		t.Skip("builtin embedding provider is only available with builtin_embeddings tag")
+	}
+
+	cfg := DefaultConfig()
+	cfg.Embeddings.Enabled = false
+
+	provider := buildEmbeddingProvider(cfg)
+	if provider == nil {
+		t.Fatal("expected builtin embedding provider")
+	}
+	if provider.Name() != "builtin-glove" {
+		t.Fatalf("expected builtin-glove provider, got %q", provider.Name())
 	}
 }
 
