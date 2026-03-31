@@ -74,6 +74,13 @@ jobs:
     name: Docker Image
     runs-on: ubuntu-latest
     needs: build
+    strategy:
+      matrix:
+        include:
+          - tag_suffix: ""
+            go_build_tags: ""
+          - tag_suffix: "-builtin-embeddings"
+            go_build_tags: "builtin_embeddings"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -100,7 +107,9 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: VERSION=${{ env.SHORT_SHA }}
+          build-args: |
+            VERSION=${{ env.SHORT_SHA }}
+            GO_BUILD_TAGS=${{ matrix.go_build_tags }}
           tags: |
-            ghcr.io/bonztm/agent-memory-manager:${{ env.SHORT_SHA }}
-            ghcr.io/bonztm/agent-memory-manager:edge
+            ghcr.io/bonztm/agent-memory-manager:${{ env.SHORT_SHA }}${{ matrix.tag_suffix }}
+            ghcr.io/bonztm/agent-memory-manager:edge${{ matrix.tag_suffix }}

@@ -150,8 +150,13 @@ func TestNewService_SQLiteWiresConfiguredProvidersAndBatchSizes(t *testing.T) {
 	if got := runtimeInterfaceType(t, impl, "intelligence"); got != "service.LLMIntelligenceProvider" && got != "*service.LLMIntelligenceProvider" {
 		t.Fatalf("expected LLM intelligence provider type, got %q", got)
 	}
-	if got := runtimeInterfaceType(t, impl, "embeddingProvider"); got != "service.NoopEmbeddingProvider" && got != "*service.NoopEmbeddingProvider" {
-		t.Fatalf("expected noop embedding provider type, got %q", got)
+	gotEmbeddingType := runtimeInterfaceType(t, impl, "embeddingProvider")
+	if service.BuiltinEmbeddingAvailable() {
+		if gotEmbeddingType != "service.BuiltinEmbeddingProvider" && gotEmbeddingType != "*service.BuiltinEmbeddingProvider" {
+			t.Fatalf("expected builtin embedding provider type, got %q", gotEmbeddingType)
+		}
+	} else if gotEmbeddingType != "service.NoopEmbeddingProvider" && gotEmbeddingType != "*service.NoopEmbeddingProvider" {
+		t.Fatalf("expected noop embedding provider type, got %q", gotEmbeddingType)
 	}
 
 	if got := runtimeIntField(t, impl, "reprocessBatchSize"); got != 71 {

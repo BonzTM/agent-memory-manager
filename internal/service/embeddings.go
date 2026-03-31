@@ -45,6 +45,15 @@ func buildEpisodeEmbeddingText(episode *core.Episode) string {
 	return buildEmbeddingText(episode.Title, episode.Summary, episode.TightDescription)
 }
 
+func embeddingHasMagnitude(vec []float32) bool {
+	for _, value := range vec {
+		if value != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *AMMService) upsertEmbeddingBestEffort(ctx context.Context, objectID, objectKind, text string) {
 	if s.embeddingProvider == nil {
 		return
@@ -60,6 +69,12 @@ func (s *AMMService) upsertEmbeddingBestEffort(ctx context.Context, objectID, ob
 	}
 	if len(vectors) != 1 {
 		slog.Warn("embedding provider returned unexpected vector count", "objectKind", objectKind, "objectID", objectID, "provider", s.embeddingProvider.Name(), "model", s.embeddingProvider.Model(), "expected", 1, "actual", len(vectors))
+		return
+	}
+	if !embeddingHasMagnitude(vectors[0]) {
+		if err := s.repo.DeleteEmbeddings(ctx, objectID, objectKind, s.embeddingProvider.Model()); err != nil {
+			slog.Warn("embedding delete failed after empty vector", "objectKind", objectKind, "objectID", objectID, "model", s.embeddingProvider.Model(), "error", err)
+		}
 		return
 	}
 
@@ -198,6 +213,12 @@ func (s *AMMService) embedBatch(ctx context.Context, items []embeddable, kind, m
 		}
 		now := time.Now().UTC()
 		for j := range ids {
+			if !embeddingHasMagnitude(vectors[j]) {
+				if err := s.repo.DeleteEmbeddings(ctx, ids[j], kind, model); err != nil {
+					slog.Warn("embedding delete failed after empty batch vector", "kind", kind, "id", ids[j], "model", model, "error", err)
+				}
+				continue
+			}
 			record := &core.EmbeddingRecord{ObjectID: ids[j], ObjectKind: kind, Model: model, Vector: vectors[j], CreatedAt: now}
 			if err := s.repo.UpsertEmbedding(ctx, record); err != nil {
 				slog.Warn("embedding persist failed", "kind", kind, "id", ids[j], "error", err)
