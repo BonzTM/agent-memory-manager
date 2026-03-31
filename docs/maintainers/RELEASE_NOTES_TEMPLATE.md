@@ -4,9 +4,21 @@
 
 {{RELEASE_SUMMARY}}
 
-## Highlights
+## Fixed
 
-{{HIGHLIGHTS}}
+{{FIXED_ITEMS}}
+
+## Added
+
+{{ADDED_ITEMS}}
+
+## Changed
+
+{{CHANGED_ITEMS}}
+
+## Admin/Operations
+
+{{ADMIN_ITEMS}}
 
 ## Deployment and Distribution
 
