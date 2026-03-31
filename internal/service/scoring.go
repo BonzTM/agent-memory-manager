@@ -10,10 +10,18 @@ import (
 
 // Recall scoring uses a weighted blend of positive signals plus a repetition
 // penalty. Semantic similarity is optional and only participates when both query
-// and candidate embeddings are available. Positive weights are dynamically
-// renormalized to keep total positive contribution stable when optional signals
-// are missing.
-const scoringNormalizationFactor = 0.75 / 0.57
+// and candidate embeddings are available. When semantic is absent, positive
+// weights are scaled UP to redistribute semantic's share, keeping total
+// contribution stable.
+//
+// Weight budget (raw, before normalization):
+//   Lexical 0.14, ExtractionQuality 0.08, Semantic 0.18, EntityOverlap 0.20,
+//   ScopeFit 0.10, Recency 0.08, Importance 0.07, TemporalValidity 0.05,
+//   StructuralProximity 0.05, SourceTrust 0.05  → total 1.00
+//
+// Recency and freshness were collapsed into a single signal. The former
+// freshness weight (0.04) was redistributed: +0.02 to entity overlap
+// (0.18→0.20) and +0.02 to recency (0.06→0.08).
 
 // ScoringWeights stores the weighted blend used for recall scoring.
 type ScoringWeights struct {
@@ -26,32 +34,34 @@ type ScoringWeights struct {
 	Importance          float64 `json:"importance"`
 	TemporalValidity    float64 `json:"temporal_validity"`
 	StructuralProximity float64 `json:"structural_proximity"`
-	Freshness           float64 `json:"freshness"`
 	SourceTrust         float64 `json:"source_trust"`
 	KindBoost           float64 `json:"kind_boost"`
 	RepetitionPenalty   float64 `json:"repetition_penalty"`
 }
 
-// DefaultScoringWeights returns the historical hardcoded scoring constants.
+// DefaultScoringWeights returns the scoring constants.
+// Raw weights sum to 1.0 (including Semantic). No pre-normalization factor
+// needed — renormalization at score time handles the optional semantic signal.
 func DefaultScoringWeights() ScoringWeights {
 	return ScoringWeights{
-		Lexical:             0.14 * scoringNormalizationFactor,
-		ExtractionQuality:   0.08 * scoringNormalizationFactor,
-		Semantic:            0.18 * scoringNormalizationFactor,
-		EntityOverlap:       0.18 * scoringNormalizationFactor,
-		ScopeFit:            0.10 * scoringNormalizationFactor,
-		Recency:             0.06 * scoringNormalizationFactor,
-		Importance:          0.07 * scoringNormalizationFactor,
-		TemporalValidity:    0.05 * scoringNormalizationFactor,
-		StructuralProximity: 0.05 * scoringNormalizationFactor,
-		Freshness:           0.04 * scoringNormalizationFactor,
-		SourceTrust:         0.05 * scoringNormalizationFactor,
+		Lexical:             0.14,
+		ExtractionQuality:   0.08,
+		Semantic:            0.18,
+		EntityOverlap:       0.20,
+		ScopeFit:            0.10,
+		Recency:             0.08,
+		Importance:          0.07,
+		TemporalValidity:    0.05,
+		StructuralProximity: 0.05,
+		SourceTrust:         0.05,
 		KindBoost:           0.15,
 		RepetitionPenalty:   0.10,
 	}
 }
 
 // recencyHalfLifeDays controls exponential decay for the recency signal.
+// Recency uses the most recent meaningful timestamp (creation, observation,
+// update, or last confirmation).
 const recencyHalfLifeDays = 14.0
 
 // ScoringContext carries the query-time signals needed to rank recall
@@ -80,7 +90,6 @@ type SignalBreakdown struct {
 	Importance          float64 `json:"importance"`
 	TemporalValidity    float64 `json:"temporal_validity"`
 	StructuralProximity float64 `json:"structural_proximity"`
-	Freshness           float64 `json:"freshness"`
 	SourceTrust         float64 `json:"source_trust"`
 	RepetitionPenalty   float64 `json:"repetition_penalty"`
 	FinalScore          float64 `json:"final_score"`
@@ -97,7 +106,6 @@ func (b SignalBreakdown) ToMap() map[string]float64 {
 		"importance":           b.Importance,
 		"temporal_validity":    b.TemporalValidity,
 		"structural_proximity": b.StructuralProximity,
-		"freshness":            b.Freshness,
 		"source_trust":         b.SourceTrust,
 		"repetition_penalty":   b.RepetitionPenalty,
 		"final_score":          b.FinalScore,
@@ -153,14 +161,16 @@ func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 	b.Importance = signalImportance(item)
 	b.TemporalValidity = signalTemporalValidity(item, sctx.Now)
 	b.StructuralProximity = signalStructuralProximity(item)
-	b.Freshness = signalFreshness(item, sctx.Now)
 	b.SourceTrust = signalSourceTrust(item)
 	b.RepetitionPenalty = signalRepetitionPenalty(item, sctx)
 
-	totalPositive := weights.Lexical + weights.ExtractionQuality + weights.EntityOverlap + weights.ScopeFit + weights.Recency + weights.Importance + weights.TemporalValidity + weights.StructuralProximity + weights.Freshness + weights.SourceTrust
+	// totalPositive includes Semantic weight — it represents the full budget.
+	// When semantic is absent, activePositive < totalPositive, so renorm > 1.0,
+	// redistributing the missing semantic share across present signals.
+	totalPositive := weights.Lexical + weights.ExtractionQuality + weights.Semantic + weights.EntityOverlap + weights.ScopeFit + weights.Recency + weights.Importance + weights.TemporalValidity + weights.StructuralProximity + weights.SourceTrust
 	activePositive := totalPositive
-	if semanticSignalAvailable(item, sctx) {
-		activePositive += weights.Semantic
+	if !semanticSignalAvailable(item, sctx) {
+		activePositive -= weights.Semantic
 	}
 
 	renorm := 1.0
@@ -177,7 +187,6 @@ func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 		weights.Importance*b.Importance+
 		weights.TemporalValidity*b.TemporalValidity+
 		weights.StructuralProximity*b.StructuralProximity+
-		weights.Freshness*b.Freshness+
 		weights.SourceTrust*b.SourceTrust) - weights.RepetitionPenalty*b.RepetitionPenalty
 
 	kindMultiplier := signalKindBoost(item.Kind)
@@ -390,16 +399,6 @@ func signalStructuralProximity(item ScoringCandidate) float64 {
 	return 0.5
 }
 
-// signalFreshness uses the same half-life decay based on last touch.
-func signalFreshness(item ScoringCandidate, now time.Time) float64 {
-	ts := lastTouchTimestamp(item)
-	days := now.Sub(ts).Hours() / 24.0
-	if days < 0 {
-		days = 0
-	}
-	return math.Exp(-0.693 * days / recencyHalfLifeDays)
-}
-
 func signalSourceTrust(item ScoringCandidate) float64 {
 	source := strings.ToLower(strings.TrimSpace(item.SourceSystem))
 	switch {
@@ -439,15 +438,6 @@ func mostRecentTimestamp(item ScoringCandidate) time.Time {
 	if item.ObservedAt != nil && item.ObservedAt.After(best) {
 		best = *item.ObservedAt
 	}
-	if item.LastConfirmedAt != nil && item.LastConfirmedAt.After(best) {
-		best = *item.LastConfirmedAt
-	}
-	return best
-}
-
-// lastTouchTimestamp returns the last update/confirmation time for freshness.
-func lastTouchTimestamp(item ScoringCandidate) time.Time {
-	best := item.UpdatedAt
 	if item.LastConfirmedAt != nil && item.LastConfirmedAt.After(best) {
 		best = *item.LastConfirmedAt
 	}

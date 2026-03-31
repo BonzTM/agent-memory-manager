@@ -26,6 +26,7 @@ const (
 	defaultMaxExpandDepth                  = 1
 	defaultMinConfidenceForCreation        = 0.5
 	defaultMinImportanceForCreation        = 0.3
+	defaultEntityHubThreshold              = 10
 )
 
 // Config holds all runtime configuration for amm.
@@ -104,10 +105,11 @@ type StorageConfig struct {
 
 // RetrievalConfig tunes recall behavior.
 type RetrievalConfig struct {
-	DefaultLimit   int  `json:"default_limit"`
-	AmbientLimit   int  `json:"ambient_limit"`
-	EnableSemantic bool `json:"enable_semantic"`
-	EnableExplain  bool `json:"enable_explain"`
+	DefaultLimit       int   `json:"default_limit"`
+	AmbientLimit       int   `json:"ambient_limit"`
+	EnableSemantic     bool  `json:"enable_semantic"`
+	EnableExplain      bool  `json:"enable_explain"`
+	EntityHubThreshold int64 `json:"entity_hub_threshold"` // link count before hub dampening kicks in (default 10)
 }
 
 // PrivacyConfig sets default privacy behavior.
@@ -136,10 +138,11 @@ func DefaultConfig() Config {
 			PostgresDSN: "",
 		},
 		Retrieval: RetrievalConfig{
-			DefaultLimit:   10,
-			AmbientLimit:   5,
-			EnableSemantic: false,
-			EnableExplain:  true,
+			DefaultLimit:       10,
+			AmbientLimit:       5,
+			EnableSemantic:     false,
+			EnableExplain:      true,
+			EntityHubThreshold: defaultEntityHubThreshold,
 		},
 		Privacy: PrivacyConfig{
 			DefaultPrivacy: "private",
@@ -274,6 +277,10 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 		case "retrieval.enable_explain":
 			if b, err := strconv.ParseBool(val); err == nil {
 				cfg.Retrieval.EnableExplain = b
+			}
+		case "retrieval.entity_hub_threshold":
+			if n, err := strconv.ParseInt(val, 10, 64); err == nil && n > 0 {
+				cfg.Retrieval.EntityHubThreshold = n
 			}
 		case "privacy.default_privacy":
 			cfg.Privacy.DefaultPrivacy = val
@@ -597,6 +604,11 @@ func ConfigFromEnv(base Config) Config {
 	}
 	if v := os.Getenv("AMM_EMBEDDINGS_MODEL"); v != "" {
 		base.Embeddings.Model = v
+	}
+	if v := os.Getenv("AMM_ENTITY_HUB_THRESHOLD"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			base.Retrieval.EntityHubThreshold = n
+		}
 	}
 	if v := os.Getenv("AMM_MIN_CONFIDENCE_FOR_CREATION"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {

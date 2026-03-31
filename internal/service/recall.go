@@ -16,10 +16,11 @@ import (
 const (
 	minRecallScore            = 0.2
 	minRecallMemoryConfidence = 0.35
-	minHybridHistoryScore     = 0.55
+	minHybridHistoryScore     = 0.48
 	embeddingOnlyFTSPosition  = 999
-	entityHubThreshold        = 10
+	defaultEntityHubThreshold = 10
 	entityHubDampeningFloor   = 0.05
+	recallDedupThreshold      = 0.85
 )
 
 type recallFilterOptions struct {
@@ -271,7 +272,7 @@ func (s *AMMService) applyEntityHubDampening(ctx context.Context, weights map[st
 
 		linkCount := linkCounts[entityID]
 
-		if linkCount < entityHubThreshold {
+		if linkCount < s.entityHubThreshold {
 			continue
 		}
 
@@ -284,7 +285,7 @@ func (s *AMMService) applyEntityHubDampening(ctx context.Context, weights map[st
 			haveTotalMemories = true
 		}
 
-		dampening := entityHubDampening(totalMemories, linkCount)
+		dampening := entityHubDampening(totalMemories, linkCount, s.entityHubThreshold)
 		weights[term] = weight * dampening
 	}
 }
@@ -302,8 +303,8 @@ func (s *AMMService) resolveEntityIDForTerm(ctx context.Context, term string) st
 	return ""
 }
 
-func entityHubDampening(totalMemories, linkCount int64) float64 {
-	if linkCount < entityHubThreshold || totalMemories <= 1 {
+func entityHubDampening(totalMemories, linkCount, hubThreshold int64) float64 {
+	if linkCount < hubThreshold || totalMemories <= 1 {
 		return 1.0
 	}
 
@@ -955,7 +956,8 @@ func embeddingObjectKind(candidateKind string) string {
 	return candidateKind
 }
 
-// scoreAndConvert scores candidates and converts to RecallItems sorted by score.
+// scoreAndConvert scores candidates, deduplicates near-identical items, and
+// converts to RecallItems sorted by score.
 func scoreAndConvert(candidates []ScoringCandidate, sctx ScoringContext, opts recallFilterOptions, explain bool) []core.RecallItem {
 	type scored struct {
 		candidate ScoringCandidate
@@ -973,8 +975,22 @@ func scoreAndConvert(candidates []ScoringCandidate, sctx ScoringContext, opts re
 	sort.Slice(scoredItems, func(i, j int) bool {
 		return scoredItems[i].breakdown.FinalScore > scoredItems[j].breakdown.FinalScore
 	})
-	items := make([]core.RecallItem, 0, len(scoredItems))
+
+	// Deduplicate near-identical items. Walk in score order; for each item,
+	// compare its embedding to already-accepted items. If cosine similarity
+	// exceeds the threshold, skip the lower-scored duplicate.
+	deduped := make([]scored, 0, len(scoredItems))
+	accepted := make([]ScoringCandidate, 0, len(scoredItems))
 	for _, si := range scoredItems {
+		if isDuplicateRecallCandidate(si.candidate, accepted) {
+			continue
+		}
+		deduped = append(deduped, si)
+		accepted = append(accepted, si.candidate)
+	}
+
+	items := make([]core.RecallItem, 0, len(deduped))
+	for _, si := range deduped {
 		c := si.candidate
 		item := core.RecallItem{
 			ID:               c.ID,
@@ -997,6 +1013,57 @@ func scoreAndConvert(candidates []ScoringCandidate, sctx ScoringContext, opts re
 		items = append(items, item)
 	}
 	return items
+}
+
+// isDuplicateRecallCandidate checks if candidate is a near-duplicate of any
+// already-accepted item using embedding cosine similarity (>0.85) with a
+// Jaccard text fallback when embeddings are unavailable.
+func isDuplicateRecallCandidate(candidate ScoringCandidate, accepted []ScoringCandidate) bool {
+	for _, existing := range accepted {
+		if candidate.Kind != existing.Kind {
+			continue
+		}
+		// Try embedding-based dedup first.
+		if cos, ok := cosineSimilarity(candidate.Embedding, existing.Embedding); ok {
+			if cos >= recallDedupThreshold {
+				return true
+			}
+			continue
+		}
+		// Fallback: Jaccard similarity on body tokens.
+		if jaccardBodySimilarity(candidate.Body, existing.Body) >= recallDedupThreshold {
+			return true
+		}
+	}
+	return false
+}
+
+// jaccardBodySimilarity computes Jaccard index over whitespace-tokenized bodies.
+func jaccardBodySimilarity(a, b string) float64 {
+	if a == "" || b == "" {
+		return 0
+	}
+	tokensA := strings.Fields(strings.ToLower(a))
+	tokensB := strings.Fields(strings.ToLower(b))
+	setA := make(map[string]bool, len(tokensA))
+	for _, t := range tokensA {
+		setA[t] = true
+	}
+	setB := make(map[string]bool, len(tokensB))
+	for _, t := range tokensB {
+		setB[t] = true
+	}
+	intersection := 0
+	for t := range setA {
+		if setB[t] {
+			intersection++
+		}
+	}
+	union := len(setA) + len(setB) - intersection
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
 }
 
 func defaultRecallFilterOptions() recallFilterOptions {

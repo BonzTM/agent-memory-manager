@@ -610,8 +610,19 @@ func TestRecallInternalModes_EmbeddingAndVisibilityBranches(t *testing.T) {
 	}
 
 	query := "recall-embedding-query"
-	vector := []float32{1, 0, 0}
-	provider := staticEmbeddingProvider{model: "recall-internal-model", vectors: map[string][]float32{query: vector}}
+	queryVector := []float32{1, 0, 0}
+	// Use distinct per-item vectors so recall-side dedup doesn't collapse them.
+	// Vectors must have cosine similarity < 0.85 with each other to avoid dedup.
+	vectors := map[string][]float32{
+		query:           queryVector,
+		visible.ID:      {1.0, 0.0, 0.0},
+		shared.ID:       {0.0, 1.0, 0.0},
+		hidden.ID:       {0.0, 0.0, 1.0},
+		otherProject.ID: {0.7, 0.7, 0.0},
+		summary.ID:      {0.0, 0.7, 0.7},
+		episode.ID:      {0.7, 0.0, 0.7},
+	}
+	provider := staticEmbeddingProvider{model: "recall-internal-model", vectors: vectors}
 	svc.embeddingProvider = provider
 
 	for _, rec := range []struct {
@@ -625,7 +636,8 @@ func TestRecallInternalModes_EmbeddingAndVisibilityBranches(t *testing.T) {
 		{summary.ID, "summary"},
 		{episode.ID, "episode"},
 	} {
-		if err := repo.UpsertEmbedding(ctx, &core.EmbeddingRecord{ObjectID: rec.id, ObjectKind: rec.kind, Model: provider.Model(), Vector: vector, CreatedAt: now}); err != nil {
+		vec := vectors[rec.id]
+		if err := repo.UpsertEmbedding(ctx, &core.EmbeddingRecord{ObjectID: rec.id, ObjectKind: rec.kind, Model: provider.Model(), Vector: vec, CreatedAt: now}); err != nil {
 			t.Fatalf("upsert embedding %s/%s: %v", rec.kind, rec.id, err)
 		}
 	}
@@ -633,7 +645,7 @@ func TestRecallInternalModes_EmbeddingAndVisibilityBranches(t *testing.T) {
 	weights := DefaultScoringWeights()
 	sctx := ScoringContext{
 		Query:              query,
-		QueryEmbedding:     vector,
+		QueryEmbedding:     queryVector,
 		QueryEntities:      []string{"recallnode"},
 		QueryEntityWeights: map[string]float64{"recallnode": 1.0},
 		ProjectID:          "proj_recall",

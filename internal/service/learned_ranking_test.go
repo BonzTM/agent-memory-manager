@@ -13,17 +13,16 @@ import (
 func TestLearnedRanking_DefaultWeights(t *testing.T) {
 	weights := DefaultScoringWeights()
 	want := ScoringWeights{
-		Lexical:             0.14 * scoringNormalizationFactor,
-		ExtractionQuality:   0.08 * scoringNormalizationFactor,
-		Semantic:            0.18 * scoringNormalizationFactor,
-		EntityOverlap:       0.18 * scoringNormalizationFactor,
-		ScopeFit:            0.10 * scoringNormalizationFactor,
-		Recency:             0.06 * scoringNormalizationFactor,
-		Importance:          0.07 * scoringNormalizationFactor,
-		TemporalValidity:    0.05 * scoringNormalizationFactor,
-		StructuralProximity: 0.05 * scoringNormalizationFactor,
-		Freshness:           0.04 * scoringNormalizationFactor,
-		SourceTrust:         0.05 * scoringNormalizationFactor,
+		Lexical:             0.14,
+		ExtractionQuality:   0.08,
+		Semantic:            0.18,
+		EntityOverlap:       0.20,
+		ScopeFit:            0.10,
+		Recency:             0.08,
+		Importance:          0.07,
+		TemporalValidity:    0.05,
+		StructuralProximity: 0.05,
+		SourceTrust:         0.05,
 		RepetitionPenalty:   0.10,
 	}
 
@@ -37,7 +36,6 @@ func TestLearnedRanking_DefaultWeights(t *testing.T) {
 		"importance":           {weights.Importance, want.Importance},
 		"temporal_validity":    {weights.TemporalValidity, want.TemporalValidity},
 		"structural_proximity": {weights.StructuralProximity, want.StructuralProximity},
-		"freshness":            {weights.Freshness, want.Freshness},
 		"source_trust":         {weights.SourceTrust, want.SourceTrust},
 		"repetition_penalty":   {weights.RepetitionPenalty, want.RepetitionPenalty},
 	} {

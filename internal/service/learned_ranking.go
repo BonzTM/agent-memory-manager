@@ -31,12 +31,15 @@ func (s *AMMService) UpdateRankingWeights(ctx context.Context) (int, error) {
 
 	now := time.Now().UTC()
 	aggs := map[string]*signalAggregate{
+		"lexical":              {},
 		"extraction_quality":   {},
+		"entity_overlap":       {},
+		"scope_fit":            {},
 		"recency":              {},
 		"importance":           {},
 		"temporal_validity":    {},
 		"structural_proximity": {},
-		"freshness":            {},
+		"source_trust":         {},
 	}
 
 	totalShown := 0.0
@@ -83,12 +86,15 @@ func (s *AMMService) UpdateRankingWeights(ctx context.Context) (int, error) {
 
 		candidate := MemoryToCandidate(*memory, 0)
 		signals := map[string]float64{
+			"lexical":              signalLexical(candidate.FTSPosition),
 			"extraction_quality":   signalExtractionQuality(candidate),
+			"entity_overlap":       0.5, // default — no query context at learning time
+			"scope_fit":            0.5, // default — no query context at learning time
 			"recency":              signalRecency(candidate, now),
 			"importance":           signalImportance(candidate),
 			"temporal_validity":    signalTemporalValidity(candidate, now),
 			"structural_proximity": signalStructuralProximity(candidate),
-			"freshness":            signalFreshness(candidate, now),
+			"source_trust":         signalSourceTrust(candidate),
 		}
 		for key, value := range signals {
 			agg := aggs[key]
@@ -106,12 +112,15 @@ func (s *AMMService) UpdateRankingWeights(ctx context.Context) (int, error) {
 
 	prior := s.getScoringWeights()
 	updated := prior
+	updated.Lexical = bayesianSignalWeight(prior.Lexical, aggs["lexical"], totalShown)
 	updated.ExtractionQuality = bayesianSignalWeight(prior.ExtractionQuality, aggs["extraction_quality"], totalShown)
+	updated.EntityOverlap = bayesianSignalWeight(prior.EntityOverlap, aggs["entity_overlap"], totalShown)
+	updated.ScopeFit = bayesianSignalWeight(prior.ScopeFit, aggs["scope_fit"], totalShown)
 	updated.Recency = bayesianSignalWeight(prior.Recency, aggs["recency"], totalShown)
 	updated.Importance = bayesianSignalWeight(prior.Importance, aggs["importance"], totalShown)
 	updated.TemporalValidity = bayesianSignalWeight(prior.TemporalValidity, aggs["temporal_validity"], totalShown)
 	updated.StructuralProximity = bayesianSignalWeight(prior.StructuralProximity, aggs["structural_proximity"], totalShown)
-	updated.Freshness = bayesianSignalWeight(prior.Freshness, aggs["freshness"], totalShown)
+	updated.SourceTrust = bayesianSignalWeight(prior.SourceTrust, aggs["source_trust"], totalShown)
 
 	normalizePositiveWeights(&updated, totalPositiveWeight(DefaultScoringWeights()))
 
@@ -143,7 +152,7 @@ func bayesianSignalWeight(prior float64, agg *signalAggregate, dataCount float64
 }
 
 func totalPositiveWeight(w ScoringWeights) float64 {
-	return w.Lexical + w.ExtractionQuality + w.Semantic + w.EntityOverlap + w.ScopeFit + w.Recency + w.Importance + w.TemporalValidity + w.StructuralProximity + w.Freshness
+	return w.Lexical + w.ExtractionQuality + w.Semantic + w.EntityOverlap + w.ScopeFit + w.Recency + w.Importance + w.TemporalValidity + w.StructuralProximity + w.SourceTrust
 }
 
 func normalizePositiveWeights(w *ScoringWeights, target float64) {
@@ -162,7 +171,7 @@ func normalizePositiveWeights(w *ScoringWeights, target float64) {
 		w.Importance = defaults.Importance
 		w.TemporalValidity = defaults.TemporalValidity
 		w.StructuralProximity = defaults.StructuralProximity
-		w.Freshness = defaults.Freshness
+		w.SourceTrust = defaults.SourceTrust
 		return
 	}
 	scale := target / current
@@ -175,12 +184,24 @@ func normalizePositiveWeights(w *ScoringWeights, target float64) {
 	w.Importance *= scale
 	w.TemporalValidity *= scale
 	w.StructuralProximity *= scale
-	w.Freshness *= scale
+	w.SourceTrust *= scale
 }
 
 func countWeightDiffs(a, b ScoringWeights) int {
 	count := 0
-	for _, pair := range [][2]float64{{a.Lexical, b.Lexical}, {a.ExtractionQuality, b.ExtractionQuality}, {a.Semantic, b.Semantic}, {a.EntityOverlap, b.EntityOverlap}, {a.ScopeFit, b.ScopeFit}, {a.Recency, b.Recency}, {a.Importance, b.Importance}, {a.TemporalValidity, b.TemporalValidity}, {a.StructuralProximity, b.StructuralProximity}, {a.Freshness, b.Freshness}, {a.RepetitionPenalty, b.RepetitionPenalty}} {
+	for _, pair := range [][2]float64{
+		{a.Lexical, b.Lexical},
+		{a.ExtractionQuality, b.ExtractionQuality},
+		{a.Semantic, b.Semantic},
+		{a.EntityOverlap, b.EntityOverlap},
+		{a.ScopeFit, b.ScopeFit},
+		{a.Recency, b.Recency},
+		{a.Importance, b.Importance},
+		{a.TemporalValidity, b.TemporalValidity},
+		{a.StructuralProximity, b.StructuralProximity},
+		{a.SourceTrust, b.SourceTrust},
+		{a.RepetitionPenalty, b.RepetitionPenalty},
+	} {
 		if math.Abs(pair[0]-pair[1]) > 1e-9 {
 			count++
 		}

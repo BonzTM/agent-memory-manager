@@ -112,6 +112,14 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	}
 
 	summarizer := buildSummarizer(cfg)
+
+	// When no LLM summarizer is configured and the operator hasn't explicitly
+	// set a confidence gate, lower the minimum to 0.40 so heuristic-extracted
+	// memories (confidence 0.45) can still be created.
+	if summarizer == nil && cfg.IntakeQuality.MinConfidenceForCreation == defaultMinConfidenceForCreation {
+		cfg.IntakeQuality.MinConfidenceForCreation = 0.40
+	}
+
 	svc := service.New(repo, storagePath, summarizer, buildEmbeddingProvider(cfg))
 	svc.SetIntelligenceProvider(buildIntelligenceProvider(cfg, summarizer))
 	svc.SetReprocessBatchSize(cfg.Summarizer.ReprocessBatchSize)
@@ -127,6 +135,7 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	svc.SetEscalationDeterministicMaxChars(cfg.Compression.EscalationDeterministicMaxChars)
 	svc.SetMinConfidenceForCreation(cfg.IntakeQuality.MinConfidenceForCreation)
 	svc.SetMinImportanceForCreation(cfg.IntakeQuality.MinImportanceForCreation)
+	svc.SetEntityHubThreshold(cfg.Retrieval.EntityHubThreshold)
 	svc.SetMaxExpandDepth(cfg.MaxExpandDepth)
 
 	return svc, cleanup, nil

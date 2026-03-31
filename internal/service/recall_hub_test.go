@@ -77,7 +77,7 @@ func TestExpandQueryEntities_BelowThresholdHasNoDampening(t *testing.T) {
 		t.Fatalf("insert entity: %v", err)
 	}
 
-	if err := seedActiveMemoriesWithEntityLinks(ctx, repo, now, 30, map[string]int{entity.ID: entityHubThreshold - 1}); err != nil {
+	if err := seedActiveMemoriesWithEntityLinks(ctx, repo, now, 30, map[string]int{entity.ID: defaultEntityHubThreshold - 1}); err != nil {
 		t.Fatalf("seed memories and links: %v", err)
 	}
 

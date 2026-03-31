@@ -728,7 +728,6 @@ func TestRecall_WithExplain_IncludesSignals(t *testing.T) {
 		"importance",
 		"temporal_validity",
 		"structural_proximity",
-		"freshness",
 		"source_trust",
 		"repetition_penalty",
 		"final_score",
