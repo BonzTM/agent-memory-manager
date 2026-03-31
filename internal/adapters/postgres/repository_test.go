@@ -420,6 +420,24 @@ func TestRepositoryMemories(t *testing.T) {
 		t.Fatalf("expected 2 memories in batch, got %d", len(batch))
 	}
 
+	// ListMemoriesBySourceEventIDs only returns active memories, so test
+	// before we supersede mem_1 below.
+	bySource, err := repo.ListMemoriesBySourceEventIDs(ctx, []string{"evt_mem_1"})
+	if err != nil {
+		t.Fatalf("ListMemoriesBySourceEventIDs: %v", err)
+	}
+	if len(bySource) != 1 || bySource[0].ID != "mem_1" {
+		t.Fatalf("unexpected source lookup result: %#v", bySource)
+	}
+
+	emptyBySource, err := repo.ListMemoriesBySourceEventIDs(ctx, []string{})
+	if err != nil {
+		t.Fatalf("ListMemoriesBySourceEventIDs empty: %v", err)
+	}
+	if len(emptyBySource) != 0 {
+		t.Fatalf("expected empty result for empty source lookup, got %#v", emptyBySource)
+	}
+
 	m1.Body = "postgres memory alpha updated"
 	m1.UpdatedAt = now.Add(3 * time.Second)
 	m1.Status = core.MemoryStatusSuperseded
@@ -432,6 +450,16 @@ func TestRepositoryMemories(t *testing.T) {
 	}
 	if upd.Body != "postgres memory alpha updated" || upd.Status != core.MemoryStatusSuperseded {
 		t.Fatalf("updated memory mismatch: %+v", upd)
+	}
+
+	// After superseding mem_1, source lookup for evt_mem_1 should return
+	// empty — the function only returns active memories.
+	bySourceAfter, err := repo.ListMemoriesBySourceEventIDs(ctx, []string{"evt_mem_1"})
+	if err != nil {
+		t.Fatalf("ListMemoriesBySourceEventIDs after supersede: %v", err)
+	}
+	if len(bySourceAfter) != 0 {
+		t.Fatalf("expected empty result after superseding mem_1, got %#v", bySourceAfter)
 	}
 
 	listed, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Scope: core.ScopeProject, ProjectID: "proj_mem", Status: core.MemoryStatusActive, Limit: 10})
@@ -456,22 +484,6 @@ func TestRepositoryMemories(t *testing.T) {
 	}
 	if len(fuzzy) != 1 || fuzzy[0].ID != "mem_1" {
 		t.Fatalf("unexpected SearchMemoriesFuzzy result: %#v", fuzzy)
-	}
-
-	bySource, err := repo.ListMemoriesBySourceEventIDs(ctx, []string{"evt_mem_1"})
-	if err != nil {
-		t.Fatalf("ListMemoriesBySourceEventIDs: %v", err)
-	}
-	if len(bySource) != 1 || bySource[0].ID != "mem_1" {
-		t.Fatalf("unexpected source lookup result: %#v", bySource)
-	}
-
-	emptyBySource, err := repo.ListMemoriesBySourceEventIDs(ctx, []string{})
-	if err != nil {
-		t.Fatalf("ListMemoriesBySourceEventIDs empty: %v", err)
-	}
-	if len(emptyBySource) != 0 {
-		t.Fatalf("expected empty result for empty source lookup, got %#v", emptyBySource)
 	}
 
 	activeCount, err := repo.CountActiveMemories(ctx)
