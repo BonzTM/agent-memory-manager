@@ -13,6 +13,7 @@ amm 1.0.1 is a patch release focused on recall quality, scoring accuracy, and me
 - **Intake quality gates**: configurable minimum confidence and importance thresholds for memory creation, with EventQuality classification wiring to filter candidates sourced from ephemeral or noise events.
 - **Heuristic fallback floor**: when no LLM is available, the confidence gate automatically lowers to 0.40 so heuristic-extracted memories (confidence 0.45) can still be created, preventing total memory blackout.
 - **Configurable entity hub dampening**: the threshold for hub dampening is now tunable via `AMM_ENTITY_HUB_THRESHOLD`, allowing operators to adjust as their knowledge graph grows.
+- **Fixed `ResetDerived` FK violation**: claims are now deleted before memories in both PostgreSQL and SQLite adapters, fixing a foreign key constraint violation (`claims_memory_id_fkey`) that prevented derived data purges.
 
 ## Deployment and Distribution
 

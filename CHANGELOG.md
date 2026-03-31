@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `ResetDerived` FK ordering: claims are now deleted before memories in both PostgreSQL and SQLite adapters, fixing a foreign key constraint violation (`claims_memory_id_fkey`) that prevented derived data purges.
 - PostgreSQL array scanning for repository reads (nil slice handling).
 - PostgreSQL nil slice writes causing query errors.
 - Hermes plugin metadata serialization: metadata is now sent as `map[string]string` with JSON string serialization.

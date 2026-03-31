@@ -2576,13 +2576,13 @@ func (r *Repository) ResetDerived(ctx context.Context) (*core.ResetDerivedResult
 	if out.MemoryEntitiesDeleted, err = execDeleteCount(ctx, tx, "memory_entities"); err != nil {
 		return nil, wrapErr("reset derived", err)
 	}
+	if out.ClaimsDeleted, err = execDeleteCount(ctx, tx, "claims"); err != nil {
+		return nil, wrapErr("reset derived", err)
+	}
 	if out.SummaryEdgesDeleted, err = execDeleteCount(ctx, tx, "summary_edges"); err != nil {
 		return nil, wrapErr("reset derived", err)
 	}
 	if out.MemoriesDeleted, err = execDeleteCount(ctx, tx, "memories"); err != nil {
-		return nil, wrapErr("reset derived", err)
-	}
-	if out.ClaimsDeleted, err = execDeleteCount(ctx, tx, "claims"); err != nil {
 		return nil, wrapErr("reset derived", err)
 	}
 	if out.EntitiesDeleted, err = execDeleteCount(ctx, tx, "entities"); err != nil {

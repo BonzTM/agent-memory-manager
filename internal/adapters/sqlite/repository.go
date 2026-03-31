@@ -2874,14 +2874,14 @@ func (r *SQLiteRepository) ResetDerived(ctx context.Context) (*core.ResetDerived
 	if result.MemoryEntitiesDeleted, err = execDeleteCount(ctx, tx, "memory_entities"); err != nil {
 		return nil, fmt.Errorf("delete memory_entities: %w", err)
 	}
+	if result.ClaimsDeleted, err = execDeleteCount(ctx, tx, "claims"); err != nil {
+		return nil, fmt.Errorf("delete claims: %w", err)
+	}
 	if result.SummaryEdgesDeleted, err = execDeleteCount(ctx, tx, "summary_edges"); err != nil {
 		return nil, fmt.Errorf("delete summary_edges: %w", err)
 	}
 	if result.MemoriesDeleted, err = execDeleteCount(ctx, tx, "memories"); err != nil {
 		return nil, fmt.Errorf("delete memories: %w", err)
-	}
-	if result.ClaimsDeleted, err = execDeleteCount(ctx, tx, "claims"); err != nil {
-		return nil, fmt.Errorf("delete claims: %w", err)
 	}
 	if result.EntitiesDeleted, err = execDeleteCount(ctx, tx, "entities"); err != nil {
 		return nil, fmt.Errorf("delete entities: %w", err)
