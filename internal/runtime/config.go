@@ -24,21 +24,30 @@ const (
 	defaultCrossProjectSimilarity          = 0.7
 	defaultEscalationDeterministicMaxChars = 2048
 	defaultMaxExpandDepth                  = 1
+	defaultMinConfidenceForCreation        = 0.5
+	defaultMinImportanceForCreation        = 0.3
 )
 
 // Config holds all runtime configuration for amm.
 // Matches blueprint section 15.
 type Config struct {
-	Storage        StorageConfig     `json:"storage"`
-	Retrieval      RetrievalConfig   `json:"retrieval"`
-	Privacy        PrivacyConfig     `json:"privacy"`
-	Maintenance    MaintenanceConfig `json:"maintenance"`
-	Compression    CompressionConfig `json:"compression"`
-	Summarizer     SummarizerConfig  `json:"summarizer"`
-	Embeddings     EmbeddingsConfig  `json:"embeddings"`
-	MaxExpandDepth int               `json:"max_expand_depth"`
-	HTTP           HTTPConfig        `json:"http"`
-	API            APIConfig         `json:"api"`
+	Storage        StorageConfig        `json:"storage"`
+	Retrieval      RetrievalConfig      `json:"retrieval"`
+	Privacy        PrivacyConfig        `json:"privacy"`
+	Maintenance    MaintenanceConfig    `json:"maintenance"`
+	Compression    CompressionConfig    `json:"compression"`
+	Summarizer     SummarizerConfig     `json:"summarizer"`
+	Embeddings     EmbeddingsConfig     `json:"embeddings"`
+	IntakeQuality  IntakeQualityConfig  `json:"intake_quality"`
+	MaxExpandDepth int                  `json:"max_expand_depth"`
+	HTTP           HTTPConfig           `json:"http"`
+	API            APIConfig            `json:"api"`
+}
+
+// IntakeQualityConfig controls minimum thresholds for memory creation.
+type IntakeQualityConfig struct {
+	MinConfidenceForCreation float64 `json:"min_confidence_for_creation"`
+	MinImportanceForCreation float64 `json:"min_importance_for_creation"`
 }
 
 // APIConfig controls remote API client mode. When URL is set, CLI and MCP
@@ -78,11 +87,12 @@ type SummarizerConfig struct {
 }
 
 type EmbeddingsConfig struct {
-	Enabled  bool   `json:"enabled"`
-	Provider string `json:"provider"`
-	Endpoint string `json:"endpoint"`
-	APIKey   string `json:"api_key"`
-	Model    string `json:"model"`
+	Enabled            bool   `json:"enabled"`
+	ExplicitlyDisabled bool   `json:"-"` // true when operator set AMM_EMBEDDINGS_ENABLED=false
+	Provider           string `json:"provider"`
+	Endpoint           string `json:"endpoint"`
+	APIKey             string `json:"api_key"`
+	Model              string `json:"model"`
 }
 
 // StorageConfig controls where amm persists data.
@@ -158,6 +168,10 @@ func DefaultConfig() Config {
 		Embeddings: EmbeddingsConfig{
 			Enabled: false,
 		},
+		IntakeQuality: IntakeQualityConfig{
+			MinConfidenceForCreation: defaultMinConfidenceForCreation,
+			MinImportanceForCreation: defaultMinImportanceForCreation,
+		},
 		MaxExpandDepth: defaultMaxExpandDepth,
 		HTTP: HTTPConfig{
 			Addr: ":8080",
@@ -185,6 +199,20 @@ func LoadConfig(path string) (Config, error) {
 		// JSON format.
 		if err := json.Unmarshal(data, &cfg); err != nil {
 			return DefaultConfig(), err
+		}
+		// Detect explicit "enabled": false in embeddings section.
+		if !cfg.Embeddings.Enabled {
+			var raw map[string]json.RawMessage
+			if json.Unmarshal(data, &raw) == nil {
+				if embRaw, ok := raw["embeddings"]; ok {
+					var embFields map[string]json.RawMessage
+					if json.Unmarshal(embRaw, &embFields) == nil {
+						if _, hasEnabled := embFields["enabled"]; hasEnabled {
+							cfg.Embeddings.ExplicitlyDisabled = true
+						}
+					}
+				}
+			}
 		}
 		applyConfigDefaults(&cfg)
 		return cfg, nil
@@ -324,6 +352,9 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 		case "embeddings.enabled":
 			if b, err := strconv.ParseBool(val); err == nil {
 				cfg.Embeddings.Enabled = b
+				if !b {
+					cfg.Embeddings.ExplicitlyDisabled = true
+				}
 			}
 		case "embeddings.provider":
 			cfg.Embeddings.Provider = val
@@ -333,6 +364,14 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			cfg.Embeddings.APIKey = val
 		case "embeddings.model":
 			cfg.Embeddings.Model = val
+		case "intake_quality.min_confidence_for_creation":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				cfg.IntakeQuality.MinConfidenceForCreation = f
+			}
+		case "intake_quality.min_importance_for_creation":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				cfg.IntakeQuality.MinImportanceForCreation = f
+			}
 		case "max_expand_depth":
 			if n, err := strconv.Atoi(val); err == nil && n >= -1 {
 				cfg.MaxExpandDepth = n
@@ -404,6 +443,8 @@ func LoadConfigWithEnv() Config {
 //	AMM_EMBEDDINGS_ENDPOINT -> Embeddings.Endpoint
 //	AMM_EMBEDDINGS_API_KEY -> Embeddings.APIKey
 //	AMM_EMBEDDINGS_MODEL -> Embeddings.Model
+//	AMM_MIN_CONFIDENCE_FOR_CREATION -> IntakeQuality.MinConfidenceForCreation (0.0-1.0)
+//	AMM_MIN_IMPORTANCE_FOR_CREATION -> IntakeQuality.MinImportanceForCreation (0.0-1.0)
 //	AMM_HTTP_ADDR -> HTTP.Addr
 //	AMM_HTTP_CORS_ORIGINS -> HTTP.CORSOrigins
 //	AMM_API_URL -> API.URL
@@ -540,6 +581,9 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_EMBEDDINGS_ENABLED"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			base.Embeddings.Enabled = b
+			if !b {
+				base.Embeddings.ExplicitlyDisabled = true
+			}
 		}
 	}
 	if v := os.Getenv("AMM_EMBEDDINGS_PROVIDER"); v != "" {
@@ -553,6 +597,16 @@ func ConfigFromEnv(base Config) Config {
 	}
 	if v := os.Getenv("AMM_EMBEDDINGS_MODEL"); v != "" {
 		base.Embeddings.Model = v
+	}
+	if v := os.Getenv("AMM_MIN_CONFIDENCE_FOR_CREATION"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
+			base.IntakeQuality.MinConfidenceForCreation = f
+		}
+	}
+	if v := os.Getenv("AMM_MIN_IMPORTANCE_FOR_CREATION"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
+			base.IntakeQuality.MinImportanceForCreation = f
+		}
 	}
 	if v := os.Getenv("AMM_MAX_EXPAND_DEPTH"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= -1 {

@@ -51,10 +51,11 @@ func TestRegisterProject_NilGuard(t *testing.T) {
 
 func TestReflectFallbackWhenExtractorErrors(t *testing.T) {
 	svc, _ := testServiceAndRepoWithSummarizer(t, NewLLMSummarizer("http://127.0.0.1:1", "test-key", "test-model"))
+	svc.SetMinConfidenceForCreation(0) // Allow heuristic fallback candidates (confidence 0.45)
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	if _, err := svc.IngestEvent(ctx, &core.Event{Kind: "message_user", SourceSystem: "test", PrivacyLevel: core.PrivacyPrivate, Content: "I prefer concise responses", OccurredAt: now}); err != nil {
+	if _, err := svc.IngestEvent(ctx, &core.Event{Kind: "message_user", SourceSystem: "test", PrivacyLevel: core.PrivacyPrivate, Content: "I prefer concise responses because verbosity requires more context", OccurredAt: now}); err != nil {
 		t.Fatalf("ingest event: %v", err)
 	}
 

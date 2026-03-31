@@ -52,25 +52,28 @@ func (h *HeuristicSummarizer) Summarize(ctx context.Context, text string, maxLen
 }
 
 // ExtractMemoryCandidate applies phrase cues to derive memory candidates from a
-// single event.
+// single event. Requires at least 2 phrase cue matches to reduce false positives
+// from overly common phrases like "uses" or "is a".
 func (h *HeuristicSummarizer) ExtractMemoryCandidate(ctx context.Context, eventContent string) ([]core.MemoryCandidate, error) {
 	_ = ctx
 	contentLower := strings.ToLower(eventContent)
 
-	var matchedType core.MemoryType
+	// Count total cue matches across all groups and track the first matched type.
+	totalMatches := 0
+	var firstMatchedType core.MemoryType
 	for _, cue := range phraseCues {
 		for _, phrase := range cue.phrases {
 			if strings.Contains(contentLower, phrase) {
-				matchedType = cue.memType
-				break
+				totalMatches++
+				if firstMatchedType == "" {
+					firstMatchedType = cue.memType
+				}
+				break // count at most one match per cue group
 			}
-		}
-		if matchedType != "" {
-			break
 		}
 	}
 
-	if matchedType == "" {
+	if totalMatches < 2 {
 		return nil, nil
 	}
 
@@ -80,10 +83,10 @@ func (h *HeuristicSummarizer) ExtractMemoryCandidate(ctx context.Context, eventC
 	}
 
 	candidate := core.MemoryCandidate{
-		Type:             matchedType,
+		Type:             firstMatchedType,
 		Body:             body,
 		TightDescription: extractTightDescription(eventContent, 100),
-		Confidence:       0.6,
+		Confidence:       0.45,
 	}
 
 	return []core.MemoryCandidate{candidate}, nil

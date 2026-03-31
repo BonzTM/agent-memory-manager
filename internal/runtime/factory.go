@@ -38,7 +38,13 @@ func buildIntelligenceProvider(cfg Config, summarizer core.Summarizer) core.Inte
 }
 
 func buildEmbeddingProvider(cfg Config) core.EmbeddingProvider {
-	if !cfg.Embeddings.Enabled {
+	enabled := cfg.Embeddings.Enabled
+	// When compiled with builtin_embeddings, embeddings default to on.
+	// Operators can still disable with AMM_EMBEDDINGS_ENABLED=false.
+	if !enabled && service.BuiltinEmbeddingAvailable() && !cfg.Embeddings.ExplicitlyDisabled {
+		enabled = true
+	}
+	if !enabled {
 		return nil
 	}
 	if cfg.Embeddings.Endpoint != "" {
@@ -47,6 +53,9 @@ func buildEmbeddingProvider(cfg Config) core.EmbeddingProvider {
 			model = "text-embedding-3-small"
 		}
 		return service.NewAPIEmbeddingProvider(cfg.Embeddings.Endpoint, cfg.Embeddings.APIKey, model)
+	}
+	if service.BuiltinEmbeddingAvailable() {
+		return service.NewBuiltinEmbeddingProvider()
 	}
 	return service.NewNoopEmbeddingProvider(cfg.Embeddings.Provider, cfg.Embeddings.Model)
 }
@@ -116,6 +125,8 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	svc.SetEmbeddingBatchSize(cfg.Summarizer.EmbeddingBatchSize)
 	svc.SetCrossProjectSimilarityThreshold(cfg.Summarizer.CrossProjectSimilarityThreshold)
 	svc.SetEscalationDeterministicMaxChars(cfg.Compression.EscalationDeterministicMaxChars)
+	svc.SetMinConfidenceForCreation(cfg.IntakeQuality.MinConfidenceForCreation)
+	svc.SetMinImportanceForCreation(cfg.IntakeQuality.MinImportanceForCreation)
 	svc.SetMaxExpandDepth(cfg.MaxExpandDepth)
 
 	return svc, cleanup, nil

@@ -176,12 +176,15 @@ func testServiceForReprocessWithSummarizer(t *testing.T, summarizer core.Summari
 
 func TestReprocess_SupersedesHeuristicMemories(t *testing.T) {
 	svc, repo := testServiceForReprocess(t)
+	if concreteSvc, ok := svc.(*service.AMMService); ok {
+		concreteSvc.SetMinConfidenceForCreation(0) // Allow heuristic fallback candidates (confidence 0.45)
+	}
 	ctx := context.Background()
 
 	now := time.Now().UTC()
 	for i, content := range []string{
-		"We decided to use SQLite for the persistence layer",
-		"Josh prefers concise commit messages in imperative mood",
+		"We decided to use SQLite because it requires no server setup",
+		"Josh prefers concise commit messages because verbosity requires more review",
 	} {
 		evt := &core.Event{
 			ID:   generateTestID("evt_", i),

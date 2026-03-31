@@ -146,13 +146,14 @@ func TestReflect_FallsBackToSummarizerWhenAnalyzeEventsFails(t *testing.T) {
 	}
 	intel := &reprocessIntelligenceStub{isLLM: true, analyzeErr: errors.New("analysis unavailable"), extractFallback: llm}
 	concreteSvc.SetIntelligenceProvider(intel)
+	concreteSvc.SetMinConfidenceForCreation(0) // Allow heuristic fallback candidates (confidence 0.45)
 
 	now := time.Now().UTC()
 	if err := repo.InsertEvent(ctx, &core.Event{
 		ID:           "evt_reflect_fallback",
 		Kind:         "message_user",
 		SourceSystem: "test",
-		Content:      "Josh uses Kubernetes for AMM deployments",
+		Content:      "Josh decided to use Kubernetes because it supports AMM deployments",
 		PrivacyLevel: core.PrivacyPrivate,
 		OccurredAt:   now,
 		IngestedAt:   now,

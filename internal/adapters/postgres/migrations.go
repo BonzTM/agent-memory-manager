@@ -313,6 +313,34 @@ ALTER TABLE summaries ADD COLUMN depth INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE summaries ADD COLUMN condensed_kind TEXT NOT NULL DEFAULT '';
 `,
 	},
+	{
+		Version:     3,
+		Description: "attempt to enable vector extension for future ANN search",
+		SQL: `
+-- Best-effort: try to enable a vector extension. The embedding_vec column
+-- and HNSW index are NOT created here — they require knowing the embedding
+-- dimension at setup time and should be created via a separate admin command.
+-- This migration only ensures the extension is available for when the operator
+-- explicitly enables ANN search.
+DO $$
+BEGIN
+  BEGIN
+    CREATE EXTENSION IF NOT EXISTS vectors;
+  EXCEPTION WHEN OTHERS THEN
+    BEGIN
+      CREATE EXTENSION IF NOT EXISTS vectorchord;
+    EXCEPTION WHEN OTHERS THEN
+      BEGIN
+        CREATE EXTENSION IF NOT EXISTS vchord;
+      EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'No vector extension available (vectors/vectorchord/vchord). ANN search will use brute-force fallback.';
+      END;
+    END;
+  END;
+END
+$$;
+`,
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

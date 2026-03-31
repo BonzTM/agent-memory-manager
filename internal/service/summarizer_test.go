@@ -38,7 +38,8 @@ func TestHeuristicSummarizer_ExtractMemoryCandidate(t *testing.T) {
 	h := &HeuristicSummarizer{}
 	ctx := context.Background()
 
-	event := "We decided to use PostgreSQL for this service."
+	// Two cue matches across groups: "decided" (decision) + "requires" (fact)
+	event := "We decided to use PostgreSQL because it requires less maintenance."
 	candidates, err := h.ExtractMemoryCandidate(ctx, event)
 	if err != nil {
 		t.Fatalf("ExtractMemoryCandidate returned error: %v", err)
@@ -59,5 +60,52 @@ func TestHeuristicSummarizer_ExtractMemoryCandidate(t *testing.T) {
 	}
 	if got.Confidence <= 0 {
 		t.Fatalf("expected positive confidence, got %f", got.Confidence)
+	}
+}
+
+func TestHeuristicSummarizer_SingleCueNoExtraction(t *testing.T) {
+	h := &HeuristicSummarizer{}
+	ctx := context.Background()
+
+	// Only one cue match: "uses" alone should NOT extract (requires 2+)
+	event := "The service uses a database connection pool."
+	candidates, err := h.ExtractMemoryCandidate(ctx, event)
+	if err != nil {
+		t.Fatalf("ExtractMemoryCandidate returned error: %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("expected no candidates for single cue match, got %d", len(candidates))
+	}
+}
+
+func TestHeuristicSummarizer_TwoCuesCrossGroupExtracts(t *testing.T) {
+	h := &HeuristicSummarizer{}
+	ctx := context.Background()
+
+	// Two cues from different groups: "prefer" (preference) + "decided" (decision)
+	event := "I prefer Go and we decided to use it for the backend."
+	candidates, err := h.ExtractMemoryCandidate(ctx, event)
+	if err != nil {
+		t.Fatalf("ExtractMemoryCandidate returned error: %v", err)
+	}
+	if len(candidates) == 0 {
+		t.Fatal("expected candidate for two cue matches across groups")
+	}
+}
+
+func TestHeuristicSummarizer_ConfidenceIs045(t *testing.T) {
+	h := &HeuristicSummarizer{}
+	ctx := context.Background()
+
+	event := "We decided to always use structured logging going with slog."
+	candidates, err := h.ExtractMemoryCandidate(ctx, event)
+	if err != nil {
+		t.Fatalf("ExtractMemoryCandidate returned error: %v", err)
+	}
+	if len(candidates) == 0 {
+		t.Fatal("expected at least one candidate")
+	}
+	if candidates[0].Confidence != 0.45 {
+		t.Fatalf("expected heuristic confidence 0.45, got %f", candidates[0].Confidence)
 	}
 }

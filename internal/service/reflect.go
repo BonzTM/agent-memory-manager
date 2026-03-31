@@ -66,6 +66,7 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 			candidates := make([]core.MemoryCandidate, 0)
 			analysisEntities := make([]core.EntityCandidate, 0)
 			analysisRelationships := make([]core.RelationshipCandidate, 0)
+			var eventQuality map[int]string
 			usedAnalysis := false
 
 			if s.intelligence != nil && s.intelligence.IsLLMBacked() {
@@ -85,6 +86,7 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 						candidates = append(candidates, analysis.Memories...)
 						analysisEntities = append(analysisEntities, analysis.Entities...)
 						analysisRelationships = append(analysisRelationships, analysis.Relationships...)
+						eventQuality = analysis.EventQuality
 					}
 					usedAnalysis = len(candidates) > 0
 					if len(candidates) == 0 {
@@ -116,6 +118,22 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 			for _, rawCandidate := range candidates {
 				candidate, ok := prepareMemoryCandidate(rawCandidate)
 				if !ok {
+					continue
+				}
+				if !passesIntakeQualityGates(candidate, s.minConfidenceForCreation, s.minImportanceForCreation) {
+					slog.Debug("candidate rejected by intake quality gate",
+						"confidence", candidate.Confidence,
+						"min_confidence", s.minConfidenceForCreation,
+						"min_importance", s.minImportanceForCreation,
+						"type", candidate.Type,
+					)
+					continue
+				}
+				if candidateSourcedFromLowQualityEvents(candidate, eventQuality) {
+					slog.Debug("candidate rejected: all source events classified as ephemeral or noise",
+						"source_events", candidate.SourceEventNums,
+						"type", candidate.Type,
+					)
 					continue
 				}
 				candidateEvents, ok := resolveCandidateEvents(batch, candidate.SourceEventNums)

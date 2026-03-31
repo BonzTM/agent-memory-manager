@@ -39,9 +39,9 @@ func TestCoverageGapTextHelpers(t *testing.T) {
 	ctx := context.Background()
 	if got, _ := hs.Summarize(ctx, "hello", 2); got != "he" { t.Fatalf("summarize short: %q", got) }
 	if got, _ := hs.Summarize(ctx, "hello", 0); got != "" { t.Fatalf("summarize zero: %q", got) }
-	if c, _ := hs.ExtractMemoryCandidate(ctx, "i prefer go"); len(c) != 1 || c[0].Type != core.MemoryTypePreference { t.Fatalf("extract candidate: %+v", c) }
+	if c, _ := hs.ExtractMemoryCandidate(ctx, "i prefer go because it requires minimal deps"); len(c) != 1 || c[0].Type != core.MemoryTypePreference { t.Fatalf("extract candidate: %+v", c) }
 	if c, _ := hs.ExtractMemoryCandidate(ctx, "no cue here"); c != nil { t.Fatalf("expected no candidate, got %+v", c) }
-	if b, _ := hs.ExtractMemoryCandidateBatch(ctx, []string{"i prefer go", "i want tests"}); len(b) != 2 || b[1].SourceEventNums[0] != 2 { t.Fatalf("batch candidates: %+v", b) }
+	if b, _ := hs.ExtractMemoryCandidateBatch(ctx, []string{"i prefer go because it requires less code", "i want tests that requires a real database"}); len(b) != 2 || b[1].SourceEventNums[0] != 2 { t.Fatalf("batch candidates: %+v", b) }
 	if got, ok := sanitizeTightDescription(" tool_input: x "); ok || got == "" { t.Fatalf("sanitize tight desc blocked: %q %v", got, ok) }
 	if got, ok := sanitizeTightDescription(strings.Repeat("a", maxTightDescLen+1)); ok || got == "" { t.Fatalf("sanitize tight desc long: %q %v", got, ok) }
 	if got, ok := sanitizeTightDescription("keep this"); !ok || got != "keep this" { t.Fatalf("sanitize tight desc keep: %q %v", got, ok) }

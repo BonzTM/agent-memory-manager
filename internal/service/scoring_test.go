@@ -42,7 +42,7 @@ func TestExtractEntities(t *testing.T) {
 		{
 			name:    "multiple entities",
 			input:   "Alice and Bob discussed Redis",
-			wantAny: []string{"Alice", "Bob", "Redis"},
+			wantAny: []string{"Alice", "Bob", "redis"},
 		},
 		{
 			name:  "empty input",
@@ -57,6 +57,26 @@ func TestExtractEntities(t *testing.T) {
 			name:    "punctuation stripped",
 			input:   "Ask Alice, then Bob.",
 			wantAny: []string{"Alice", "Bob"},
+		},
+		{
+			name:    "lowercase known tech entity redis",
+			input:   "We use redis for caching",
+			wantAny: []string{"redis"},
+		},
+		{
+			name:    "lowercase known tech entity kubernetes",
+			input:   "Deploy to kubernetes with helm",
+			wantAny: []string{"kubernetes"},
+		},
+		{
+			name:    "lowercase known tech entity postgres",
+			input:   "The data is stored in postgres",
+			wantAny: []string{"postgres"},
+		},
+		{
+			name:     "common lowercase words not extracted as entities",
+			input:    "the user wants to test this feature",
+			wantNone: []string{"user", "test", "feature"},
 		},
 	}
 

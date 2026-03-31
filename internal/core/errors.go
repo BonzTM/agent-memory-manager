@@ -10,4 +10,5 @@ var (
 	ErrInvalidMode               = errors.New("invalid recall mode")
 	ErrInvalidStatus             = errors.New("invalid memory status")
 	ErrExpansionRecursionBlocked = errors.New("expansion recursion blocked: delegation depth exceeds maximum")
+	ErrNotImplemented            = errors.New("not implemented")
 )

@@ -8,6 +8,28 @@ import (
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
+// knownTechEntities is the set of well-known technology names that commonly
+// appear in lowercase but should still be extracted as entities.
+var knownTechEntities = map[string]bool{
+	"redis": true, "postgres": true, "postgresql": true, "mysql": true,
+	"sqlite": true, "mongodb": true, "dynamodb": true, "elasticsearch": true,
+	"kubernetes": true, "docker": true, "nginx": true, "apache": true,
+	"grafana": true, "prometheus": true, "terraform": true, "ansible": true,
+	"jenkins": true, "circleci": true, "traefik": true, "consul": true,
+	"vault": true, "nomad": true, "kafka": true, "rabbitmq": true,
+	"nats": true, "grpc": true, "graphql": true, "webpack": true,
+	"vite": true, "eslint": true, "prettier": true, "jest": true,
+	"mocha": true, "pytest": true, "golang": true, "rustc": true,
+	"llvm": true, "clang": true, "gcc": true, "cmake": true,
+	"bazel": true, "gradle": true, "maven": true, "npm": true,
+	"yarn": true, "pnpm": true, "pip": true, "cargo": true,
+	"helm": true, "istio": true, "envoy": true, "etcd": true,
+	"zookeeper": true, "minio": true, "ceph": true, "clickhouse": true,
+	"cockroachdb": true, "timescaledb": true, "influxdb": true,
+	"supabase": true, "firebase": true, "vercel": true, "netlify": true,
+	"datadog": true, "sentry": true, "pagerduty": true, "opsgenie": true,
+}
+
 // commonCapitalized is the set of English words that are frequently capitalized
 // at sentence starts but are not entity names.
 var commonCapitalized = map[string]bool{
@@ -21,18 +43,30 @@ var commonCapitalized = map[string]bool{
 	"Should": true, "Can": true, "May": true, "Might": true,
 }
 
-// ExtractEntities extracts likely entity names from text using simple
-// capitalized-token heuristics.
+// ExtractEntities extracts likely entity names from text using capitalized-token
+// heuristics and a known technology entity list for lowercase matching.
 func ExtractEntities(text string) []string {
 	words := strings.Fields(text)
 
 	seen := make(map[string]bool)
 	var results []string
 
-	// Walk through words, collecting runs of capitalized tokens.
+	// Walk through words, collecting runs of capitalized tokens
+	// and matching known lowercase tech entities.
 	i := 0
 	for i < len(words) {
 		word := stripPunctuation(words[i])
+
+		// Check for known lowercase tech entities.
+		if wordLower := strings.ToLower(word); knownTechEntities[wordLower] {
+			if !seen[wordLower] {
+				seen[wordLower] = true
+				results = append(results, wordLower)
+			}
+			i++
+			continue
+		}
+
 		if !isCapitalized(word) || commonCapitalized[word] {
 			i++
 			continue

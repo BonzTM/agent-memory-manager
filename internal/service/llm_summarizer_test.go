@@ -145,7 +145,7 @@ func TestLLMSummarizer_ExtractFallsBackOnBadJSON(t *testing.T) {
 	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
 	ctx := context.Background()
 
-	result, err := s.ExtractMemoryCandidate(ctx, "I prefer tabs over spaces")
+	result, err := s.ExtractMemoryCandidate(ctx, "I prefer tabs over spaces because Go requires gofmt formatting")
 	if err != nil {
 		t.Fatalf("expected fallback instead of error: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestLLMSummarizer_ExtractFallsBackOnHTTPError(t *testing.T) {
 	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
 	ctx := context.Background()
 
-	result, err := s.ExtractMemoryCandidate(ctx, "We decided to use Go for this project")
+	result, err := s.ExtractMemoryCandidate(ctx, "We decided to use Go because it requires minimal dependencies")
 	if err != nil {
 		t.Fatalf("expected fallback instead of error: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestLLMSummarizer_ExtractBatchFallsBackOnError(t *testing.T) {
 	ctx := context.Background()
 
 	result, err := s.ExtractMemoryCandidateBatch(ctx, []string{
-		"We decided to use Go for this project",
+		"We decided to use Go because it requires minimal dependencies",
 	})
 	if err != nil {
 		t.Fatalf("expected fallback, got error: %v", err)
@@ -405,5 +405,13 @@ func TestLLMSummarizer_ExtractBatchTruncatesLongEvents(t *testing.T) {
 	}
 	if strings.Contains(receivedPrompt, strings.Repeat("a", maxEventContentLen+1)) {
 		t.Fatal("expected prompt to exclude content beyond maxEventContentLen")
+	}
+}
+
+func TestLLMSummarizer_ExtractPromptIncludesDurabilityCheck(t *testing.T) {
+	prompt := buildMemoryExtractionPrompt([]string{"test event content"}, false)
+	want := "will this still matter in 30 days"
+	if !strings.Contains(prompt, want) {
+		t.Fatalf("expected extraction prompt to contain durability check %q", want)
 	}
 }

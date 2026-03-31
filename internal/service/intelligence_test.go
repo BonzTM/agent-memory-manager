@@ -20,7 +20,7 @@ func TestHeuristicIntelligence_AnalyzeEvents(t *testing.T) {
 	h := NewHeuristicIntelligenceProvider()
 
 	result, err := h.AnalyzeEvents(context.Background(), []core.EventContent{
-		{Index: 1, Content: "We decided to use SQLite for this service."},
+		{Index: 1, Content: "We decided to use SQLite because it requires no server."},
 		{Index: 2, Content: "OpenAI API integration is next."},
 	})
 	if err != nil {
@@ -210,7 +210,7 @@ func TestLLMIntelligence_FallsBackToHeuristic(t *testing.T) {
 	defer srv.Close()
 
 	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model"), nil)
-	result, err := provider.AnalyzeEvents(context.Background(), []core.EventContent{{Index: 1, Content: "We decided to use Go for this project."}})
+	result, err := provider.AnalyzeEvents(context.Background(), []core.EventContent{{Index: 1, Content: "We decided to use Go because it requires minimal dependencies."}})
 	if err != nil {
 		t.Fatalf("expected fallback instead of error: %v", err)
 	}

@@ -2740,6 +2740,10 @@ func (r *SQLiteRepository) DeleteEmbeddings(ctx context.Context, objectID, objec
 	return err
 }
 
+func (r *SQLiteRepository) SearchNearestEmbeddings(_ context.Context, _ []float32, _, _ string, _ int) ([]string, error) {
+	return nil, core.ErrNotImplemented
+}
+
 func (r *SQLiteRepository) ListUnembeddedMemories(ctx context.Context, model string, limit int) ([]core.Memory, error) {
 	query := "SELECT " + memoryCols + ` FROM memories m
 		WHERE m.status = 'active'

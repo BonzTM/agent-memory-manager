@@ -168,6 +168,12 @@ type Repository interface {
 	GetEmbeddingsBatch(ctx context.Context, objectIDs []string, objectKind, model string) (map[string]EmbeddingRecord, error)
 	ListEmbeddingsByKind(ctx context.Context, objectKind, model string, limit int) ([]EmbeddingRecord, error)
 	DeleteEmbeddings(ctx context.Context, objectID, objectKind, model string) error
+	// SearchNearestEmbeddings returns the objectIDs of the nearest embeddings
+	// to the query vector, ordered by similarity (highest first). Backends that
+	// support ANN indexing (e.g. pgvecto.rs) should use it; others may fall
+	// back to brute-force cosine. Returns (nil, core.ErrNotImplemented) if the
+	// backend does not support vector search.
+	SearchNearestEmbeddings(ctx context.Context, queryVector []float32, objectKind, model string, limit int) ([]string, error)
 	ListUnembeddedMemories(ctx context.Context, model string, limit int) ([]Memory, error)
 	ListUnembeddedSummaries(ctx context.Context, model string, limit int) ([]Summary, error)
 	ListUnembeddedEpisodes(ctx context.Context, model string, limit int) ([]Episode, error)

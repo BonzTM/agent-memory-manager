@@ -75,6 +75,9 @@ deploy/
 # Build all three binaries
 go build ./cmd/amm ./cmd/amm-mcp ./cmd/amm-http
 
+# Build with built-in ONNX embedding support (optional)
+go build -tags builtin_embeddings ./cmd/amm ./cmd/amm-mcp ./cmd/amm-http
+
 # Run targeted package tests (prefer this first)
 go test ./internal/core/... ./internal/runtime/... -count=1
 
@@ -84,6 +87,7 @@ go test ./... -count=1
 # Initialize a fresh database
 AMM_DB_PATH=~/.amm/amm.db ./amm init
 ```
+
 
 ## Go Conventions
 
@@ -102,7 +106,6 @@ See `golang/AGENTS.md` in the coding-handbook for the full fast-path contract.
 - Prefer small, reviewable changes over broad cleanup.
 - Do not invent product requirements or architectural decisions — surface the gap and wait.
 - If verification fails, fix the issue or report clearly. Do not claim the task is complete.
-- Implementation must stay aligned with `refined-spec.md` and `technical-blueprint.md`. Flag divergence.
 - Go behavior changes need test coverage or explicit exemption.
 - Schema changes must go through the migration systems in both `internal/adapters/sqlite/migrations.go` and `internal/adapters/postgres/migrations.go`.
 

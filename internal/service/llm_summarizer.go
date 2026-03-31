@@ -109,6 +109,7 @@ func buildMemoryExtractionPrompt(eventContents []string, includeSourceEvents boo
 	var rules strings.Builder
 	rules.WriteString("- Only extract things worth remembering across sessions\n")
 	rules.WriteString("- Be highly selective: at most 10-15% of events should yield a memory. A batch of 20 events should produce 2-3 memories at most, not 10. Fewer high-quality memories is always better than many thin ones.\n")
+	rules.WriteString("- Durability check: before creating each memory, ask yourself — will this still matter in 30 days? If the answer is 'only if something goes wrong' or 'only during this task', skip it.\n")
 	rules.WriteString("- Skip transient task state, status noise, and greetings\n")
 	rules.WriteString("- Tool output (grep results, build logs, test output) should NOT be stored verbatim. Instead, if tool output reveals a durable lesson, constraint, or gotcha, extract the LESSON — not the output itself. For example: a build failure showing 'missing import' becomes a constraint memory about dependency requirements, not a copy of the build log.\n")
 	rules.WriteString("- Skip file trees, package inventories, raw config/env var dumps, diffs, logs, and JSON blobs\n")

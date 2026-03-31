@@ -341,3 +341,103 @@ func TestConfigFromEnv_OverridesReviewRoutingConfig(t *testing.T) {
 		t.Fatalf("expected review model override, got %q", cfg.Summarizer.ReviewModel)
 	}
 }
+
+func TestDefaultConfig_IntakeQualityDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.IntakeQuality.MinConfidenceForCreation != defaultMinConfidenceForCreation {
+		t.Fatalf("expected default min confidence %v, got %v", defaultMinConfidenceForCreation, cfg.IntakeQuality.MinConfidenceForCreation)
+	}
+	if cfg.IntakeQuality.MinImportanceForCreation != defaultMinImportanceForCreation {
+		t.Fatalf("expected default min importance %v, got %v", defaultMinImportanceForCreation, cfg.IntakeQuality.MinImportanceForCreation)
+	}
+}
+
+func TestConfigFromEnv_OverridesIntakeQuality(t *testing.T) {
+	t.Setenv("AMM_MIN_CONFIDENCE_FOR_CREATION", "0.7")
+	t.Setenv("AMM_MIN_IMPORTANCE_FOR_CREATION", "0.4")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.IntakeQuality.MinConfidenceForCreation != 0.7 {
+		t.Fatalf("expected min confidence 0.7, got %v", cfg.IntakeQuality.MinConfidenceForCreation)
+	}
+	if cfg.IntakeQuality.MinImportanceForCreation != 0.4 {
+		t.Fatalf("expected min importance 0.4, got %v", cfg.IntakeQuality.MinImportanceForCreation)
+	}
+}
+
+func TestConfigFromEnv_IgnoresInvalidIntakeQuality(t *testing.T) {
+	t.Setenv("AMM_MIN_CONFIDENCE_FOR_CREATION", "1.5")
+	t.Setenv("AMM_MIN_IMPORTANCE_FOR_CREATION", "-0.1")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.IntakeQuality.MinConfidenceForCreation != defaultMinConfidenceForCreation {
+		t.Fatalf("expected out-of-range confidence to keep default %v, got %v", defaultMinConfidenceForCreation, cfg.IntakeQuality.MinConfidenceForCreation)
+	}
+	if cfg.IntakeQuality.MinImportanceForCreation != defaultMinImportanceForCreation {
+		t.Fatalf("expected out-of-range importance to keep default %v, got %v", defaultMinImportanceForCreation, cfg.IntakeQuality.MinImportanceForCreation)
+	}
+}
+
+func TestConfigFromEnv_ZeroIntakeQualityDisablesGates(t *testing.T) {
+	t.Setenv("AMM_MIN_CONFIDENCE_FOR_CREATION", "0")
+	t.Setenv("AMM_MIN_IMPORTANCE_FOR_CREATION", "0")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.IntakeQuality.MinConfidenceForCreation != 0 {
+		t.Fatalf("expected zero confidence threshold, got %v", cfg.IntakeQuality.MinConfidenceForCreation)
+	}
+	if cfg.IntakeQuality.MinImportanceForCreation != 0 {
+		t.Fatalf("expected zero importance threshold, got %v", cfg.IntakeQuality.MinImportanceForCreation)
+	}
+}
+
+func TestConfigFromEnv_ExplicitlyDisabledEmbeddings(t *testing.T) {
+	t.Setenv("AMM_EMBEDDINGS_ENABLED", "false")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.Embeddings.Enabled {
+		t.Fatal("expected embeddings disabled")
+	}
+	if !cfg.Embeddings.ExplicitlyDisabled {
+		t.Fatal("expected ExplicitlyDisabled=true when operator sets AMM_EMBEDDINGS_ENABLED=false")
+	}
+}
+
+func TestConfigFromEnv_EnabledEmbeddingsNotExplicitlyDisabled(t *testing.T) {
+	t.Setenv("AMM_EMBEDDINGS_ENABLED", "true")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if !cfg.Embeddings.Enabled {
+		t.Fatal("expected embeddings enabled")
+	}
+	if cfg.Embeddings.ExplicitlyDisabled {
+		t.Fatal("expected ExplicitlyDisabled=false when operator sets AMM_EMBEDDINGS_ENABLED=true")
+	}
+}
+
+func TestDefaultConfig_EmbeddingsNotExplicitlyDisabled(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Embeddings.ExplicitlyDisabled {
+		t.Fatal("default config should not have ExplicitlyDisabled=true")
+	}
+}
+
+func TestLoadConfig_ParsesIntakeQualityToml(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	content := []byte("[intake_quality]\nmin_confidence_for_creation = \"0.6\"\nmin_importance_for_creation = \"0.2\"\n")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("expected TOML config to load, got error: %v", err)
+	}
+	if cfg.IntakeQuality.MinConfidenceForCreation != 0.6 {
+		t.Fatalf("expected TOML min confidence 0.6, got %v", cfg.IntakeQuality.MinConfidenceForCreation)
+	}
+	if cfg.IntakeQuality.MinImportanceForCreation != 0.2 {
+		t.Fatalf("expected TOML min importance 0.2, got %v", cfg.IntakeQuality.MinImportanceForCreation)
+	}
+}

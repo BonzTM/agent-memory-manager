@@ -54,6 +54,23 @@ AMM loads configuration in the following order:
 |----------|-------------|---------|
 | `AMM_ESCALATION_DETERMINISTIC_MAX_CHARS` | Maximum characters for the Level-3 deterministic truncation fallback in the compression pipeline | `2048` |
 
+### Intake Quality Gates
+
+Controls minimum thresholds for memory creation. Candidates below these thresholds are rejected at intake, before storage.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `AMM_MIN_CONFIDENCE_FOR_CREATION` | Minimum confidence score (0.0–1.0) for a memory candidate to be persisted | `0.50` |
+| `AMM_MIN_IMPORTANCE_FOR_CREATION` | Minimum importance score (0.0–1.0) for a memory candidate to be persisted | `0.30` |
+
+**Important**: Heuristic extraction (used when no LLM is configured) produces candidates at confidence **0.45**, which is below the default gate of 0.50. This means **heuristic-only memories are not stored by default**. If you run AMM without an LLM summarizer endpoint, lower the confidence gate:
+
+```bash
+AMM_MIN_CONFIDENCE_FOR_CREATION=0.4   # Allow heuristic extractions through
+```
+
+Set both to `0` to disable intake filtering entirely.
+
 ### Summarizer (LLM Extraction & Reflection)
 Set `AMM_SUMMARIZER_ENDPOINT` and `AMM_SUMMARIZER_API_KEY` to enable LLM-backed memory extraction, NER entity extraction, and relationship inference. Without these, AMM falls back to heuristic extraction.
 
@@ -151,6 +168,10 @@ Full reference — all supported keys shown with their defaults:
     "embedding_batch_size": 64,
     "cross_project_similarity_threshold": 0.7
   },
+  "intake_quality": {
+    "min_confidence_for_creation": 0.50,
+    "min_importance_for_creation": 0.30
+  },
   "embeddings": {
     "enabled": true,
     "provider": "openai",
@@ -220,6 +241,10 @@ compress_batch_size = 15
 topic_batch_size = 15
 embedding_batch_size = 64
 cross_project_similarity_threshold = 0.7
+
+[intake_quality]
+min_confidence_for_creation = 0.50
+min_importance_for_creation = 0.30
 
 [embeddings]
 enabled = true

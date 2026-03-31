@@ -2286,7 +2286,21 @@ func (r *Repository) UpsertEmbedding(ctx context.Context, embedding *core.Embedd
 		ON CONFLICT (object_id, object_kind, model)
 		DO UPDATE SET embedding = EXCLUDED.embedding, created_at = EXCLUDED.created_at`,
 		embedding.ObjectID, embedding.ObjectKind, encodeVector(embedding.Vector), embedding.Model, embedding.CreatedAt.UTC())
-	return wrapErr("upsert embedding", err)
+	if err != nil {
+		return wrapErr("upsert embedding", err)
+	}
+	// If the embedding_vec column exists (operator has set up ANN), keep it in sync.
+	if len(embedding.Vector) > 0 && r.hasVectorColumn(ctx) {
+		vecStr := formatPgVector(embedding.Vector)
+		if _, err := r.db.ExecContext(ctx, `
+			UPDATE embeddings SET embedding_vec = $1::vector
+			WHERE object_id = $2 AND object_kind = $3 AND model = $4`,
+			vecStr, embedding.ObjectID, embedding.ObjectKind, embedding.Model); err != nil {
+			slog.Warn("failed to update embedding_vec column", "error", err,
+				"object_id", embedding.ObjectID, "object_kind", embedding.ObjectKind)
+		}
+	}
+	return nil
 }
 
 func (r *Repository) GetEmbedding(ctx context.Context, objectID, objectKind, model string) (*core.EmbeddingRecord, error) {
@@ -2362,6 +2376,61 @@ func (r *Repository) DeleteEmbeddings(ctx context.Context, objectID, objectKind,
 	}
 	_, err := r.db.ExecContext(ctx, `DELETE FROM embeddings WHERE object_id = $1 AND object_kind = $2 AND model = $3`, objectID, objectKind, model)
 	return wrapErr("delete embeddings", err)
+}
+
+func (r *Repository) hasVectorColumn(ctx context.Context) bool {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'embeddings' AND column_name = 'embedding_vec'
+		)`).Scan(&exists)
+	return err == nil && exists
+}
+
+func (r *Repository) SearchNearestEmbeddings(ctx context.Context, queryVector []float32, objectKind, model string, limit int) ([]string, error) {
+	if !r.hasVectorColumn(ctx) {
+		return nil, core.ErrNotImplemented
+	}
+
+	// Format query vector as pgvector literal: '[0.1,0.2,...]'
+	vecStr := formatPgVector(queryVector)
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT object_id
+		FROM embeddings
+		WHERE object_kind = $1 AND model = $2 AND embedding_vec IS NOT NULL
+		ORDER BY embedding_vec <=> $3::vector
+		LIMIT $4`, objectKind, model, vecStr, defaultLimit(limit))
+	if err != nil {
+		return nil, wrapErr("search nearest embeddings", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, wrapErr("search nearest embeddings", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func formatPgVector(vec []float32) string {
+	if len(vec) == 0 {
+		return "[]"
+	}
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, v := range vec {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, "%g", v)
+	}
+	b.WriteByte(']')
+	return b.String()
 }
 
 func (r *Repository) ListUnembeddedMemories(ctx context.Context, model string, limit int) ([]core.Memory, error) {

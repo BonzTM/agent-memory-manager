@@ -31,6 +31,8 @@ type AMMService struct {
 	escalationDeterministicMaxChars int
 	embeddingBatchSize              int
 	crossProjectSimilarityThreshold float64
+	minConfidenceForCreation        float64
+	minImportanceForCreation        float64
 	maxExpandDepth                  int
 	scoringWeights                  ScoringWeights
 	scoringWeightsMu                sync.RWMutex
@@ -58,6 +60,8 @@ func New(repo core.Repository, dbPath string, summarizer core.Summarizer, embedd
 		escalationDeterministicMaxChars: defaultEscalationDeterministicMaxChars,
 		embeddingBatchSize:              defaultEmbeddingBatchSize,
 		crossProjectSimilarityThreshold: defaultCrossProjectSimilarityThreshold,
+		minConfidenceForCreation:        defaultMinConfidenceForCreation,
+		minImportanceForCreation:        defaultMinImportanceForCreation,
 		maxExpandDepth:                  1,
 		scoringWeights:                  DefaultScoringWeights(),
 	}
@@ -154,6 +158,22 @@ func (s *AMMService) SetCrossProjectSimilarityThreshold(threshold float64) {
 		return
 	}
 	s.crossProjectSimilarityThreshold = threshold
+}
+
+func (s *AMMService) SetMinConfidenceForCreation(v float64) {
+	if v < 0 || v > 1 {
+		s.minConfidenceForCreation = defaultMinConfidenceForCreation
+		return
+	}
+	s.minConfidenceForCreation = v
+}
+
+func (s *AMMService) SetMinImportanceForCreation(v float64) {
+	if v < 0 || v > 1 {
+		s.minImportanceForCreation = defaultMinImportanceForCreation
+		return
+	}
+	s.minImportanceForCreation = v
 }
 
 func (s *AMMService) SetMaxExpandDepth(depth int) {

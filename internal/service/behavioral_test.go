@@ -32,6 +32,7 @@ func testServiceAndRepo(t *testing.T) (*AMMService, *sqlite.SQLiteRepository) {
 	}
 	repo := &sqlite.SQLiteRepository{DB: db}
 	svc := New(repo, dbPath, nil, nil)
+	svc.SetMinConfidenceForCreation(0) // Tests use heuristic extraction (confidence 0.45)
 	t.Cleanup(func() { db.Close() })
 	return svc, repo
 }
@@ -50,6 +51,7 @@ func testServiceAndRepoWithSummarizer(t *testing.T, summarizer core.Summarizer) 
 	}
 	repo := &sqlite.SQLiteRepository{DB: db}
 	svc := New(repo, dbPath, summarizer, nil)
+	svc.SetMinConfidenceForCreation(0) // Tests use heuristic extraction (confidence 0.45)
 	t.Cleanup(func() { db.Close() })
 	return svc, repo
 }
@@ -297,8 +299,8 @@ func TestReflect_ExtractsPreferences(t *testing.T) {
 
 	// Ingest events containing preference phrases.
 	phrases := []string{
-		"I prefer tabs over spaces for indentation",
-		"always use dark mode in the editor",
+		"I prefer tabs over spaces because it requires less keystrokes",
+		"always use dark mode in the editor since it supports focus",
 	}
 	for _, p := range phrases {
 		_, err := svc.IngestEvent(ctx, &core.Event{
@@ -346,7 +348,7 @@ func TestReflect_ExtractsDecisions(t *testing.T) {
 		Kind:         "message",
 		SourceSystem: "test",
 		PrivacyLevel: core.PrivacyPrivate,
-		Content:      "We decided to use PostgreSQL for the database layer",
+		Content:      "We decided to use PostgreSQL because it supports JSONB natively",
 		OccurredAt:   time.Now().UTC(),
 	})
 	if err != nil {
@@ -385,7 +387,7 @@ func TestReflect_AssignsTypeBasedImportance(t *testing.T) {
 		Kind:         "message",
 		SourceSystem: "test",
 		PrivacyLevel: core.PrivacyPrivate,
-		Content:      "We decided to use PostgreSQL for the database layer",
+		Content:      "We decided to use PostgreSQL because it supports JSONB natively",
 		OccurredAt:   time.Now().UTC(),
 	})
 	if err != nil {
@@ -423,7 +425,7 @@ func TestReflect_SkipsDuplicates(t *testing.T) {
 		Kind:         "message",
 		SourceSystem: "test",
 		PrivacyLevel: core.PrivacyPrivate,
-		Content:      "I prefer using Go for backend services",
+		Content:      "I prefer using Go for backend services because it runs on all platforms",
 		OccurredAt:   time.Now().UTC(),
 	})
 	if err != nil {
@@ -509,7 +511,7 @@ func TestReflect_CreatesEntities(t *testing.T) {
 		Kind:         "message",
 		SourceSystem: "test",
 		PrivacyLevel: core.PrivacyPrivate,
-		Content:      "We decided Josh should own Kubernetes rollout planning.",
+		Content:      "We decided Josh should own Kubernetes rollout planning since it requires careful coordination.",
 		OccurredAt:   time.Now().UTC(),
 	})
 	if err != nil {
@@ -585,7 +587,7 @@ func TestReflect_SetsProvisionalWhenHeuristic(t *testing.T) {
 		Kind:         "message_user",
 		SourceSystem: "test",
 		PrivacyLevel: core.PrivacyPrivate,
-		Content:      "I prefer concise commit messages",
+		Content:      "I prefer concise commit messages and it is a best practice",
 		OccurredAt:   time.Now().UTC(),
 	})
 	if err != nil {

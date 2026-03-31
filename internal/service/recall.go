@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -816,6 +817,19 @@ func (s *AMMService) searchByEmbedding(ctx context.Context, queryEmbedding []flo
 	if model == "" {
 		return nil
 	}
+
+	// Prefer ANN search via the repository (e.g. pgvecto.rs) when available.
+	// Fall back to brute-force if ANN returns an error or empty results
+	// (empty can mean the vector column isn't populated yet).
+	ids, err := s.repo.SearchNearestEmbeddings(ctx, queryEmbedding, objectKind, model, limit)
+	if err == nil && len(ids) > 0 {
+		return ids
+	}
+	if err != nil && !errors.Is(err, core.ErrNotImplemented) {
+		slog.Warn("ANN search failed, falling back to brute-force", "error", err)
+	}
+
+	// Brute-force fallback: load all embeddings and compute cosine similarity.
 	records, err := s.repo.ListEmbeddingsByKind(ctx, objectKind, model, limit*5)
 	if err != nil || len(records) == 0 {
 		return nil
@@ -843,7 +857,7 @@ func (s *AMMService) searchByEmbedding(ctx context.Context, queryEmbedding []flo
 	if len(scored) > limit {
 		scored = scored[:limit]
 	}
-	ids := make([]string, 0, len(scored))
+	ids = make([]string, 0, len(scored))
 	for _, item := range scored {
 		ids = append(ids, item.id)
 	}

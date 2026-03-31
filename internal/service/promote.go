@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	sessionTraceArchiveMaxAge = 7 * 24 * time.Hour
+	sessionTraceArchiveMaxAge = 3 * 24 * time.Hour
 )
 
 func (s *AMMService) ArchiveLowSalienceSessionTraces(ctx context.Context) (int, error) {
