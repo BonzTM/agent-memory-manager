@@ -50,16 +50,24 @@ jobs:
           LDFLAGS="$LDFLAGS -X github.com/bonztm/agent-memory-manager/internal/buildinfo.CommitShort=${SHORT_SHA}"
           EXT=""
           if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
-          mkdir -p dist
+          mkdir -p dist/standard dist/builtin-embeddings
           for bin in amm amm-mcp amm-http; do
-            go build -ldflags "$LDFLAGS" -o "dist/${bin}${EXT}" "./cmd/${bin}"
+            go build -ldflags "$LDFLAGS" -o "dist/standard/${bin}${EXT}" "./cmd/${bin}"
+            go build -tags builtin_embeddings -ldflags "$LDFLAGS" -o "dist/builtin-embeddings/${bin}${EXT}" "./cmd/${bin}"
           done
 
-      - name: Upload artifacts
+      - name: Upload standard artifacts
         uses: actions/upload-artifact@v7
         with:
           name: amm-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/
+          path: dist/standard/
+          if-no-files-found: error
+
+      - name: Upload builtin embeddings artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: amm-${{ matrix.goos }}-${{ matrix.goarch }}-builtin-embeddings
+          path: dist/builtin-embeddings/
           if-no-files-found: error
 
   docker:

@@ -50,31 +50,49 @@ jobs:
           LDFLAGS="$LDFLAGS -X github.com/bonztm/agent-memory-manager/internal/buildinfo.CommitShort=${GITHUB_SHA::7}"
           EXT=""
           if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
-          mkdir -p dist
+          mkdir -p dist/standard dist/builtin-embeddings
           for bin in amm amm-mcp amm-http; do
-            go build -ldflags "$LDFLAGS" -o "dist/${bin}${EXT}" "./cmd/${bin}"
+            go build -ldflags "$LDFLAGS" -o "dist/standard/${bin}${EXT}" "./cmd/${bin}"
+            go build -tags builtin_embeddings -ldflags "$LDFLAGS" -o "dist/builtin-embeddings/${bin}${EXT}" "./cmd/${bin}"
           done
 
       - name: Package release archive
         run: |
-          cd dist
-          ARCHIVE="amm-${{ env.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}"
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip "../${ARCHIVE}.zip" amm.exe amm-mcp.exe amm-http.exe
-          else
-            tar czf "../${ARCHIVE}.tar.gz" amm amm-mcp amm-http
-          fi
+          package_variant() {
+            variant_dir="$1"
+            archive_suffix="$2"
+            archive="amm-${{ env.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}${archive_suffix}"
+            if [ "${{ matrix.goos }}" = "windows" ]; then
+              (
+                cd "dist/${variant_dir}"
+                zip -q "../../${archive}.zip" amm.exe amm-mcp.exe amm-http.exe
+              )
+            else
+              (
+                cd "dist/${variant_dir}"
+                tar czf "../../${archive}.tar.gz" amm amm-mcp amm-http
+              )
+            fi
+          }
+
+          package_variant standard ""
+          package_variant builtin-embeddings "-builtin-embeddings"
 
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ARCHIVE="amm-${{ env.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}"
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            gh release upload "${{ env.VERSION }}" "${ARCHIVE}.zip" --clobber
-          else
-            gh release upload "${{ env.VERSION }}" "${ARCHIVE}.tar.gz" --clobber
-          fi
+          upload_variant() {
+            archive="amm-${{ env.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}$1"
+            if [ "${{ matrix.goos }}" = "windows" ]; then
+              gh release upload "${{ env.VERSION }}" "${archive}.zip" --clobber
+            else
+              gh release upload "${{ env.VERSION }}" "${archive}.tar.gz" --clobber
+            fi
+          }
+
+          upload_variant ""
+          upload_variant "-builtin-embeddings"
 
   docker:
     name: Docker Image
