@@ -173,17 +173,26 @@ config['plugins']['entries'][plugin_name] = {
 }
 
 
-# Add MCP sidecar if requested
-if install_mcp:
-    config['plugins']['entries'].setdefault('acpx', {'enabled': True, 'config': {}})
-    config['plugins']['entries']['acpx'].setdefault('config', {})
-    config['plugins']['entries']['acpx']['config'].setdefault('mcpServers', {})
+# Always ensure acpx MCP sidecar is configured for explicit agent tools
+# (amm_recall, amm_remember, amm_expand, etc.)
+config['plugins']['entries'].setdefault('acpx', {'enabled': True, 'config': {}})
+config['plugins']['entries']['acpx'].setdefault('config', {})
+config['plugins']['entries']['acpx']['config'].setdefault('mcpServers', {})
+if 'amm' not in config['plugins']['entries']['acpx']['config']['mcpServers']:
     config['plugins']['entries']['acpx']['config']['mcpServers']['amm'] = {
-        'command': amm_bin,
-        'args': ['--mcp'],
+        'command': amm_bin + '-mcp',
+        'args': [],
         'env': {'AMM_DB_PATH': db_path or '~/.amm/amm.db'},
     }
     print('  MCP sidecar: configured via acpx')
+else:
+    print('  MCP sidecar: already configured')
+
+# Ensure amm is in the allow list
+config['plugins'].setdefault('allow', [])
+if 'amm' not in config['plugins']['allow']:
+    config['plugins']['allow'].append('amm')
+    print('  Added amm to plugins.allow')
 
 with open(config_path, 'w') as f:
     json.dump(config, f, indent=2)
