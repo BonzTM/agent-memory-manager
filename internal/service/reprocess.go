@@ -50,6 +50,10 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 		}
 	}
 
+	// For session events, reprocess means: delete session summaries and clear
+	// reflected_at so ConsolidateSessions re-processes the session on the next
+	// maintenance run. Session events don't go through per-event extraction.
+	sessionIDs := make(map[string]bool)
 	var toProcess []core.Event
 	isLLMBacked := s.intelligence != nil && s.intelligence.IsLLMBacked()
 	for _, evt := range events {
@@ -60,6 +64,12 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 			if mode == "read_only" && !isLLMBacked {
 				continue
 			}
+		}
+
+		// Session events are handled by ConsolidateSessions, not per-event extraction.
+		if evt.SessionID != "" {
+			sessionIDs[evt.SessionID] = true
+			continue
 		}
 
 		if !reprocessAll {
@@ -76,6 +86,64 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 			}
 		}
 		toProcess = append(toProcess, evt)
+	}
+
+	// Clear reflected_at on session events so ConsolidateSessions re-processes them.
+	for _, evt := range events {
+		if evt.SessionID == "" || !sessionIDs[evt.SessionID] {
+			continue
+		}
+		if evt.ReflectedAt != nil {
+			evt.ReflectedAt = nil
+			if err := s.repo.UpdateEvent(ctx, &evt); err != nil {
+				slog.Warn("reprocess: failed to clear reflected_at", "event_id", evt.ID, "error", err)
+			}
+		}
+	}
+
+	// Delete stale session summaries and episodes so ConsolidateSessions
+	// rebuilds cleanly instead of appending incremental "(continued)"
+	// summaries or duplicating episodes.
+	for sessionID := range sessionIDs {
+		summaries, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{
+			Kind:      "session",
+			SessionID: sessionID,
+			Limit:     100,
+		})
+		if err != nil {
+			slog.Warn("reprocess: failed to list session summaries", "session_id", sessionID, "error", err)
+		} else {
+			for _, sum := range summaries {
+				if err := s.repo.DeleteSummary(ctx, sum.ID); err != nil {
+					slog.Warn("reprocess: failed to delete session summary", "summary_id", sum.ID, "error", err)
+				}
+			}
+		}
+
+		episodes, err := s.repo.ListEpisodes(ctx, core.ListEpisodesOptions{
+			SessionID: sessionID,
+			Limit:     100,
+		})
+		if err != nil {
+			slog.Warn("reprocess: failed to list session episodes", "session_id", sessionID, "error", err)
+		} else {
+			for _, ep := range episodes {
+				if err := s.repo.DeleteEpisode(ctx, ep.ID); err != nil {
+					slog.Warn("reprocess: failed to delete session episode", "episode_id", ep.ID, "error", err)
+				}
+			}
+		}
+	}
+
+	// Rebuild session data immediately by running consolidation with no
+	// idle timeout so reprocess doesn't leave sessions in a half-torn-down state.
+	if len(sessionIDs) > 0 {
+		savedTimeout := s.sessionIdleTimeout
+		s.sessionIdleTimeout = 0
+		if _, err := s.ConsolidateSessions(ctx); err != nil {
+			slog.Warn("reprocess: consolidate_sessions after session reset failed", "error", err)
+		}
+		s.sessionIdleTimeout = savedTimeout
 	}
 
 	if len(toProcess) == 0 {
