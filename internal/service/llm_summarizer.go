@@ -113,6 +113,7 @@ func buildMemoryExtractionPrompt(eventContents []string, includeSourceEvents boo
 	rules.WriteString("- Skip: transient task state, status noise, greetings, file trees, package inventories, raw config/env var dumps, diffs, logs, and JSON blobs.\n")
 	rules.WriteString("- Skip: information already obvious from the project's README, AGENTS.md, or standard documentation.\n")
 	rules.WriteString("- Tool output (grep results, build logs, test output) should NOT be stored verbatim. Only extract the LESSON if one exists.\n")
+	rules.WriteString("- User questions and requests are not memories. Extract from the answers and conclusions, not the questions that prompted them.\n")
 	if includeSourceEvents {
 		rules.WriteString("- Deduplicate across events: if multiple events express the same thing, produce ONE memory with higher confidence.\n")
 	}
