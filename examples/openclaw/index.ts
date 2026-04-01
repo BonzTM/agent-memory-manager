@@ -84,18 +84,18 @@ export default {
       },
     });
 
-    // --- Ambient recall prompt section -------------------------------------
+    // --- Memory prompt builder (required by memory slot contract) -----------
     api.registerMemoryPromptSection({
       id: "amm-recall",
-      generate: async (ctx: Record<string, unknown>) => {
+      promptBuilder: async (ctx: Record<string, unknown>) => {
         const query = typeof ctx?.query === "string" ? ctx.query : "";
         const sessionId = typeof ctx?.sessionKey === "string" ? ctx.sessionKey : "";
-        if (!query.trim()) return { content: "" };
+        if (!query.trim()) return "";
 
         const raw = await recall(config, query, sessionId);
         const rendered = renderRecall(raw, config.recallLimit);
-        if (!rendered) return { content: "" };
-        return { content: `<amm-context>\n${rendered}\n</amm-context>` };
+        if (!rendered) return "";
+        return `<amm-context>\n${rendered}\n</amm-context>`;
       },
     });
 
