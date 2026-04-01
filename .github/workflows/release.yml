@@ -94,6 +94,30 @@ jobs:
           upload_variant ""
           upload_variant "-builtin-embeddings"
 
+  npm-openclaw:
+    name: Publish OpenClaw Plugin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Set version from tag
+        working-directory: examples/openclaw
+        run: |
+          npm version "${{ env.VERSION }}" --no-git-tag-version --allow-same-version
+
+      - name: Publish to npm
+        working-directory: examples/openclaw
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
   docker:
     name: Docker Image
     runs-on: ubuntu-latest
