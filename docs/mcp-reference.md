@@ -31,7 +31,7 @@ Response:
     "protocolVersion": "2024-11-05",
     "serverInfo": {
       "name": "amm-mcp",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     "capabilities": {
       "tools": {

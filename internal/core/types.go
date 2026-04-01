@@ -294,6 +294,7 @@ type RecallItem struct {
 	TightDescription string             `json:"tight_description"`
 	Confidence       *float64           `json:"confidence,omitempty"`
 	ObservedAt       string             `json:"observed_at,omitempty"`
+	ConflictsWith    []string           `json:"conflicts_with,omitempty"`
 }
 
 // RecallResult is the response from a recall operation.
@@ -305,6 +306,7 @@ type RecallResult struct {
 // RecallMeta contains metadata about a recall operation.
 type RecallMeta struct {
 	Mode        RecallMode `json:"mode"`
+	RoutedFrom  RecallMode `json:"routed_from,omitempty"`
 	QueryTimeMs int64      `json:"query_time_ms"`
 }
 

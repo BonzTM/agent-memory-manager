@@ -110,6 +110,7 @@ type RecallItemResponse struct {
 	TightDescription string             `json:"tight_description"`
 	Confidence       *float64           `json:"confidence,omitempty"`
 	ObservedAt       string             `json:"observed_at,omitempty"`
+	ConflictsWith    []string           `json:"conflicts_with,omitempty"`
 }
 
 // RecallMetaResponse contains metadata about a recall operation.
@@ -117,6 +118,7 @@ type RecallItemResponse struct {
 // It reports the effective recall mode and basic timing data for the query.
 type RecallMetaResponse struct {
 	Mode        string `json:"mode"`
+	RoutedFrom  string `json:"routed_from,omitempty"`
 	QueryTimeMs int64  `json:"query_time_ms"`
 }
 

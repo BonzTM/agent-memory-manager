@@ -3,7 +3,7 @@
   "info": {
     "title": "AMM \u2014 Agent Memory Manager",
     "description": "REST API for the Agent Memory Manager. Provides durable, structured memory for AI agents.",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "tags": [
     {
@@ -992,27 +992,27 @@
                   "properties": {
                     "data": {
                       "type": "object",
-                       "required": [
-                         "pattern",
-                         "total_hits",
-                         "sample_limited",
-                         "groups"
-                       ],
-                       "properties": {
-                         "pattern": {
-                           "type": "string"
-                         },
-                         "total_hits": {
-                           "type": "integer"
-                         },
-                         "sample_limited": {
-                           "type": "boolean",
-                           "description": "True when search results may be incomplete due to sampling limit"
-                         },
-                         "groups": {
-                           "type": "array",
-                           "items": {
-                             "type": "object",
+                      "required": [
+                        "pattern",
+                        "total_hits",
+                        "sample_limited",
+                        "groups"
+                      ],
+                      "properties": {
+                        "pattern": {
+                          "type": "string"
+                        },
+                        "total_hits": {
+                          "type": "integer"
+                        },
+                        "sample_limited": {
+                          "type": "boolean",
+                          "description": "True when search results may be incomplete due to sampling limit"
+                        },
+                        "groups": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
                             "required": [
                               "matches"
                             ],
@@ -2859,6 +2859,12 @@
           },
           "observed_at": {
             "type": "string"
+          },
+          "conflicts_with": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -2866,6 +2872,9 @@
         "type": "object",
         "properties": {
           "mode": {
+            "$ref": "#/components/schemas/RecallMode"
+          },
+          "routed_from": {
             "$ref": "#/components/schemas/RecallMode"
           },
           "query_time_ms": {
