@@ -19,11 +19,23 @@ openclaw plugins install @bonztm/amm
 
 **Requires `amm-http` running as an HTTP service** — the npm package does not include local binary support due to OpenClaw's security scanner restrictions on `child_process`.
 
-After install, configure the plugin in `~/.openclaw/openclaw.json`:
+After install, configure the plugin and MCP server in `~/.openclaw/openclaw.json`:
 
 ```json
 {
+  "mcp": {
+    "servers": {
+      "amm": {
+        "url": "http://localhost:8080/v1/mcp",
+        "transport": "streamable-http",
+        "headers": {
+          "Authorization": "Bearer your-amm-api-key"
+        }
+      }
+    }
+  },
   "plugins": {
+    "allow": ["amm"],
     "entries": {
       "amm": {
         "enabled": true,
@@ -39,26 +51,31 @@ After install, configure the plugin in `~/.openclaw/openclaw.json`:
 }
 ```
 
-`apiUrl` is **required** for npm installs — point it at your `amm-http` instance. Restart OpenClaw after configuring.
+- `plugins.entries.amm.config.apiUrl` is **required** for npm installs — point it at your `amm-http` instance
+- `mcp.servers.amm` gives the agent explicit tools (`amm_recall`, `amm_remember`, `amm_expand`, etc.)
+- Restart OpenClaw after configuring
 
 ### Option B: Local install (binary + HTTP mode)
 
 For environments where the `amm` binary and SQLite database are on the same machine as OpenClaw:
 
 ```bash
+# Local binary mode (no HTTP server needed)
 ./install.sh
 
-# With options
+# With project scoping
 ./install.sh --project-id my-project --recall-limit 10
 
-# HTTP API mode (also works with install.sh)
+# HTTP API mode (remote amm-http server)
 ./install.sh --api-url http://localhost:8080 --api-key your-key
-
-# With MCP sidecar for the full tool suite
-./install.sh --mcp
 ```
 
-The install script copies the full plugin including local binary transport. The `amm` binary is called via subprocess — no HTTP server needed. Run `./install.sh --help` for all options.
+The install script automatically configures:
+- The AMM plugin (ambient recall + event capture)
+- An MCP server (explicit agent tools) — local `amm-mcp` binary for local installs, MCP-over-HTTP for `--api-url` installs
+- The `plugins.allow` list
+
+Run `./install.sh --help` for all options.
 
 ### Option C: Manual
 
@@ -68,16 +85,53 @@ Copy the plugin directory and update your `openclaw.json`:
 cp -R examples/openclaw ~/.openclaw/extensions/amm
 ```
 
+For local binary mode:
+
 ```json
 {
+  "mcp": {
+    "servers": {
+      "amm": {
+        "command": "/usr/local/bin/amm-mcp",
+        "args": [],
+        "env": { "AMM_DB_PATH": "/home/you/.amm/amm.db" }
+      }
+    }
+  },
   "plugins": {
-    "slots": {
-      "memory": "amm"
-    },
+    "allow": ["amm"],
     "entries": {
       "amm": {
         "enabled": true,
         "config": {
+          "projectId": "my-project"
+        }
+      }
+    }
+  }
+}
+```
+
+For HTTP API mode:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "amm": {
+        "url": "http://your-amm-host:8080/v1/mcp",
+        "transport": "streamable-http"
+      }
+    }
+  },
+  "plugins": {
+    "allow": ["amm"],
+    "entries": {
+      "amm": {
+        "enabled": true,
+        "config": {
+          "apiUrl": "http://your-amm-host:8080",
+          "apiKey": "your-key",
           "projectId": "my-project"
         }
       }

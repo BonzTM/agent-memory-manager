@@ -12,11 +12,21 @@ openclaw plugins install @bonztm/amm
 
 Requires `amm-http` running as an HTTP service. The npm package uses HTTP transport only — OpenClaw's security scanner blocks local binary (`child_process`) imports.
 
-After install, configure the plugin in `~/.openclaw/openclaw.json`:
+After install, configure the plugin **and** MCP server in `~/.openclaw/openclaw.json`:
 
 ```json
 {
+  "mcp": {
+    "servers": {
+      "amm": {
+        "url": "http://localhost:8080/v1/mcp",
+        "transport": "streamable-http",
+        "headers": { "Authorization": "Bearer your-amm-api-key" }
+      }
+    }
+  },
   "plugins": {
+    "allow": ["amm"],
     "entries": {
       "amm": {
         "enabled": true,
@@ -32,7 +42,10 @@ After install, configure the plugin in `~/.openclaw/openclaw.json`:
 }
 ```
 
-`apiUrl` is **required** for npm installs — point it at your `amm-http` instance. Restart OpenClaw after configuring.
+- **`plugins.entries.amm`** — the plugin (ambient recall + event capture). `apiUrl` is **required** for npm installs.
+- **`mcp.servers.amm`** — gives agents explicit tools (`amm_recall`, `amm_remember`, `amm_expand`). Uses MCP-over-HTTP for npm installs.
+
+Restart OpenClaw after configuring.
 
 ### Local install (binary + HTTP mode)
 
@@ -42,14 +55,23 @@ For environments where the `amm` binary and SQLite database are on the same mach
 cd examples/openclaw && ./install.sh
 ```
 
-This copies the full plugin including local binary transport. No HTTP server required — the `amm` binary is called directly via subprocess. Configure via `ammBin`/`dbPath` in plugin config or `AMM_BIN`/`AMM_DB_PATH` env vars.
+The install script automatically configures the plugin, an MCP server (local `amm-mcp` binary or MCP-over-HTTP if `--api-url` is set), and the `plugins.allow` list. No manual config editing needed.
 
-See [`examples/openclaw/README.md`](../examples/openclaw/README.md) for all install options and configuration reference.
+```bash
+# HTTP mode (remote amm-http)
+./install.sh --api-url http://your-host:8080 --api-key your-key
+
+# With project scoping
+./install.sh --project-id my-project
+```
+
+See [`examples/openclaw/README.md`](../examples/openclaw/README.md) for all install options.
 
 ## What the Plugin Does
 
 1. **Ambient recall injection** — the `before_prompt_build` hook queries amm and returns a `prependContext` block with relevant memories before the LLM sees the prompt
-3. **Event capture** — plugin-registered hooks capture `message:preprocessed`, `message:sent`, `tool:called`, and `tool:completed` events into amm history
+2. **Event capture** — plugin-registered hooks capture `message:preprocessed`, `message:sent`, `tool:called`, and `tool:completed` events into amm history
+3. **MCP tools** — `amm-mcp` configured as an MCP server gives agents `amm_recall`, `amm_remember`, `amm_expand`, and 30+ other tools
 4. **Dual transport** — local `amm` binary (default) or HTTP API via `AMM_API_URL`
 
 The plugin is **hot-path only**. It does not run maintenance jobs.
