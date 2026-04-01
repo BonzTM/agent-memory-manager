@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/adapters/postgres"
 	"github.com/bonztm/agent-memory-manager/internal/adapters/sqlite"
@@ -132,6 +133,10 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	svc.SetTopicBatchSize(cfg.Summarizer.TopicBatchSize)
 	svc.SetEmbeddingBatchSize(cfg.Summarizer.EmbeddingBatchSize)
 	svc.SetCrossProjectSimilarityThreshold(cfg.Summarizer.CrossProjectSimilarityThreshold)
+	if cfg.Summarizer.SessionIdleTimeoutMinutes >= 0 {
+		svc.SetSessionIdleTimeout(time.Duration(cfg.Summarizer.SessionIdleTimeoutMinutes) * time.Minute)
+	}
+	svc.SetSummarizerContextWindow(cfg.Summarizer.SummarizerContextWindow)
 	svc.SetEscalationDeterministicMaxChars(cfg.Compression.EscalationDeterministicMaxChars)
 	svc.SetMinConfidenceForCreation(cfg.IntakeQuality.MinConfidenceForCreation)
 	svc.SetMinImportanceForCreation(cfg.IntakeQuality.MinImportanceForCreation)

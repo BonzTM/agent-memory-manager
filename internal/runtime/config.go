@@ -26,6 +26,8 @@ const (
 	defaultMaxExpandDepth                  = 1
 	defaultMinConfidenceForCreation        = 0.5
 	defaultMinImportanceForCreation        = 0.3
+	defaultSessionIdleTimeoutMinutes      = 15
+	defaultSummarizerContextWindow        = 128000
 	defaultEntityHubThreshold              = 10
 )
 
@@ -85,6 +87,8 @@ type SummarizerConfig struct {
 	TopicBatchSize                  int     `json:"topic_batch_size"`
 	EmbeddingBatchSize              int     `json:"embedding_batch_size"`
 	CrossProjectSimilarityThreshold float64 `json:"cross_project_similarity_threshold"`
+	SessionIdleTimeoutMinutes       int     `json:"session_idle_timeout_minutes"`
+	SummarizerContextWindow         int     `json:"summarizer_context_window"`
 }
 
 type EmbeddingsConfig struct {
@@ -167,6 +171,8 @@ func DefaultConfig() Config {
 			TopicBatchSize:                  defaultTopicBatchSize,
 			EmbeddingBatchSize:              defaultEmbeddingBatchSize,
 			CrossProjectSimilarityThreshold: defaultCrossProjectSimilarity,
+			SessionIdleTimeoutMinutes:       defaultSessionIdleTimeoutMinutes,
+			SummarizerContextWindow:         defaultSummarizerContextWindow,
 		},
 		Embeddings: EmbeddingsConfig{
 			Enabled: false,
@@ -443,6 +449,8 @@ func LoadConfigWithEnv() Config {
 //	AMM_COMPRESS_MAX_EVENTS -> Summarizer.CompressMaxEvents
 //	AMM_COMPRESS_BATCH_SIZE -> Summarizer.CompressBatchSize
 //	AMM_TOPIC_BATCH_SIZE -> Summarizer.TopicBatchSize
+//	AMM_SESSION_IDLE_TIMEOUT_MINUTES -> Summarizer.SessionIdleTimeoutMinutes
+//	AMM_SUMMARIZER_CONTEXT_WINDOW -> Summarizer.SummarizerContextWindow
 //	AMM_EMBEDDING_BATCH_SIZE -> Summarizer.EmbeddingBatchSize
 //	AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD -> Summarizer.CrossProjectSimilarityThreshold
 //	AMM_EMBEDDINGS_ENABLED -> Embeddings.Enabled (true/false)
@@ -583,6 +591,16 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
 			base.Summarizer.CrossProjectSimilarityThreshold = f
+		}
+	}
+	if v := os.Getenv("AMM_SESSION_IDLE_TIMEOUT_MINUTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			base.Summarizer.SessionIdleTimeoutMinutes = n
+		}
+	}
+	if v := os.Getenv("AMM_SUMMARIZER_CONTEXT_WINDOW"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Summarizer.SummarizerContextWindow = n
 		}
 	}
 	if v := os.Getenv("AMM_EMBEDDINGS_ENABLED"); v != "" {
