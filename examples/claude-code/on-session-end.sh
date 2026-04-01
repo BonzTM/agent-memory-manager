@@ -32,6 +32,7 @@ except json.JSONDecodeError:
 
 session_id = payload.get("session_id") or payload.get("sessionId") or os.environ.get("CLAUDE_SESSION_ID", "")
 project_id = payload.get("project_id") or payload.get("projectId") or os.environ.get("CLAUDE_PROJECT_ID", "")
+cwd = payload.get("cwd") or os.environ.get("PWD", "")
 last_assistant_message = payload.get("last_assistant_message") or payload.get("lastAssistantMessage") or ""
 
 if last_assistant_message:
@@ -43,7 +44,7 @@ if last_assistant_message:
             "project_id": project_id,
             "actor_type": "assistant",
             "content": last_assistant_message,
-            "metadata": {"hook_event": "Stop"},
+            "metadata": {"hook_event": "Stop", "cwd": cwd},
             "occurred_at": now_rfc3339(),
         }
     ))
@@ -70,7 +71,7 @@ print(json.dumps({
     "session_id": os.environ.get("CLAUDE_SESSION_ID", ""),
     "project_id": os.environ.get("CLAUDE_PROJECT_ID", ""),
     "content": "Claude stop hook executed.",
-    "metadata": {"hook_event": "Stop"},
+    "metadata": {"hook_event": "Stop", "cwd": os.environ.get("PWD", "")},
     "occurred_at": now_rfc3339(),
 }))
 ')
@@ -82,6 +83,5 @@ AMM_DB_PATH="$DB" "$AMM" jobs run rebuild_indexes >/dev/null 2>&1 || true
 AMM_DB_PATH="$DB" "$AMM" jobs run compress_history >/dev/null 2>&1 || true
 AMM_DB_PATH="$DB" "$AMM" jobs run consolidate_sessions >/dev/null 2>&1 || true
 AMM_DB_PATH="$DB" "$AMM" jobs run extract_claims >/dev/null 2>&1 || true
-AMM_DB_PATH="$DB" "$AMM" jobs run form_episodes >/dev/null 2>&1 || true
 
 exit 0

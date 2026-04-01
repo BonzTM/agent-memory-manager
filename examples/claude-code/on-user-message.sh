@@ -7,23 +7,68 @@ set -euo pipefail
 AMM="${AMM_BIN:-/usr/local/bin/amm}"
 DB="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
 
-PROMPT="${1:-}"
-SESSION_ID="${CLAUDE_SESSION_ID:-$(date +%Y%m%d)}"
-PROJECT_ID="${CLAUDE_PROJECT_ID:-}"
+PAYLOAD=""
+if [ ! -t 0 ]; then
+  PAYLOAD="$(cat || true)"
+fi
 
-# Skip empty prompts
-[ -z "$PROMPT" ] && exit 0
+[ -n "$PAYLOAD" ] || exit 0
+
+# Parse fields and build event from stdin JSON
+EVENT_AND_PROMPT=$(printf '%s' "$PAYLOAD" | python3 -c '
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+
+def now_rfc3339() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+raw = sys.stdin.read().strip()
+if not raw:
+    raise SystemExit(0)
+
+try:
+    payload = json.loads(raw)
+except json.JSONDecodeError:
+    raise SystemExit(0)
+
+session_id = payload.get("session_id") or payload.get("sessionId") or ""
+project_id = payload.get("project_id") or payload.get("projectId") or ""
+prompt = payload.get("prompt") or payload.get("message") or ""
+cwd = payload.get("cwd") or os.environ.get("PWD", "")
+
+if not prompt.strip():
+    raise SystemExit(0)
+
+event = {
+    "kind": "message_user",
+    "source_system": "claude-code",
+    "session_id": session_id,
+    "project_id": project_id,
+    "actor_type": "user",
+    "content": prompt,
+    "metadata": {
+        "hook_event": "UserMessage",
+        "cwd": cwd,
+    },
+    "occurred_at": now_rfc3339(),
+}
+
+# Output event JSON on first line, prompt on second line
+print(json.dumps(event, ensure_ascii=False))
+print(prompt)
+')
+
+[ -n "$EVENT_AND_PROMPT" ] || exit 0
+
+EVENT_JSON=$(echo "$EVENT_AND_PROMPT" | head -1)
+PROMPT=$(echo "$EVENT_AND_PROMPT" | tail -n +2)
 
 # Ingest the user message as an event
-echo "{
-  \"kind\": \"message_user\",
-  \"source_system\": \"claude-code\",
-  \"session_id\": \"$SESSION_ID\",
-  \"project_id\": \"$PROJECT_ID\",
-  \"actor_type\": \"user\",
-  \"content\": $(echo "$PROMPT" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))'),
-  \"occurred_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
-}" | AMM_DB_PATH="$DB" "$AMM" ingest event --in - >/dev/null 2>&1
+printf '%s' "$EVENT_JSON" | AMM_DB_PATH="$DB" "$AMM" ingest event --in - >/dev/null 2>&1
 
 # Request ambient recall and output hints for injection
 RECALL=$(AMM_DB_PATH="$DB" "$AMM" recall --mode ambient "$PROMPT" 2>/dev/null || echo '{}')

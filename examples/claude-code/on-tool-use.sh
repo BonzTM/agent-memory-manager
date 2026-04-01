@@ -37,6 +37,7 @@ tool_input = payload.get("tool_input") or payload.get("toolInput")
 tool_result = payload.get("tool_result") or payload.get("toolResult")
 session_id = payload.get("session_id") or payload.get("sessionId") or os.environ.get("CLAUDE_SESSION_ID", "")
 project_id = payload.get("project_id") or payload.get("projectId") or os.environ.get("CLAUDE_PROJECT_ID", "")
+cwd = payload.get("cwd") or os.environ.get("PWD", "")
 status = os.environ.get("HOOK_STATUS", "success")
 
 if status == "pre":
@@ -73,6 +74,7 @@ tool_call_event = {
         "hook_event": hook_event,
         "tool_name": tool_name,
         "tool_input": tool_input_text,
+        "cwd": cwd,
     },
     "occurred_at": now_rfc3339(),
 }
@@ -104,6 +106,7 @@ event = {
         "tool_name": tool_name,
         "tool_input": tool_input_text,
         "succeeded": "true" if succeeded else "false",
+        "cwd": cwd,
     },
     "occurred_at": now_rfc3339(),
 }

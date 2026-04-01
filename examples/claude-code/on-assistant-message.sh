@@ -33,6 +33,7 @@ except json.JSONDecodeError:
 
 session_id = payload.get("session_id") or payload.get("sessionId") or os.environ.get("CLAUDE_SESSION_ID", "")
 project_id = payload.get("project_id") or payload.get("projectId") or os.environ.get("CLAUDE_PROJECT_ID", "")
+cwd = payload.get("cwd") or os.environ.get("PWD", "")
 assistant_message = (
     payload.get("assistant_message")
     or payload.get("assistantMessage")
@@ -56,7 +57,7 @@ event = {
     "project_id": project_id,
     "actor_type": "assistant",
     "content": assistant_message,
-    "metadata": {"hook_event": "AssistantResponse"},
+    "metadata": {"hook_event": "AssistantResponse", "cwd": cwd},
     "occurred_at": now_rfc3339(),
 }
 
