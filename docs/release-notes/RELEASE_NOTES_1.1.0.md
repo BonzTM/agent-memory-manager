@@ -2,7 +2,7 @@
 
 ## Release Summary
 
-amm 1.1.0 is a minor release focused on recall intelligence, scoring accuracy, and memory creation precision. It adds automatic query intent routing that steers hybrid recall to specialized modes, temporal staleness detection that penalizes memories with stale relative-time references, and contradiction surfacing that annotates recalled items with conflicting memory IDs. It also fixes an inverted renormalization bug, collapses two redundant time-decay signals into one, expands Bayesian learned ranking to 9 of 10 signals, and adds recall-side deduplication and intake quality gates.
+amm 1.1.0 is a minor release focused on recall intelligence, scoring accuracy, memory creation precision, and runtime integration quality. It adds automatic query intent routing that steers hybrid recall to specialized modes, temporal staleness detection that penalizes memories with stale relative-time references, and contradiction surfacing that annotates recalled items with conflicting memory IDs. The OpenClaw integration has been overhauled from a repo-local hook bundle to a native OpenClaw 2026.03.31 plugin with automatic ambient recall injection and dual transport support. It also fixes an inverted renormalization bug, collapses two redundant time-decay signals into one, expands Bayesian learned ranking to 9 of 10 signals, and adds recall-side deduplication and intake quality gates.
 
 ## Fixed
 
@@ -29,6 +29,10 @@ amm 1.1.0 is a minor release focused on recall intelligence, scoring accuracy, a
 - Known tech entity extraction: 60+ lowercase technology names recognized without capitalization.
 - Hermes AMM plugin example for Hermes-Agent integration.
 - Durability check in LLM extraction prompt: candidates assessed for 30-day relevance before creation.
+- Native OpenClaw plugin (`examples/openclaw/`) for OpenClaw 2026.03.31+. Uses `definePluginEntry()` with `openclaw.plugin.json` manifest, replacing the previous hook-bundle approach.
+- Automatic ambient recall injection for OpenClaw via `before_prompt_build` hook. Relevant memories are prepended to every LLM prompt without the agent calling any tool, matching Hermes plugin behavior.
+- Dual transport in the OpenClaw plugin: local `amm` binary (default) or HTTP API via `AMM_API_URL`, with MCP-over-HTTP sidecar support for remote deployments.
+- Plugin-level `configSchema` for OpenClaw plugin configuration alongside environment variables.
 
 ## Changed
 
@@ -41,6 +45,14 @@ amm 1.1.0 is a minor release focused on recall intelligence, scoring accuracy, a
 - Session trace archive TTL reduced from 7 days to 3 days.
 - Minimum hybrid history score threshold adjusted from 0.55 to 0.48.
 - Integration documentation updated to recommend disabling tool_call and tool_result event ingestion.
+- OpenClaw integration overhauled from repo-local hook bundle to native OpenClaw plugin with `openclaw.plugin.json` manifest and `definePluginEntry()` entry point.
+- OpenClaw event capture consolidated from standalone `hooks/` directories into plugin-registered hooks.
+- OpenClaw integration documentation (`docs/openclaw-integration.md`) rewritten for the native plugin architecture.
+
+## Removed
+
+- OpenClaw `hooks/amm-memory-capture/` and `hooks/amm-session-maintenance/` standalone hook directories. Event capture is now handled by the native plugin. Session maintenance is external (host cron or systemd).
+- OpenClaw `cron.add.reflect.json` cron artifact. The plugin is hot-path only; maintenance scheduling stays external via `examples/scripts/run-workers.sh`.
 
 ## Admin/Operations
 
@@ -49,6 +61,7 @@ amm 1.1.0 is a minor release focused on recall intelligence, scoring accuracy, a
 | `AMM_MIN_CONFIDENCE_FOR_CREATION` | `0.50` | Minimum confidence for memory creation (0.0-1.0) |
 | `AMM_MIN_IMPORTANCE_FOR_CREATION` | `0.30` | Minimum importance for memory creation (0.0-1.0) |
 | `AMM_ENTITY_HUB_THRESHOLD` | `10` | Entity link count before hub dampening activates |
+| `AMM_OPENCLAW_RECALL_LIMIT` | `5` | Max ambient recall items injected per OpenClaw turn |
 
 ## Deployment and Distribution
 
