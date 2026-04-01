@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Session-first memory extraction pipeline.** ConsolidateSessions is now the primary extraction path for conversation events. Two-pass LLM: narrative summarization (summarizer model) then structured extraction (review model) on the full session narrative. Produces fewer, richer memories with full conversation context instead of per-event fragments.
+- Shared `processMemoryCandidates()` function used by both Reflect and ConsolidateSessions for consistent validation, dedup, insertion, and entity linking.
+- Idle-timeout trigger for session consolidation. Sessions consolidate after configurable inactivity period (default 15 min, `AMM_SESSION_IDLE_TIMEOUT_MINUTES`). Sessions with an explicit `session_stop` event bypass the idle gate and consolidate immediately.
+- Incremental consolidation for resumed sessions. Each idle gap defines an activity burst; prior summary is prepended for context continuity. Multiple consolidation passes per session are supported.
+- Map-reduce chunking for large sessions exceeding the summarizer's context window (`AMM_SUMMARIZER_CONTEXT_WINDOW`, default 128k). Sessions are split into overlapping chunks, each summarized independently, then consolidated into a final narrative.
+- Entity and relationship extraction from session narratives via `AnalyzeEvents` on the narrative summary.
+- Active open loops from prior sessions are passed to the extraction LLM to avoid re-creating resolved loops.
+- `source_system` metadata on all memories: `remember` (manual), `reflect`, `consolidate_sessions`, `reprocess`.
+- `ResetDerived` preserves manually-created memories (`source_system = "remember"`).
+- `amm status` now reports `llm_configured` and `extraction_active` fields.
+- `DeleteSummary` and `DeleteEpisode` methods on the Repository interface (SQLite + Postgres).
+- `SessionID` field on `ListEpisodesOptions` for session-scoped episode queries.
+- CompressHistory 24hr cooldown: skips if last successful compress job was within the configured period.
+- Hermes agent `on-session-start.sh` hook for session bookending.
+- Full event capture hooks for api-mode claude-code (user, assistant, tool events over HTTP).
+- `session_start` event emission in api-mode hooks for claude-code, codex, and opencode.
+
+### Changed
+
+- **Reflect narrowed to sessionless events only.** Events with a `session_id` are handled by ConsolidateSessions. `ClaimUnreflectedEvents` (SQLite + Postgres) filters `session_id IS NULL OR session_id = ''` at the SQL level.
+- **Model routing corrected.** `ConsolidateNarrative`, `CompressEventBatches`, `SummarizeTopicBatches` now use the summarizer model (large context, cheap). `ExtractMemoryCandidateBatch`, `AnalyzeEvents`, `TriageEvents`, `ReviewMemories` now use the review model (strong instruction following). `LLMIntelligenceProvider` overrides `ExtractMemoryCandidateBatch` to route through the review model.
+- Reprocess now handles session events: clears `reflected_at`, deletes stale session summaries and episodes, triggers `ConsolidateSessions` for immediate rebuild.
+- `FormEpisodes` removed from default maintenance pipeline (`run-workers.sh`) and session-end hooks. Narrative episodes from ConsolidateSessions are higher quality. Code retained for future cross-session episode detection.
+- Claude Code `on-user-message.sh` rewritten to parse stdin JSON instead of `$1` argument. Removes date-based `CLAUDE_SESSION_ID` fallback.
+- All claude-code hooks now include `cwd` in event metadata for project_id inference.
+- Hermes agent hooks: date-based session ID fallback replaced with stable UUID (`uuidgen` with python3 fallback). `cwd` added to all hook metadata.
+- Api-mode codex and opencode examples updated with `cwd` and `project_id` in metadata.
+
+### Removed
+
+- `insertNarrativeMemories()` and `insertNarrativeMemoryIfNotDuplicate()` — replaced by full extraction pipeline on narrative summaries.
+- `narrativeMemorySearchQuery()` helper (dead code after removal).
+
 ## [1.1.1] - 2026-04-01
 
 ### Added
