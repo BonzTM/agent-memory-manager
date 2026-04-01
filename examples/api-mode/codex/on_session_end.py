@@ -17,7 +17,12 @@ def main():
     payload = {
         "kind": "session_stop",
         "source_system": "codex",
-        "content": f"Codex session ended for project: {project_id}"
+        "content": f"Codex session ended for project: {project_id}",
+        "project_id": project_id,
+        "metadata": {
+            "hook_event": "session_end",
+            "cwd": os.getcwd()
+        }
     }
     
     try:

@@ -1,7 +1,10 @@
 {
   "hooks": {
     "onSessionStart": "./on-session-start.sh",
-    "onSessionEnd": "./on-session-end.sh"
+    "onSessionEnd": "./on-session-end.sh",
+    "onUserMessage": "./on-user-message.sh",
+    "onAssistantMessage": "./on-assistant-message.sh",
+    "onToolUse": "./on-tool-use.sh"
   },
   "mcpServers": {
     "amm-http": {

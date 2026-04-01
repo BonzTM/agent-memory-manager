@@ -13,6 +13,24 @@ export default {
   },
   hooks: {
     async onSessionStart(ctx) {
+      // Emit session_start event
+      await fetch(`${this.config.apiUrl}/v1/events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : {})
+        },
+        body: JSON.stringify({
+          kind: 'session_start',
+          source_system: 'opencode',
+          project_id: this.config.projectId,
+          content: `OpenCode session started for project ${this.config.projectId}`,
+          metadata: {
+            hook_event: 'session_start',
+            cwd: process.cwd()
+          }
+        })
+      }).catch(() => {});
       const response = await fetch(`${this.config.apiUrl}/v1/recall`, {
         method: 'POST',
         headers: {
@@ -38,7 +56,11 @@ export default {
           kind: message.role === 'user' ? 'message_user' : 'message_assistant',
           source_system: 'opencode',
           content: message.content,
-          project_id: this.config.projectId
+          project_id: this.config.projectId,
+          metadata: {
+            hook_event: message.role === 'user' ? 'UserMessage' : 'AssistantResponse',
+            cwd: process.cwd()
+          }
         })
       });
     }
