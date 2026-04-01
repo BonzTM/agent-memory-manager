@@ -116,9 +116,11 @@ jobs:
         run: |
           npm version "${{ env.VERSION }}" --no-git-tag-version --allow-same-version
 
-      - name: Publish to npm with provenance
+      - name: Publish to npm
         working-directory: examples/openclaw
-        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
 
   docker:
     name: Docker Image
