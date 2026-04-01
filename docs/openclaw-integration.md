@@ -2,13 +2,28 @@
 
 OpenClaw is the runtime; amm is the memory substrate. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md).
 
-This repo ships a **native OpenClaw plugin** under [`examples/openclaw/`](../examples/openclaw/), targeting **OpenClaw 2026.03.31+**. The plugin uses `definePluginEntry()` and `openclaw.plugin.json` — it is a proper OpenClaw plugin, not a hook bundle.
+## Install
+
+```bash
+openclaw plugins install @bonztm/amm
+```
+
+Or from a local checkout:
+
+```bash
+cd examples/openclaw && ./install.sh
+```
+
+See [`examples/openclaw/README.md`](../examples/openclaw/README.md) for all install options.
 
 ## What the Plugin Does
 
-1. **Ambient recall injection** — the `before_prompt_build` hook queries amm and returns a `prependContext` block with relevant memories before the LLM sees the prompt
-2. **Event capture** — plugin-registered hooks capture `message:preprocessed`, `message:sent`, `tool:called`, and `tool:completed` events into amm history
-3. **Dual transport** — local `amm` binary (default) or HTTP API via `AMM_API_URL`
+The plugin **claims the memory slot** (`plugins.slots.memory`), replacing OpenClaw's built-in `memory-core` with AMM's full extraction and recall pipeline.
+
+1. **`memory_search` / `memory_get` tools** — registered via `api.registerTool()`, available to the agent for explicit memory queries
+2. **Ambient recall injection** — the `before_prompt_build` hook queries amm and returns a `prependContext` block with relevant memories before the LLM sees the prompt
+3. **Event capture** — plugin-registered hooks capture `message:preprocessed`, `message:sent`, `tool:called`, and `tool:completed` events into amm history
+4. **Dual transport** — local `amm` binary (default) or HTTP API via `AMM_API_URL`
 
 The plugin is **hot-path only**. It does not run maintenance jobs.
 
@@ -27,9 +42,10 @@ The plugin is **hot-path only**. It does not run maintenance jobs.
 
 ```text
 examples/openclaw/
-  openclaw.plugin.json          # Native plugin manifest
-  package.json                  # Plugin package metadata
-  index.ts                      # definePluginEntry() — registers all hooks
+  openclaw.plugin.json          # Native plugin manifest (kind: "memory")
+  package.json                  # Published as @bonztm/amm on npm
+  index.ts                      # definePluginEntry() — tools + hooks
+  install.sh                    # One-command local installer
   src/
     config.ts                   # Config resolution (plugin config + env)
     transport.ts                # Dual transport (binary CLI / HTTP API)
