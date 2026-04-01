@@ -35,6 +35,9 @@ type AMMService struct {
 	minImportanceForCreation        float64
 	entityHubThreshold              int64
 	maxExpandDepth                  int
+	sessionIdleTimeout              time.Duration
+	summarizerContextWindow         int
+	compressCooldown                time.Duration
 	scoringWeights                  ScoringWeights
 	scoringWeightsMu                sync.RWMutex
 }
@@ -65,6 +68,8 @@ func New(repo core.Repository, dbPath string, summarizer core.Summarizer, embedd
 		minImportanceForCreation:        defaultMinImportanceForCreation,
 		entityHubThreshold:              defaultEntityHubThreshold,
 		maxExpandDepth:                  1,
+		sessionIdleTimeout:              defaultSessionIdleTimeout,
+		summarizerContextWindow:         defaultSummarizerContextWindow,
 		scoringWeights:                  DefaultScoringWeights(),
 	}
 	if repo != nil && dbPath != "" {
@@ -194,6 +199,29 @@ func (s *AMMService) SetMaxExpandDepth(depth int) {
 	s.maxExpandDepth = depth
 }
 
+// SetSessionIdleTimeout configures how long a session must be idle before
+// ConsolidateSessions processes it. Zero or negative restores the default.
+// SetSessionIdleTimeout configures how long a session must be idle before
+// ConsolidateSessions processes it. Zero means process immediately (useful
+// for testing). Negative values restore the default (15 min).
+func (s *AMMService) SetSessionIdleTimeout(d time.Duration) {
+	if d < 0 {
+		s.sessionIdleTimeout = defaultSessionIdleTimeout
+		return
+	}
+	s.sessionIdleTimeout = d
+}
+
+// SetSummarizerContextWindow sets the token budget for the summarizer model.
+// Used by ConsolidateSessions to decide when to chunk large sessions.
+func (s *AMMService) SetSummarizerContextWindow(tokens int) {
+	if tokens <= 0 {
+		s.summarizerContextWindow = defaultSummarizerContextWindow
+		return
+	}
+	s.summarizerContextWindow = tokens
+}
+
 func (s *AMMService) SetIntelligenceProvider(provider core.IntelligenceProvider) {
 	if provider == nil {
 		s.intelligence = s.defaultIntelligence
@@ -321,6 +349,7 @@ func (s *AMMService) Remember(ctx context.Context, memory *core.Memory) (*core.M
 		memory.Metadata = make(map[string]string)
 	}
 	setProcessingMeta(memory, MetaExtractionQuality, QualityVerified)
+	setProcessingMeta(memory, "source_system", "remember")
 
 	if memory.Supersedes == "" {
 		activeMemories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
@@ -1077,9 +1106,12 @@ func (s *AMMService) Status(ctx context.Context) (*core.StatusResult, error) {
 		return nil, fmt.Errorf("count entities: %w", err)
 	}
 
+	llmConfigured := s.intelligence != nil && s.intelligence.IsLLMBacked()
 	result := &core.StatusResult{
 		DBPath:            s.dbPath,
 		Initialized:       initialized,
+		LLMConfigured:     llmConfigured,
+		ExtractionActive:  llmConfigured,
 		EventCount:        evtCount,
 		PendingEventCount: pendingCount,
 		MemoryCount:       memCount,

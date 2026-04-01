@@ -31,6 +31,20 @@ func (s *AMMService) jobFrontierSequenceID(ctx context.Context, kind string) int
 	return v
 }
 
+// lastCompletedJobTime returns the finish time of the most recent completed
+// job of the given kind, or zero time if none exists.
+func (s *AMMService) lastCompletedJobTime(ctx context.Context, kind string) time.Time {
+	jobs, err := s.repo.ListJobs(ctx, core.ListJobsOptions{
+		Kind:   kind,
+		Status: "completed",
+		Limit:  1,
+	})
+	if err != nil || len(jobs) == 0 || jobs[0].FinishedAt == nil {
+		return time.Time{}
+	}
+	return *jobs[0].FinishedAt
+}
+
 func (s *AMMService) legacyCompressWatermark(ctx context.Context) string {
 	jobs, err := s.repo.ListJobs(ctx, core.ListJobsOptions{
 		Kind:   "compress",
@@ -63,6 +77,9 @@ const (
 	sessionBodyMaxChars                   = 2000
 	topicBodyMaxChars                     = 2000
 	defaultEscalationDeterministicMaxChars = 2048
+	defaultSessionIdleTimeout             = 15 * time.Minute
+	defaultSummarizerContextWindow        = 128000 // tokens
+	defaultCompressCooldown               = 24 * time.Hour
 )
 
 type compressEventChunkPlan struct {
@@ -88,6 +105,19 @@ type topicSummaryPlan struct {
 // returns the number created.
 func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 	slog.Debug("CompressHistory called")
+
+	// Cooldown: skip if ran within the configured period (default 24h).
+	cooldown := s.compressCooldown
+	if cooldown <= 0 {
+		cooldown = defaultCompressCooldown
+	}
+	if lastRun := s.lastCompletedJobTime(ctx, "compress"); !lastRun.IsZero() {
+		if time.Since(lastRun) < cooldown {
+			slog.Debug("CompressHistory skipped (cooldown)", "last_run", lastRun, "cooldown", cooldown)
+			return 0, nil
+		}
+	}
+
 	frontier := s.jobFrontierSequenceID(ctx, "compress")
 
 	maxEvents := s.compressMaxEvents
@@ -299,52 +329,72 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 		}
 	}
 
-	recordFrontier := func(created int) error {
-		maxSeq := maxEventSequenceID(newEvents)
-		now := time.Now().UTC()
-		job := &core.Job{
-		ID:         core.GenerateID("job_"),
-			Kind:       "consolidate_sessions",
-			Status:     "completed",
-			StartedAt:  &now,
-			FinishedAt: &now,
-			Result: map[string]string{
-				"created":         fmt.Sprintf("%d", created),
-				"max_sequence_id": fmt.Sprintf("%d", maxSeq),
-			},
-			CreatedAt: now,
-		}
-		return s.repo.InsertJob(ctx, job)
-	}
-
 	if len(candidateSessionIDs) == 0 {
-		if err := recordFrontier(0); err != nil {
-			return 0, fmt.Errorf("record consolidate_sessions job: %w", err)
-		}
-		return 0, nil
+		// No session events in this batch — still advance the frontier so we
+		// don't re-scan the same sessionless events on the next run.
+		return 0, s.recordConsolidateFrontier(ctx, 0, maxEventSequenceID(newEvents))
 	}
 
 	created := 0
 
-	for sessionID := range candidateSessionIDs {
-		existing, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{
-			Kind:      "session",
-			SessionID: sessionID,
-			Limit:     1,
-		})
-		if err == nil && len(existing) > 0 {
-			continue
-		}
+	idleTimeout := s.sessionIdleTimeout
+	now := time.Now().UTC()
 
+	// Track the max sequence ID of sessions we actually processed (not skipped),
+	// and the minimum sequence ID of any skipped session so we don't advance
+	// the frontier past it.
+	var processedMaxSeq int64
+	var skippedMinSeq int64
+
+	for sessionID := range candidateSessionIDs {
+		// Incremental consolidation: find unreflected events for this session.
 		evts, err := s.repo.ListEvents(ctx, core.ListEventsOptions{
-			SessionID: sessionID,
-			Limit:     500,
+			SessionID:       sessionID,
+			UnreflectedOnly: true,
+			Limit:           10000,
 		})
 		if err != nil {
 			return created, fmt.Errorf("list session events for consolidate %s: %w", sessionID, err)
 		}
 		if len(evts) == 0 {
 			continue
+		}
+
+		// Idle-timeout check: skip sessions that are still active.
+		// When idleTimeout is 0, skip the check (process immediately).
+		// Bypass the idle gate if the session has an explicit session_stop event.
+		hasStopEvent := false
+		for _, evt := range evts {
+			if evt.Kind == "session_stop" {
+				hasStopEvent = true
+				break
+			}
+		}
+		if idleTimeout > 0 && !hasStopEvent {
+			latestEvent := evts[len(evts)-1].OccurredAt
+			for _, evt := range evts {
+				if evt.OccurredAt.After(latestEvent) {
+					latestEvent = evt.OccurredAt
+				}
+			}
+			if now.Sub(latestEvent) < idleTimeout {
+				slog.Debug("session still active, skipping consolidation",
+					"session_id", sessionID,
+					"latest_event", latestEvent,
+					"idle_timeout", idleTimeout)
+				// Track the minimum sequence of skipped sessions so the
+				// frontier doesn't advance past them.
+				minSeq := evts[0].SequenceID
+				for _, evt := range evts[1:] {
+					if evt.SequenceID < minSeq {
+						minSeq = evt.SequenceID
+					}
+				}
+				if skippedMinSeq == 0 || minSeq < skippedMinSeq {
+					skippedMinSeq = minSeq
+				}
+				continue
+			}
 		}
 
 		eventIDs := make([]string, 0, len(evts))
@@ -371,7 +421,32 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 			return created, fmt.Errorf("collect session memory context: %w", err)
 		}
 
-		body, tightDesc, narrativeResult, usedNarrative, err := s.buildSessionNarrative(ctx, eventContents, bodyBuilder.String(), evts, existingMemories)
+		// Fetch prior summary for context continuity (incremental consolidation).
+		priorSummary := s.latestSessionSummary(ctx, sessionID)
+
+		// Prepend prior summary as context for the narrative LLM.
+		narrativeContents := eventContents
+		narrativeJoined := bodyBuilder.String()
+		if priorSummary != nil && priorSummary.Body != "" {
+			contextPrefix := fmt.Sprintf("[Previously in this session]\n%s\n\n[New events in this activity burst]", priorSummary.Body)
+			priorContent := core.EventContent{
+				Index:     0, // synthetic, before real events
+				Content:   contextPrefix,
+				SessionID: sessionID,
+				ProjectID: projectID,
+			}
+			narrativeContents = append([]core.EventContent{priorContent}, eventContents...)
+			// Re-index so the LLM sees sequential indices
+			for i := range narrativeContents {
+				narrativeContents[i].Index = i + 1
+			}
+			narrativeJoined = contextPrefix + "\n" + bodyBuilder.String()
+		}
+
+		// Check if we need map-reduce chunking for large sessions.
+		narrativeContents, narrativeJoined = s.chunkSessionIfNeeded(ctx, narrativeContents, narrativeJoined, existingMemories, sessionID)
+
+		body, tightDesc, narrativeResult, usedNarrative, err := s.buildSessionNarrative(ctx, narrativeContents, narrativeJoined, evts, existingMemories)
 		if err != nil {
 			return created, err
 		}
@@ -381,14 +456,77 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 				return created, fmt.Errorf("insert narrative episode: %w", err)
 			}
 
-			autoMemories, err := s.insertNarrativeMemories(ctx, narrativeResult, scope, projectID, sessionID, eventIDs)
-			if err != nil {
-				return created, fmt.Errorf("insert narrative memories: %w", err)
+			// Extract memories from the narrative using the full extraction pipeline.
+			// Include KeyDecisions/Unresolved and active open loops as
+			// supplementary context so the extraction LLM can close resolved
+			// loops and avoid re-creating existing ones.
+			if s.intelligence != nil && narrativeResult.Summary != "" {
+				openLoops := s.activeOpenLoopsForScope(ctx, scope, projectID)
+				extractionInput := buildExtractionInput(narrativeResult, openLoops)
+
+				// Try AnalyzeEvents on the narrative for entities/relationships
+				// alongside memory extraction (single LLM call when supported).
+				var extracted []core.MemoryCandidate
+				var analysisEntities []core.EntityCandidate
+				var analysisRelationships []core.RelationshipCandidate
+				usedAnalysis := false
+
+				if s.intelligence.IsLLMBacked() {
+					narrativeEvent := []core.EventContent{{
+						Index:     1,
+						Content:   extractionInput,
+						ProjectID: projectID,
+						SessionID: sessionID,
+					}}
+					analysis, analysisErr := s.intelligence.AnalyzeEvents(ctx, narrativeEvent)
+					if analysisErr == nil && analysis != nil && len(analysis.Memories) > 0 {
+						extracted = analysis.Memories
+						analysisEntities = analysis.Entities
+						analysisRelationships = analysis.Relationships
+						usedAnalysis = true
+					}
+				}
+
+				// Fall back to extraction-only if analysis didn't produce memories.
+				if len(extracted) == 0 {
+					var err error
+					extracted, err = s.intelligence.ExtractMemoryCandidateBatch(ctx, []string{extractionInput})
+					if err != nil {
+						slog.Warn("narrative memory extraction failed, skipping",
+							"session_id", sessionID, "error", err)
+					}
+				}
+
+				if len(extracted) > 0 {
+					scopeVal := scope
+					memCreated, err := s.processMemoryCandidates(ctx, candidateProcessingInput{
+						candidates:            extracted,
+						sourceEvents:          evts,
+						sourceSystem:          "consolidate_sessions",
+						scopeOverride:         &scopeVal,
+						projectOverride:       projectID,
+						sessionID:             sessionID,
+						analysisEntities:      analysisEntities,
+						analysisRelationships: analysisRelationships,
+						usedAnalysis:          usedAnalysis,
+					})
+					if err != nil {
+						return created, fmt.Errorf("process narrative memory candidates: %w", err)
+					}
+					slog.Debug("extracted memories from session narrative",
+						"session_id", sessionID, "created", memCreated)
+				}
 			}
-			linkedMemories = append(linkedMemories, autoMemories...)
 		}
 
-		now := time.Now().UTC()
+		summaryNow := time.Now().UTC()
+
+		// Build summary title including burst number if this is an incremental pass.
+		summaryTitle := fmt.Sprintf("Session %s", sessionID)
+		if priorSummary != nil {
+			summaryTitle = fmt.Sprintf("Session %s (continued)", sessionID)
+		}
+
 		summary := &core.Summary{
 			ID:               core.GenerateID("sum_"),
 			Kind:             "session",
@@ -396,15 +534,15 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 			Scope:            scope,
 			ProjectID:        projectID,
 			SessionID:        sessionID,
-			Title:            fmt.Sprintf("Session %s", sessionID),
+			Title:            summaryTitle,
 			Body:             body,
 			TightDescription: tightDesc,
 			PrivacyLevel:     core.PrivacyPrivate,
 			SourceSpan: core.SourceSpan{
 				EventIDs: eventIDs,
 			},
-			CreatedAt: now,
-			UpdatedAt: now,
+			CreatedAt: summaryNow,
+			UpdatedAt: summaryNow,
 		}
 
 		if err := s.repo.InsertSummary(ctx, summary); err != nil {
@@ -423,15 +561,35 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 			}
 		}
 
+		// Mark events reflected AFTER summary persistence succeeds.
+		// If we mark before and the summary write fails, the burst is lost.
+		if err := s.markEventsReflected(ctx, evts); err != nil {
+			return created, fmt.Errorf("mark session events reflected: %w", err)
+		}
+
 		if err := s.markMemoriesNarrativeIncluded(ctx, linkedMemories); err != nil {
 			return created, fmt.Errorf("mark narrative included metadata: %w", err)
+		}
+
+		// Only advance frontier past sessions we actually completed.
+		if seq := maxEventSequenceID(evts); seq > processedMaxSeq {
+			processedMaxSeq = seq
 		}
 
 		created++
 	}
 
-	if err := recordFrontier(created); err != nil {
-		return created, fmt.Errorf("record consolidate_sessions job: %w", err)
+	// Record frontier. If any sessions were skipped (idle-timeout), cap the
+	// frontier just below their earliest event so they're re-discovered.
+	frontierSeq := processedMaxSeq
+	if frontierSeq == 0 {
+		frontierSeq = maxEventSequenceID(newEvents)
+	}
+	if skippedMinSeq > 0 && skippedMinSeq-1 < frontierSeq {
+		frontierSeq = skippedMinSeq - 1
+	}
+	if err := s.recordConsolidateFrontier(ctx, created, frontierSeq); err != nil {
+		return created, err
 	}
 
 	return created, nil
@@ -942,124 +1100,6 @@ func eventTimeBounds(events []core.Event) (*time.Time, *time.Time) {
 	return &minTime, &maxTime
 }
 
-func (s *AMMService) insertNarrativeMemories(
-	ctx context.Context,
-	result *core.NarrativeResult,
-	scope core.Scope,
-	projectID string,
-	sessionID string,
-	eventIDs []string,
-) ([]*core.Memory, error) {
-	if result == nil {
-		return nil, nil
-	}
-
-	created := make([]*core.Memory, 0, len(result.KeyDecisions)+len(result.Unresolved))
-	for _, decision := range result.KeyDecisions {
-		mem, err := s.insertNarrativeMemoryIfNotDuplicate(ctx, core.MemoryTypeDecision, decision, scope, projectID, sessionID, eventIDs)
-		if err != nil {
-			return nil, err
-		}
-		if mem != nil {
-			created = append(created, mem)
-		}
-	}
-	for _, unresolved := range result.Unresolved {
-		mem, err := s.insertNarrativeMemoryIfNotDuplicate(ctx, core.MemoryTypeOpenLoop, unresolved, scope, projectID, sessionID, eventIDs)
-		if err != nil {
-			return nil, err
-		}
-		if mem != nil {
-			created = append(created, mem)
-		}
-	}
-
-	return created, nil
-}
-
-func (s *AMMService) insertNarrativeMemoryIfNotDuplicate(
-	ctx context.Context,
-	memoryType core.MemoryType,
-	body string,
-	scope core.Scope,
-	projectID string,
-	sessionID string,
-	eventIDs []string,
-) (*core.Memory, error) {
-	trimmedBody := strings.TrimSpace(body)
-	if trimmedBody == "" {
-		return nil, nil
-	}
-
-	now := time.Now().UTC()
-	candidate := core.Memory{
-		Type:             memoryType,
-		Scope:            scope,
-		ProjectID:        projectID,
-		SessionID:        sessionID,
-		Body:             trimmedBody,
-		TightDescription: func() string {
-			td := extractTightDescription(trimmedBody, 120)
-			if _, ok := sanitizeTightDescription(td); !ok {
-				if len(trimmedBody) > 120 {
-					return trimmedBody[:120]
-				}
-				return trimmedBody
-			}
-			return td
-		}(),
-		Confidence:       0.85,
-		Importance:       importanceForCandidate(core.MemoryCandidate{Type: memoryType}),
-		Status:           core.MemoryStatusActive,
-		SourceEventIDs:   eventIDs,
-	}
-
-	queryText := narrativeMemorySearchQuery(candidate)
-	existing, err := s.repo.SearchMemoriesFuzzy(ctx, queryText, core.ListMemoriesOptions{
-		Type:      memoryType,
-		Scope:     scope,
-		ProjectID: projectID,
-		Status:    core.MemoryStatusActive,
-		Limit:     100,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("search memories for narrative duplicate detection: %w", err)
-	}
-	active := make([]*core.Memory, 0, len(existing))
-	for i := range existing {
-		active = append(active, &existing[i])
-	}
-
-	duplicates := findDuplicateActiveMemories(active, candidate)
-	if len(duplicates) > 0 {
-		return nil, nil
-	}
-
-	mem := &core.Memory{
-			ID:               core.GenerateID("mem_"),
-		Type:             candidate.Type,
-		Scope:            candidate.Scope,
-		ProjectID:        candidate.ProjectID,
-		SessionID:        candidate.SessionID,
-		Body:             candidate.Body,
-		TightDescription: candidate.TightDescription,
-		Confidence:       candidate.Confidence,
-		Importance:       candidate.Importance,
-		PrivacyLevel:     core.PrivacyPrivate,
-		Status:           core.MemoryStatusActive,
-		SourceEventIDs:   candidate.SourceEventIDs,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}
-	markExtracted(mem, s.extractionMethod(), s.extractionModelName())
-	setProcessingMeta(mem, MetaNarrativeIncluded, "true")
-
-	if err := s.repo.InsertMemory(ctx, mem); err != nil {
-		return nil, fmt.Errorf("insert narrative memory: %w", err)
-	}
-
-	return mem, nil
-}
 
 func (s *AMMService) collectSessionMemoryContext(
 	ctx context.Context,
@@ -1092,34 +1132,6 @@ func (s *AMMService) collectSessionMemoryContext(
 	}
 
 	return summaries, linked, nil
-}
-
-func narrativeMemorySearchQuery(candidate core.Memory) string {
-	combined := strings.TrimSpace(strings.Join([]string{candidate.Subject, candidate.TightDescription, candidate.Body}, " "))
-	if combined == "" {
-		return ""
-	}
-	tokens := strings.Fields(strings.ToLower(combined))
-	seen := make(map[string]struct{}, len(tokens))
-	terms := make([]string, 0, 12)
-	for _, token := range tokens {
-		clean := strings.Trim(token, "\"'.,!?;:()[]{}<>|/\\+-=*`")
-		if len(clean) < 3 {
-			continue
-		}
-		if _, ok := seen[clean]; ok {
-			continue
-		}
-		seen[clean] = struct{}{}
-		terms = append(terms, clean)
-		if len(terms) >= 12 {
-			break
-		}
-	}
-	if len(terms) == 0 {
-		return combined
-	}
-	return strings.Join(terms, " ")
 }
 
 func isMemoryLinkedToSession(mem *core.Memory, sessionID string, eventSet map[string]struct{}) bool {
@@ -1181,6 +1193,226 @@ func inferScopeFromEvents(events []core.Event) (core.Scope, string) {
 		}
 	}
 	return core.ScopeProject, projectID
+}
+
+// recordConsolidateFrontier persists a consolidate_sessions job with the given
+// frontier sequence ID so future runs start scanning after it.
+func (s *AMMService) recordConsolidateFrontier(ctx context.Context, created int, maxSeq int64) error {
+	now := time.Now().UTC()
+	job := &core.Job{
+		ID:         core.GenerateID("job_"),
+		Kind:       "consolidate_sessions",
+		Status:     "completed",
+		StartedAt:  &now,
+		FinishedAt: &now,
+		Result: map[string]string{
+			"created":         fmt.Sprintf("%d", created),
+			"max_sequence_id": fmt.Sprintf("%d", maxSeq),
+		},
+		CreatedAt: now,
+	}
+	if err := s.repo.InsertJob(ctx, job); err != nil {
+		return fmt.Errorf("record consolidate_sessions job: %w", err)
+	}
+	return nil
+}
+
+// buildExtractionInput combines the narrative summary with any structured
+// KeyDecisions/Unresolved fields so the extraction LLM sees everything the
+// narrative provider returned.
+func buildExtractionInput(result *core.NarrativeResult, openLoops []core.Memory) string {
+	if result == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(result.Summary)
+	if len(result.KeyDecisions) > 0 {
+		b.WriteString("\n\nKey decisions made in this session:\n")
+		for _, d := range result.KeyDecisions {
+			b.WriteString("- ")
+			b.WriteString(d)
+			b.WriteByte('\n')
+		}
+	}
+	if len(result.Unresolved) > 0 {
+		b.WriteString("\n\nUnresolved items from this session:\n")
+		for _, u := range result.Unresolved {
+			b.WriteString("- ")
+			b.WriteString(u)
+			b.WriteByte('\n')
+		}
+	}
+	if len(openLoops) > 0 {
+		b.WriteString("\n\nActive open loops from prior sessions (close if resolved, don't re-create):\n")
+		for _, ol := range openLoops {
+			b.WriteString("- ")
+			b.WriteString(ol.TightDescription)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+// activeOpenLoopsForScope returns the most recent active open_loop memories
+// for the given scope, capped at 10 to avoid bloating the extraction prompt.
+func (s *AMMService) activeOpenLoopsForScope(ctx context.Context, scope core.Scope, projectID string) []core.Memory {
+	mems, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
+		Type:      core.MemoryTypeOpenLoop,
+		Scope:     scope,
+		ProjectID: projectID,
+		Status:    core.MemoryStatusActive,
+		Limit:     10,
+	})
+	if err != nil {
+		return nil
+	}
+	return mems
+}
+
+// estimateTokens provides a rough chars-to-tokens estimate.
+func estimateTokens(text string) int {
+	return len(text) / 4
+}
+
+// chunkSessionIfNeeded checks if the session content exceeds the summarizer's
+// context window and applies map-reduce chunking if needed. Returns the
+// (possibly reduced) event contents and joined body.
+func (s *AMMService) chunkSessionIfNeeded(
+	ctx context.Context,
+	eventContents []core.EventContent,
+	joinedBody string,
+	existingMemories []core.MemorySummary,
+	sessionID string,
+) ([]core.EventContent, string) {
+	contextWindow := s.summarizerContextWindow
+	if contextWindow <= 0 {
+		contextWindow = defaultSummarizerContextWindow
+	}
+
+	// Reserve space for prompt template and prior summary.
+	promptReserve := 4000
+	availableTokens := contextWindow - promptReserve
+	if availableTokens <= 0 {
+		return eventContents, joinedBody
+	}
+
+	totalTokens := estimateTokens(joinedBody)
+	if totalTokens <= availableTokens {
+		return eventContents, joinedBody
+	}
+
+	if s.intelligence == nil {
+		return eventContents, joinedBody
+	}
+
+	slog.Info("session exceeds context window, chunking",
+		"session_id", sessionID,
+		"estimated_tokens", totalTokens,
+		"context_window", contextWindow,
+		"num_events", len(eventContents))
+
+	// Calculate chunk sizing.
+	eventsPerChunk := len(eventContents) * availableTokens / totalTokens
+	if eventsPerChunk < 5 {
+		eventsPerChunk = 5
+	}
+	overlap := eventsPerChunk / 10
+	if overlap < 1 {
+		overlap = 1
+	}
+
+	// Split into overlapping chunks and summarize each.
+	chunkSummaries := make([]string, 0)
+	for start := 0; start < len(eventContents); {
+		end := start + eventsPerChunk
+		if end > len(eventContents) {
+			end = len(eventContents)
+		}
+		chunk := eventContents[start:end]
+
+		// Re-index the chunk for the LLM.
+		reindexed := make([]core.EventContent, len(chunk))
+		for i, ec := range chunk {
+			reindexed[i] = ec
+			reindexed[i].Index = i + 1
+		}
+
+		result, err := s.intelligence.ConsolidateNarrative(ctx, reindexed, existingMemories)
+		if err != nil {
+			slog.Warn("chunk summarization failed, falling back to single pass",
+				"session_id", sessionID, "error", err)
+			return eventContents, joinedBody
+		}
+		if result != nil && result.Summary != "" {
+			chunkSummaries = append(chunkSummaries, result.Summary)
+		}
+
+		// Advance past the non-overlapping portion.
+		start = end - overlap
+		if start <= end-eventsPerChunk {
+			start = end // prevent infinite loop on tiny overlaps
+		}
+		// If we've reached the end, break.
+		if end >= len(eventContents) {
+			break
+		}
+	}
+
+	if len(chunkSummaries) == 0 {
+		return eventContents, joinedBody
+	}
+
+	// Feed chunk summaries back as synthetic events for the final consolidation.
+	finalContents := make([]core.EventContent, len(chunkSummaries))
+	var finalJoined strings.Builder
+	for i, summary := range chunkSummaries {
+		finalContents[i] = core.EventContent{
+			Index:     i + 1,
+			Content:   fmt.Sprintf("[Session chunk %d/%d summary]\n%s", i+1, len(chunkSummaries), summary),
+			SessionID: sessionID,
+		}
+		if i > 0 {
+			finalJoined.WriteByte('\n')
+		}
+		finalJoined.WriteString(summary)
+	}
+
+	slog.Info("chunked session into summaries",
+		"session_id", sessionID,
+		"chunks", len(chunkSummaries),
+		"original_events", len(eventContents))
+
+	return finalContents, finalJoined.String()
+}
+
+// latestSessionSummary returns the most recent session summary for a given
+// session, or nil if none exists. Used for context continuity in incremental
+// consolidation.
+func (s *AMMService) latestSessionSummary(ctx context.Context, sessionID string) *core.Summary {
+	summaries, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{
+		Kind:      "session",
+		SessionID: sessionID,
+		Limit:     1,
+	})
+	if err != nil || len(summaries) == 0 {
+		return nil
+	}
+	return &summaries[0]
+}
+
+// markEventsReflected sets reflected_at on events that haven't been reflected yet.
+func (s *AMMService) markEventsReflected(ctx context.Context, events []core.Event) error {
+	now := time.Now().UTC()
+	for i := range events {
+		if events[i].ReflectedAt != nil {
+			continue
+		}
+		events[i].ReflectedAt = &now
+		if err := s.repo.UpdateEvent(ctx, &events[i]); err != nil {
+			return fmt.Errorf("mark event %s reflected: %w", events[i].ID, err)
+		}
+	}
+	return nil
 }
 
 func buildTopicSnippets(events []core.Event, n int) string {

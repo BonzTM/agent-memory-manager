@@ -125,7 +125,7 @@ func TestIdle_ConsolidateSessions_AllSessionsAlreadySummarized(t *testing.T) {
 
 	sessions := []string{"sess_idle_summary_a", "sess_idle_summary_b"}
 	for i, sessionID := range sessions {
-		_, err := svc.IngestEvent(ctx, &core.Event{
+		evt, err := svc.IngestEvent(ctx, &core.Event{
 			Kind:         "message",
 			SourceSystem: "test",
 			SessionID:    sessionID,
@@ -134,6 +134,13 @@ func TestIdle_ConsolidateSessions_AllSessionsAlreadySummarized(t *testing.T) {
 			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
 		})
 		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Mark event as already reflected (simulates prior consolidation).
+		reflectedAt := time.Now().UTC()
+		evt.ReflectedAt = &reflectedAt
+		if err := repo.UpdateEvent(ctx, evt); err != nil {
 			t.Fatal(err)
 		}
 
