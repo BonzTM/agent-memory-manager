@@ -32,7 +32,8 @@ func testServiceAndRepo(t *testing.T) (*AMMService, *sqlite.SQLiteRepository) {
 	}
 	repo := &sqlite.SQLiteRepository{DB: db}
 	svc := New(repo, dbPath, nil, nil)
-	svc.SetMinConfidenceForCreation(0) // Tests use heuristic extraction (confidence 0.45)
+	svc.SetMinConfidenceForCreation(0)            // Tests use heuristic extraction (confidence 0.45)
+	svc.SetSessionIdleTimeout(0) // 0 = process immediately in tests
 	t.Cleanup(func() { db.Close() })
 	return svc, repo
 }
@@ -51,7 +52,8 @@ func testServiceAndRepoWithSummarizer(t *testing.T, summarizer core.Summarizer) 
 	}
 	repo := &sqlite.SQLiteRepository{DB: db}
 	svc := New(repo, dbPath, summarizer, nil)
-	svc.SetMinConfidenceForCreation(0) // Tests use heuristic extraction (confidence 0.45)
+	svc.SetMinConfidenceForCreation(0)            // Tests use heuristic extraction (confidence 0.45)
+	svc.SetSessionIdleTimeout(0) // 0 = process immediately in tests
 	t.Cleanup(func() { db.Close() })
 	return svc, repo
 }
@@ -1628,10 +1630,17 @@ func TestConsolidateSessions_AutoExtractsDecisions(t *testing.T) {
 	svc.SetIntelligenceProvider(consolidateTestIntelligence{
 		consolidate: func(_ []core.EventContent, _ []core.MemorySummary) (*core.NarrativeResult, error) {
 			return &core.NarrativeResult{
-				Summary:      "decision summary",
-				TightDesc:    "decision tight",
-				KeyDecisions: []string{"Adopt IntelligenceProvider for session consolidation"},
+				Summary:   "decision summary",
+				TightDesc: "decision tight",
 			}, nil
+		},
+		extractBatch: func(_ []string) ([]core.MemoryCandidate, error) {
+			return []core.MemoryCandidate{{
+				Type:             core.MemoryTypeDecision,
+				Body:             "Adopt IntelligenceProvider for session consolidation",
+				TightDescription: "Adopt IntelligenceProvider for consolidation",
+				Confidence:       0.9,
+			}}, nil
 		},
 	})
 
@@ -1681,8 +1690,8 @@ func TestConsolidateSessions_AutoExtractsDecisions(t *testing.T) {
 	if mems[0].Body != "Adopt IntelligenceProvider for session consolidation" {
 		t.Fatalf("unexpected decision body: %q", mems[0].Body)
 	}
-	if mems[0].Metadata[MetaExtractionQuality] != QualityProvisional {
-		t.Fatalf("expected extraction quality provisional, got %q", mems[0].Metadata[MetaExtractionQuality])
+	if mems[0].Metadata["source_system"] != "consolidate_sessions" {
+		t.Fatalf("expected source_system consolidate_sessions, got %q", mems[0].Metadata["source_system"])
 	}
 
 	seededAfter, err := svc.repo.GetMemory(ctx, seeded.ID)
@@ -1701,10 +1710,17 @@ func TestConsolidateSessions_AutoExtractsOpenLoops(t *testing.T) {
 	svc.SetIntelligenceProvider(consolidateTestIntelligence{
 		consolidate: func(_ []core.EventContent, _ []core.MemorySummary) (*core.NarrativeResult, error) {
 			return &core.NarrativeResult{
-				Summary:    "open loop summary",
-				TightDesc:  "open loop tight",
-				Unresolved: []string{"How should we route model-specific narrative prompts?"},
+				Summary:   "open loop summary",
+				TightDesc: "open loop tight",
 			}, nil
+		},
+		extractBatch: func(_ []string) ([]core.MemoryCandidate, error) {
+			return []core.MemoryCandidate{{
+				Type:             core.MemoryTypeOpenLoop,
+				Body:             "How should we route model-specific narrative prompts?",
+				TightDescription: "Model-specific narrative prompt routing",
+				Confidence:       0.85,
+			}}, nil
 		},
 	})
 
@@ -1737,8 +1753,8 @@ func TestConsolidateSessions_AutoExtractsOpenLoops(t *testing.T) {
 	if mems[0].Body != "How should we route model-specific narrative prompts?" {
 		t.Fatalf("unexpected open_loop body: %q", mems[0].Body)
 	}
-	if mems[0].Metadata[MetaExtractionQuality] != QualityProvisional {
-		t.Fatalf("expected extraction quality provisional, got %q", mems[0].Metadata[MetaExtractionQuality])
+	if mems[0].Metadata["source_system"] != "consolidate_sessions" {
+		t.Fatalf("expected source_system consolidate_sessions, got %q", mems[0].Metadata["source_system"])
 	}
 }
 
@@ -1810,10 +1826,17 @@ func TestConsolidateSessions_RunJob(t *testing.T) {
 	svc.SetIntelligenceProvider(consolidateTestIntelligence{
 		consolidate: func(_ []core.EventContent, _ []core.MemorySummary) (*core.NarrativeResult, error) {
 			return &core.NarrativeResult{
-				Summary:      "job consolidate summary",
-				TightDesc:    "job consolidate tight",
-				KeyDecisions: []string{"Use consolidate_sessions job pathway"},
+				Summary:   "job consolidate summary",
+				TightDesc: "job consolidate tight",
 			}, nil
+		},
+		extractBatch: func(_ []string) ([]core.MemoryCandidate, error) {
+			return []core.MemoryCandidate{{
+				Type:             core.MemoryTypeDecision,
+				Body:             "Use consolidate_sessions job pathway",
+				TightDescription: "Use consolidate_sessions job pathway",
+				Confidence:       0.9,
+			}}, nil
 		},
 	})
 

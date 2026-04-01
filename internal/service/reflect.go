@@ -115,182 +115,19 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 				continue
 			}
 
-			for _, rawCandidate := range candidates {
-				candidate, ok := prepareMemoryCandidate(rawCandidate)
-				if !ok {
-					continue
-				}
-				if !passesIntakeQualityGates(candidate, s.minConfidenceForCreation, s.minImportanceForCreation) {
-					slog.Debug("candidate rejected by intake quality gate",
-						"confidence", candidate.Confidence,
-						"min_confidence", s.minConfidenceForCreation,
-						"min_importance", s.minImportanceForCreation,
-						"type", candidate.Type,
-					)
-					continue
-				}
-				if candidateSourcedFromLowQualityEvents(candidate, eventQuality) {
-					slog.Debug("candidate rejected: all source events classified as ephemeral or noise",
-						"source_events", candidate.SourceEventNums,
-						"type", candidate.Type,
-					)
-					continue
-				}
-				candidateEvents, ok := resolveCandidateEvents(batch, candidate.SourceEventNums)
-				if !ok {
-					continue
-				}
-
-				scope, projectID := inferScopeFromEvents(candidateEvents)
-				sourceEventIDs := eventIDsFromEvents(candidateEvents)
-				if len(sourceEventIDs) == 0 {
-					continue
-				}
-				sourceContent := joinEventContent(candidateEvents)
-				candidateEntities := []core.EntityCandidate(nil)
-				candidateRelationships := []core.RelationshipCandidate(nil)
-				if usedAnalysis {
-					candidateEntities = selectAnalysisEntitiesForContent(analysisEntities, sourceContent)
-					candidateRelationships = selectAnalysisRelationshipsForContent(analysisRelationships, analysisEntities, sourceContent)
-				}
-
-				now := time.Now().UTC()
-				importance := importanceForCandidate(candidate)
-				candidateMemory := core.Memory{
-					Type:             candidate.Type,
-					Scope:            scope,
-					ProjectID:        projectID,
-					Subject:          candidate.Subject,
-					Body:             candidate.Body,
-					TightDescription: candidate.TightDescription,
-					Confidence:       candidate.Confidence,
-					Importance:       importance,
-					Status:           core.MemoryStatusActive,
-					SourceEventIDs:   sourceEventIDs,
-				}
-
-				fuzzyText := strings.TrimSpace(strings.Join([]string{candidateMemory.Subject, candidateMemory.TightDescription, candidateMemory.Body}, " "))
-
-				retractedResults, _ := s.repo.SearchMemoriesFuzzy(ctx, fuzzyText, core.ListMemoriesOptions{Type: candidate.Type, Scope: scope, ProjectID: projectID, Status: core.MemoryStatusRetracted, Limit: 20})
-				retractedPtrs := make([]*core.Memory, 0, len(retractedResults))
-				for i := range retractedResults {
-					retractedPtrs = append(retractedPtrs, &retractedResults[i])
-				}
-				if matchesRetractedMemory(retractedPtrs, candidateMemory) {
-					continue
-				}
-
-				existing, err := s.repo.SearchMemoriesFuzzy(ctx, fuzzyText, core.ListMemoriesOptions{Type: candidate.Type, Scope: scope, ProjectID: projectID, Status: core.MemoryStatusActive, Limit: 100})
-				if err != nil {
-					return created, fmt.Errorf("search memories for reflect duplicate detection: %w", err)
-				}
-				activeMemories := make([]*core.Memory, 0, len(existing))
-				for i := range existing {
-					activeMemories = append(activeMemories, &existing[i])
-				}
-
-				duplicates := findDuplicateActiveMemories(activeMemories, candidateMemory)
-				if len(duplicates) > 0 {
-					duplicate := selectDuplicateKeeper(duplicates)
-					duplicate.SourceEventIDs = mergeUniqueStrings(duplicate.SourceEventIDs, candidateMemory.SourceEventIDs)
-					for _, sibling := range duplicates {
-						if sibling == nil || sibling.ID == duplicate.ID {
-							continue
-						}
-						duplicate.SourceEventIDs = mergeUniqueStrings(duplicate.SourceEventIDs, sibling.SourceEventIDs)
-					}
-					if candidateMemory.Confidence > duplicate.Confidence {
-						duplicate.Confidence = candidateMemory.Confidence
-					}
-					if candidateMemory.Importance > duplicate.Importance {
-						duplicate.Importance = candidateMemory.Importance
-					}
-					if shouldUpgradeDuplicateContent(duplicate, candidateMemory, s.extractionMethod()) {
-						duplicate.Subject = candidateMemory.Subject
-						duplicate.Body = candidateMemory.Body
-						duplicate.TightDescription = candidateMemory.TightDescription
-					}
-					method := s.extractionMethod()
-					if getProcessingMeta(duplicate, MetaExtractionMethod) == "" || method == MethodLLM {
-						markExtracted(duplicate, method, s.extractionModelName())
-					}
-					duplicate.UpdatedAt = now
-					if err := s.repo.UpdateMemory(ctx, duplicate); err != nil {
-						return created, fmt.Errorf("update duplicate reflected memory %s: %w", duplicate.ID, err)
-					}
-
-					for _, sibling := range duplicates {
-						if sibling == nil || sibling.ID == duplicate.ID || sibling.Status == core.MemoryStatusSuperseded {
-							continue
-						}
-						supNow := time.Now().UTC()
-						sibling.Status = core.MemoryStatusSuperseded
-						sibling.SupersededBy = duplicate.ID
-						sibling.SupersededAt = &supNow
-						sibling.UpdatedAt = supNow
-						if err := s.repo.UpdateMemory(ctx, sibling); err != nil {
-							return created, fmt.Errorf("supersede duplicate reflected sibling %s: %w", sibling.ID, err)
-						}
-					}
-
-					if usedAnalysis && len(candidateEntities) > 0 {
-						if err := s.linkEntitiesFromAnalysis(ctx, duplicate.ID, candidateEntities); err != nil {
-							return created, fmt.Errorf("link reflected analysis entities: %w", err)
-						}
-					} else {
-						if err := s.linkEntitiesToMemory(ctx, duplicate.ID, sourceContent); err != nil {
-							return created, fmt.Errorf("link reflected entities: %w", err)
-						}
-					}
-					if usedAnalysis && len(candidateRelationships) > 0 {
-						if err := s.createRelationshipsFromAnalysis(ctx, candidateRelationships); err != nil {
-							return created, fmt.Errorf("create reflected relationships: %w", err)
-						}
-					}
-					continue
-				}
-
-				mem := &core.Memory{
-					ID:               core.GenerateID("mem_"),
-					Type:             candidateMemory.Type,
-					Scope:            candidateMemory.Scope,
-					ProjectID:        candidateMemory.ProjectID,
-					Subject:          candidateMemory.Subject,
-					Body:             candidateMemory.Body,
-					TightDescription: candidateMemory.TightDescription,
-					Confidence:       candidateMemory.Confidence,
-					Importance:       importance,
-					PrivacyLevel:     core.PrivacyPrivate,
-					Status:           core.MemoryStatusActive,
-					SourceEventIDs:   candidateMemory.SourceEventIDs,
-					CreatedAt:        now,
-					UpdatedAt:        now,
-				}
-				markExtracted(mem, s.extractionMethod(), s.extractionModelName())
-				setProcessingMeta(mem, "source_system", "reflect")
-
-				if err := s.repo.InsertMemory(ctx, mem); err != nil {
-					return created, fmt.Errorf("insert reflected memory: %w", err)
-				}
-
-				if usedAnalysis && len(candidateEntities) > 0 {
-					if err := s.linkEntitiesFromAnalysis(ctx, mem.ID, candidateEntities); err != nil {
-						return created, fmt.Errorf("link reflected analysis entities: %w", err)
-					}
-				} else {
-					if err := s.linkEntitiesToMemory(ctx, mem.ID, sourceContent); err != nil {
-						return created, fmt.Errorf("link reflected entities: %w", err)
-					}
-				}
-
-				if usedAnalysis && len(candidateRelationships) > 0 {
-					if err := s.createRelationshipsFromAnalysis(ctx, candidateRelationships); err != nil {
-						return created, fmt.Errorf("create reflected relationships: %w", err)
-					}
-				}
-
-				created++
+			batchCreated, err := s.processMemoryCandidates(ctx, candidateProcessingInput{
+				candidates:            candidates,
+				sourceEvents:          batch,
+				eventQuality:          eventQuality,
+				analysisEntities:      analysisEntities,
+				analysisRelationships: analysisRelationships,
+				usedAnalysis:          usedAnalysis,
+				sourceSystem:          "reflect",
+			})
+			if err != nil {
+				return created, err
 			}
+			created += batchCreated
 		}
 	}
 
@@ -314,6 +151,10 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 func filterReflectEventsByMetadata(events []core.Event, isLLMBacked bool) []core.Event {
 	filtered := make([]core.Event, 0, len(events))
 	for _, evt := range events {
+		// Skip events that belong to a session — ConsolidateSessions handles those.
+		if evt.SessionID != "" {
+			continue
+		}
 		if mode, ok := evt.Metadata["ingestion_mode"]; ok {
 			if mode == "ignore" {
 				continue
