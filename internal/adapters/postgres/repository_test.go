@@ -153,8 +153,8 @@ func TestRepositoryEvents(t *testing.T) {
 	now := nowUTC()
 
 	e1 := &core.Event{ID: "evt_1", Kind: "message_user", SourceSystem: "cli", SessionID: "sess_a", ProjectID: "proj_a", PrivacyLevel: core.PrivacyPrivate, Content: "alpha event", Metadata: map[string]string{"k": "v"}, OccurredAt: now.Add(-3 * time.Minute), IngestedAt: now}
-	e2 := &core.Event{ID: "evt_2", Kind: "message_assistant", SourceSystem: "cli", SessionID: "sess_a", ProjectID: "proj_a", PrivacyLevel: core.PrivacyPrivate, Content: "beta event", OccurredAt: now.Add(-2 * time.Minute), IngestedAt: now}
-	e3 := &core.Event{ID: "evt_3", Kind: "message_user", SourceSystem: "cli", SessionID: "sess_b", ProjectID: "proj_b", PrivacyLevel: core.PrivacyPrivate, Content: "gamma findme", OccurredAt: now.Add(-1 * time.Minute), IngestedAt: now}
+	e2 := &core.Event{ID: "evt_2", Kind: "message_assistant", SourceSystem: "cli", SessionID: "", ProjectID: "proj_a", PrivacyLevel: core.PrivacyPrivate, Content: "beta event", OccurredAt: now.Add(-2 * time.Minute), IngestedAt: now}
+	e3 := &core.Event{ID: "evt_3", Kind: "message_user", SourceSystem: "cli", SessionID: "", ProjectID: "proj_b", PrivacyLevel: core.PrivacyPrivate, Content: "gamma findme", OccurredAt: now.Add(-1 * time.Minute), IngestedAt: now}
 	mustInsertEvent(t, repo, e1)
 	mustInsertEvent(t, repo, e2)
 	mustInsertEvent(t, repo, e3)
@@ -185,8 +185,9 @@ func TestRepositoryEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
-	if len(list) != 2 {
-		t.Fatalf("expected 2 events for session, got %d", len(list))
+	// Only e1 has sess_a; e2 is sessionless.
+	if len(list) != 1 {
+		t.Fatalf("expected 1 event for session sess_a, got %d", len(list))
 	}
 
 	searched, err := repo.SearchEvents(ctx, "findme", 10)
