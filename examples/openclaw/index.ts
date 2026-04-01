@@ -85,18 +85,17 @@ export default {
     });
 
     // --- Memory prompt builder (required by memory slot contract) -----------
-    api.registerMemoryPromptSection({
-      id: "amm-recall",
-      promptBuilder: async (ctx: Record<string, unknown>) => {
-        const query = typeof ctx?.query === "string" ? ctx.query : "";
-        const sessionId = typeof ctx?.sessionKey === "string" ? ctx.sessionKey : "";
-        if (!query.trim()) return "";
+    // registerMemoryPromptSection takes a function directly, not an object.
+    // OpenClaw calls it with (params) and expects an array of prompt sections.
+    api.registerMemoryPromptSection(async (params: Record<string, unknown>) => {
+      const query = typeof params?.query === "string" ? params.query : "";
+      const sessionId = typeof params?.sessionKey === "string" ? params.sessionKey : "";
+      if (!query.trim()) return [];
 
-        const raw = await recall(config, query, sessionId);
-        const rendered = renderRecall(raw, config.recallLimit);
-        if (!rendered) return "";
-        return `<amm-context>\n${rendered}\n</amm-context>`;
-      },
+      const raw = await recall(config, query, sessionId);
+      const rendered = renderRecall(raw, config.recallLimit);
+      if (!rendered) return [];
+      return [{ role: "system", content: `<amm-context>\n${rendered}\n</amm-context>` }];
     });
 
     // --- Fallback: before_prompt_build for non-slot recall -----------------
