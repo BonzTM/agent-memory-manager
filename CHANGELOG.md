@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-04-01
+
 ### Added
 
 - Automatic project_id inference from `cwd` event metadata at ingestion. When an event carries `cwd` in metadata and no explicit `project_id`, AMM matches against registered project paths and sets the project scope automatically. Enables correct project-scoped memories from global ingestion hooks.
@@ -90,6 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background maintenance pipeline with reflect, compression, indexing, contradiction detection, graph rebuild, lifecycle review, and related worker jobs.
 - Helm chart and sidecar deployment artifacts for Kubernetes-based installations.
 
-[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.1.0...HEAD
+[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.1.1...HEAD
+[1.1.1]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.1.1
 [1.1.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.1.0
 [1.0.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.0.0

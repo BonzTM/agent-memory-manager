@@ -83,7 +83,7 @@ Expected health response:
 
 ## Notes
 
-- The chart uses `appVersion: 1.1.0` by default.
+- The chart uses `appVersion: 1.1.1` by default.
 - SQLite only supports a single writer at a time; use PostgreSQL for shared high-concurrency deployments.
 - AMM maintenance jobs still need an external scheduler or runtime-triggered execution model.
 
