@@ -1,0 +1,14 @@
+apiVersion: v1
+entries:
+  amm:
+  - apiVersion: v2
+    appVersion: 1.1.0
+    created: "2026-04-01T02:55:01.91225347Z"
+    description: Agent Memory Manager - persistent memory substrate for AI agents
+    digest: 3cd715561f5b11611b6423b053eac613aff2f6a04b482086e4f8902c563325cb
+    name: amm
+    type: application
+    urls:
+    - https://bonztm.github.io/agent-memory-manager/amm-1.1.0.tgz
+    version: 1.1.0
+generated: "2026-04-01T02:55:01.91155449Z"
