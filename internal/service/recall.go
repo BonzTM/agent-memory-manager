@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -37,8 +38,10 @@ func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallO
 	slog.Debug("Recall called", "mode", opts.Mode, "limit", opts.Limit, "project_id", opts.ProjectID, "session_id", opts.SessionID, "query_len", len(query))
 	start := time.Now()
 
+	originalMode := opts.Mode
 	if opts.Mode == "" {
 		opts.Mode = core.RecallModeHybrid
+		originalMode = core.RecallModeHybrid
 	}
 
 	if opts.Limit == 0 {
@@ -53,41 +56,50 @@ func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallO
 	// Build scoring context.
 	sctx := s.buildScoringContext(ctx, query, opts)
 
+	// Auto-route hybrid queries to specialized modes when intent is clear.
+	// The specialized mode runs first; if results are sparse, hybrid backfills
+	// so that summaries, episodes, and events are never lost.
+	var routedMode core.RecallMode
+	if opts.Mode == core.RecallModeHybrid {
+		if routed, ok := classifyRecallIntent(query, sctx.QueryEntities); ok {
+			slog.Debug("intent routing", "from", opts.Mode, "to", routed, "query", query)
+			routedMode = routed
+		}
+	}
+
 	var items []core.RecallItem
 	var err error
 
-	switch opts.Mode {
-	case core.RecallModeAmbient:
-		items, err = s.recallAmbient(ctx, query, opts, sctx)
-	case core.RecallModeFacts:
-		items, err = s.recallFacts(ctx, query, opts, sctx)
-	case core.RecallModeContradictions:
-		items, err = s.recallContradictions(ctx, query, opts, sctx)
-	case core.RecallModeEpisodes:
-		items, err = s.recallEpisodes(ctx, query, opts, sctx)
-	case core.RecallModeProject:
-		items, err = s.recallProject(ctx, query, opts, sctx)
-	case core.RecallModeEntity:
-		items, err = s.recallEntity(ctx, query, opts, sctx)
-	case core.RecallModeHistory:
-		items, err = s.recallHistory(ctx, query, opts, sctx)
-	case core.RecallModeHybrid:
-		items, err = s.recallHybrid(ctx, query, opts, sctx)
-	case core.RecallModeTimeline:
-		items, err = s.recallTimeline(ctx, query, opts)
-	case core.RecallModeActive:
-		items, err = s.recallActive(ctx, query, opts)
-	default:
-		return nil, fmt.Errorf("%w: %q", core.ErrInvalidMode, opts.Mode)
-	}
-	if err != nil {
-		return nil, err
+	if routedMode != "" {
+		// Try the specialized mode first.
+		routedOpts := opts
+		routedOpts.Mode = routedMode
+		items, err = s.dispatchRecall(ctx, query, routedOpts, sctx)
+		if err != nil {
+			return nil, err
+		}
+		// Backfill with hybrid if the specialized mode returned sparse results.
+		if len(items) < opts.Limit {
+			hybridItems, hybridErr := s.recallHybrid(ctx, query, opts, sctx)
+			if hybridErr == nil {
+				items = mergeRecallItems(items, hybridItems, opts.Limit)
+			}
+		}
+		opts.Mode = routedMode
+	} else {
+		items, err = s.dispatchRecall(ctx, query, opts, sctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Truncate to limit.
 	if len(items) > opts.Limit {
 		items = items[:opts.Limit]
 	}
+
+	// Annotate results with active contradictions.
+	s.annotateContradictions(ctx, items, opts.AgentID)
 
 	// Record recall history for repetition suppression.
 	if opts.SessionID != "" {
@@ -99,12 +111,16 @@ func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallO
 	}
 
 	elapsed := time.Since(start).Milliseconds()
+	meta := core.RecallMeta{
+		Mode:        opts.Mode,
+		QueryTimeMs: elapsed,
+	}
+	if opts.Mode != originalMode {
+		meta.RoutedFrom = originalMode
+	}
 	return &core.RecallResult{
 		Items: items,
-		Meta: core.RecallMeta{
-			Mode:        opts.Mode,
-			QueryTimeMs: elapsed,
-		},
+		Meta:  meta,
 	}, nil
 }
 
@@ -1064,6 +1080,146 @@ func jaccardBodySimilarity(a, b string) float64 {
 		return 0
 	}
 	return float64(intersection) / float64(union)
+}
+
+// dispatchRecall routes to the appropriate recall implementation based on mode.
+func (s *AMMService) dispatchRecall(ctx context.Context, query string, opts core.RecallOptions, sctx ScoringContext) ([]core.RecallItem, error) {
+	switch opts.Mode {
+	case core.RecallModeAmbient:
+		return s.recallAmbient(ctx, query, opts, sctx)
+	case core.RecallModeFacts:
+		return s.recallFacts(ctx, query, opts, sctx)
+	case core.RecallModeContradictions:
+		return s.recallContradictions(ctx, query, opts, sctx)
+	case core.RecallModeEpisodes:
+		return s.recallEpisodes(ctx, query, opts, sctx)
+	case core.RecallModeProject:
+		return s.recallProject(ctx, query, opts, sctx)
+	case core.RecallModeEntity:
+		return s.recallEntity(ctx, query, opts, sctx)
+	case core.RecallModeHistory:
+		return s.recallHistory(ctx, query, opts, sctx)
+	case core.RecallModeHybrid:
+		return s.recallHybrid(ctx, query, opts, sctx)
+	case core.RecallModeTimeline:
+		return s.recallTimeline(ctx, query, opts)
+	case core.RecallModeActive:
+		return s.recallActive(ctx, query, opts)
+	default:
+		return nil, fmt.Errorf("%w: %q", core.ErrInvalidMode, opts.Mode)
+	}
+}
+
+// mergeRecallItems merges routed results with hybrid backfill, deduplicating
+// by ID and preserving the routed items' priority (they appear first).
+func mergeRecallItems(primary, backfill []core.RecallItem, limit int) []core.RecallItem {
+	seen := make(map[string]bool, len(primary))
+	for _, item := range primary {
+		seen[item.ID] = true
+	}
+	merged := make([]core.RecallItem, len(primary), limit)
+	copy(merged, primary)
+	for _, item := range backfill {
+		if len(merged) >= limit {
+			break
+		}
+		if !seen[item.ID] {
+			merged = append(merged, item)
+			seen[item.ID] = true
+		}
+	}
+	return merged
+}
+
+// annotateContradictions looks up active contradiction memories and annotates
+// any returned items that are referenced in a contradiction with the IDs of the
+// conflicting memory. Only memory-kind items are checked. The agentID parameter
+// gates visibility: conflicting memory IDs are only included when the caller is
+// allowed to see the referenced memory.
+func (s *AMMService) annotateContradictions(ctx context.Context, items []core.RecallItem, agentID string) {
+	// Collect memory IDs from the result set.
+	memoryIDs := make(map[string]int) // id -> index in items
+	for i, item := range items {
+		if item.Kind == "memory" {
+			memoryIDs[item.ID] = i
+		}
+	}
+	if len(memoryIDs) == 0 {
+		return
+	}
+
+	// Load active contradictions.
+	contradictions, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
+		Type:   core.MemoryTypeContradiction,
+		Status: core.MemoryStatusActive,
+		Limit:  1000,
+	})
+	if err != nil || len(contradictions) == 0 {
+		return
+	}
+
+	// Build a map: memoryID -> set of conflicting memory IDs.
+	conflicts := make(map[string]map[string]bool)
+	for _, c := range contradictions {
+		refIDs := extractMemoryIDsFromContradiction(c.Body)
+		if len(refIDs) < 2 {
+			continue
+		}
+		// Each referenced memory conflicts with all others in this contradiction.
+		for _, id := range refIDs {
+			if conflicts[id] == nil {
+				conflicts[id] = make(map[string]bool)
+			}
+			for _, other := range refIDs {
+				if other != id {
+					conflicts[id][other] = true
+				}
+			}
+		}
+	}
+
+	// Annotate items, filtering by visibility.
+	for id, idx := range memoryIDs {
+		if conflicting, ok := conflicts[id]; ok && len(conflicting) > 0 {
+			ids := make([]string, 0, len(conflicting))
+			for cid := range conflicting {
+				// Only include the conflicting ID if the caller can see that memory.
+				mem, err := s.repo.GetMemory(ctx, cid)
+				if err != nil || mem == nil || !memoryVisibleToAgent(mem, agentID) {
+					continue
+				}
+				ids = append(ids, cid)
+			}
+			sort.Strings(ids)
+			items[idx].ConflictsWith = ids
+		}
+	}
+}
+
+// contradictionMemoryIDPattern matches the two structural "memory mem_..." refs
+// in contradiction bodies. It uses a non-greedy match to skip over the Go %q
+// quoted body text between the two structural positions.
+var contradictionMemoryIDPattern = regexp.MustCompile(`(?:^|[:,])\s*memory\s+(mem_[^\s]+)\s+says\s`)
+
+// extractMemoryIDsFromContradiction parses the two structural memory IDs from
+// a contradiction body. The body format is:
+//
+//	Conflicting claims about "subject": memory mem_A says "...", memory mem_B says "..."
+//
+// Only the first two matches are returned to avoid picking up nested mem_ IDs
+// that may appear inside the Go %q-quoted memory bodies.
+func extractMemoryIDsFromContradiction(body string) []string {
+	matches := contradictionMemoryIDPattern.FindAllStringSubmatch(body, 2)
+	if len(matches) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if len(m) >= 2 {
+			ids = append(ids, m[1])
+		}
+	}
+	return ids
 }
 
 func defaultRecallFilterOptions() recallFilterOptions {

@@ -586,3 +586,128 @@ func TestScoring_PenalizesProvisionalMemories(t *testing.T) {
 		t.Fatalf("expected provisional score (%f) < verified score (%f)", provisionalBreakdown.FinalScore, verifiedBreakdown.FinalScore)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Temporal staleness
+// ---------------------------------------------------------------------------
+
+func TestContainsRelativeTimeLanguage(t *testing.T) {
+	tests := []struct {
+		text string
+		want bool
+	}{
+		{"We currently use Python 3.11", true},
+		{"The latest version is deployed", true},
+		{"Today we decided to switch to Go", true},
+		{"Right now the service is down", true},
+		{"We use Python 3.11 for backend", false},
+		{"The decision was made in January", false},
+		{"", false},
+		{"this sprint we'll focus on auth", true},
+		{"as of now the API is stable", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			if got := containsRelativeTimeLanguage(tt.text); got != tt.want {
+				t.Errorf("containsRelativeTimeLanguage(%q) = %v, want %v", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTemporalStalenessPenalty(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("recent item with relative language — no penalty", func(t *testing.T) {
+		item := ScoringCandidate{
+			Body:      "We currently use Redis",
+			CreatedAt: now.Add(-24 * time.Hour), // 1 day old
+		}
+		penalty := temporalStalenessPenalty(item, now)
+		if penalty != 0 {
+			t.Errorf("expected 0 penalty for recent item, got %f", penalty)
+		}
+	})
+
+	t.Run("old item without relative language — no penalty", func(t *testing.T) {
+		item := ScoringCandidate{
+			Body:      "We use Redis for caching",
+			CreatedAt: now.Add(-90 * 24 * time.Hour), // 90 days old
+		}
+		penalty := temporalStalenessPenalty(item, now)
+		if penalty != 0 {
+			t.Errorf("expected 0 penalty for old item without relative language, got %f", penalty)
+		}
+	})
+
+	t.Run("old item with relative language — has penalty", func(t *testing.T) {
+		item := ScoringCandidate{
+			Body:      "We currently use Python 3.11",
+			CreatedAt: now.Add(-60 * 24 * time.Hour), // 60 days old
+		}
+		penalty := temporalStalenessPenalty(item, now)
+		if penalty <= 0 {
+			t.Errorf("expected positive penalty for old item with 'currently', got %f", penalty)
+		}
+		if penalty > temporalStalenessMaxPenalty {
+			t.Errorf("expected penalty <= %f, got %f", temporalStalenessMaxPenalty, penalty)
+		}
+	})
+
+	t.Run("very old item — capped at max", func(t *testing.T) {
+		item := ScoringCandidate{
+			Body:      "Today we switched to the new auth system",
+			CreatedAt: now.Add(-365 * 24 * time.Hour), // 1 year old
+		}
+		penalty := temporalStalenessPenalty(item, now)
+		if math.Abs(penalty-temporalStalenessMaxPenalty) > 0.001 {
+			t.Errorf("expected penalty capped at %f, got %f", temporalStalenessMaxPenalty, penalty)
+		}
+	})
+
+	t.Run("tight description triggers staleness", func(t *testing.T) {
+		item := ScoringCandidate{
+			Body:             "Python 3.11 is the standard",
+			TightDescription: "currently using Python 3.11",
+			CreatedAt:        now.Add(-60 * 24 * time.Hour),
+		}
+		penalty := temporalStalenessPenalty(item, now)
+		if penalty <= 0 {
+			t.Errorf("expected positive penalty when tight_description has relative language, got %f", penalty)
+		}
+	})
+}
+
+func TestSignalTemporalValidity_StalenessIntegration(t *testing.T) {
+	now := time.Now().UTC()
+
+	fresh := ScoringCandidate{
+		Body:      "We currently use Redis",
+		CreatedAt: now.Add(-2 * 24 * time.Hour),
+	}
+	stale := ScoringCandidate{
+		Body:      "We currently use Redis",
+		CreatedAt: now.Add(-90 * 24 * time.Hour),
+	}
+	noRelative := ScoringCandidate{
+		Body:      "We use Redis",
+		CreatedAt: now.Add(-90 * 24 * time.Hour),
+	}
+
+	freshScore := signalTemporalValidity(fresh, now)
+	staleScore := signalTemporalValidity(stale, now)
+	noRelativeScore := signalTemporalValidity(noRelative, now)
+
+	if freshScore != 1.0 {
+		t.Errorf("expected fresh item with relative language to score 1.0, got %f", freshScore)
+	}
+	if staleScore >= 1.0 {
+		t.Errorf("expected stale item with 'currently' to score < 1.0, got %f", staleScore)
+	}
+	if staleScore <= 0 {
+		t.Errorf("expected stale item score > 0, got %f", staleScore)
+	}
+	if noRelativeScore != 1.0 {
+		t.Errorf("expected old item without relative language to score 1.0, got %f", noRelativeScore)
+	}
+}

@@ -380,7 +380,9 @@ func signalImportance(item ScoringCandidate) float64 {
 	return item.Importance
 }
 
-// signalTemporalValidity checks whether the item is still valid.
+// signalTemporalValidity checks whether the item is still valid and applies a
+// staleness penalty when the content contains relative-time language but the
+// item is old.
 func signalTemporalValidity(item ScoringCandidate, now time.Time) float64 {
 	if item.SupersededBy != "" {
 		return 0.5
@@ -388,7 +390,74 @@ func signalTemporalValidity(item ScoringCandidate, now time.Time) float64 {
 	if item.ValidTo != nil && item.ValidTo.Before(now) {
 		return 0.0
 	}
-	return 1.0
+	base := 1.0
+	penalty := temporalStalenessPenalty(item, now)
+	result := base * (1.0 - penalty)
+	if result < 0 {
+		return 0
+	}
+	return result
+}
+
+// temporalStalenessAgeDays is the age threshold (in days) before relative-time
+// language triggers a staleness penalty.
+const temporalStalenessAgeDays = 14
+
+// temporalStalenessMaxPenalty is the maximum penalty applied (caps the ramp).
+const temporalStalenessMaxPenalty = 0.3
+
+// temporalStalenessRampDays controls how many days it takes to reach the max
+// penalty after exceeding the age threshold.
+const temporalStalenessRampDays = 180.0
+
+// temporalStalenessPenalty returns a 0–0.3 penalty when the item body contains
+// relative-time references ("today", "currently", etc.) and the item is older
+// than temporalStalenessAgeDays. The penalty ramps linearly over 180 days.
+func temporalStalenessPenalty(item ScoringCandidate, now time.Time) float64 {
+	// Use CreatedAt rather than mostRecentTimestamp to avoid metadata-only
+	// updates (e.g. status changes) resetting the staleness clock.
+	ts := item.CreatedAt
+	days := now.Sub(ts).Hours() / 24.0
+	if days <= float64(temporalStalenessAgeDays) {
+		return 0
+	}
+	if !containsRelativeTimeLanguage(item.Body) && !containsRelativeTimeLanguage(item.TightDescription) {
+		return 0
+	}
+	excess := days - float64(temporalStalenessAgeDays)
+	penalty := (excess / temporalStalenessRampDays) * temporalStalenessMaxPenalty
+	if penalty > temporalStalenessMaxPenalty {
+		return temporalStalenessMaxPenalty
+	}
+	return penalty
+}
+
+// relativeTimeWords are phrases that imply time-relative claims.
+var relativeTimeWords = []string{
+	"today",
+	"currently",
+	"right now",
+	"at the moment",
+	"this week",
+	"this sprint",
+	"this month",
+	"as of now",
+	"at present",
+	"latest",
+	"just now",
+	"now using",
+	"now use",
+}
+
+// containsRelativeTimeLanguage checks if text contains relative-time phrases.
+func containsRelativeTimeLanguage(text string) bool {
+	lower := strings.ToLower(text)
+	for _, phrase := range relativeTimeWords {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // signalStructuralProximity rewards well-linked items.

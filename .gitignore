@@ -56,5 +56,6 @@ __pycache__/
 # Local review/planning artifacts
 ROADMAP.md
 REVIEW.md
+FUTURE_IDEAS.md
 The Honest Assessment.md
 docs/ONNX_EMBEDDING_IMPLEMENTATION_PLAN.md
