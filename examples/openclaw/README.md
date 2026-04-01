@@ -13,33 +13,32 @@ The plugin is **hot-path only**. It does not run maintenance jobs. Keep maintena
 
 ## Install
 
-### Option A: OpenClaw Plugin Manager (Recommended)
+### Option A: npm install (HTTP API mode)
 
 ```bash
 openclaw plugins install @bonztm/amm
 ```
 
-This installs the plugin, enables it, and claims the memory slot automatically.
+This installs the plugin, enables it, and claims the memory slot. **Requires `amm-http` running as an HTTP service** — configure via `apiUrl` in plugin config or `AMM_API_URL` env var. The npm package does not include local binary support due to OpenClaw's security scanner restrictions on `child_process`.
 
-### Option B: Install Script
+### Option B: Local install (binary + HTTP mode)
 
-For local/release builds:
+For environments where the `amm` binary and SQLite database are on the same machine as OpenClaw:
 
 ```bash
-# Basic install (local binary mode)
 ./install.sh
 
 # With options
 ./install.sh --project-id my-project --recall-limit 10
 
-# HTTP API mode (remote amm-http server)
+# HTTP API mode (also works with install.sh)
 ./install.sh --api-url http://localhost:8080 --api-key your-key
 
 # With MCP sidecar for the full tool suite
-./install.sh --mcp --amm-bin /usr/local/bin/amm-mcp
+./install.sh --mcp
 ```
 
-Run `./install.sh --help` for all options.
+The install script copies the full plugin including local binary transport. The `amm` binary is called via subprocess — no HTTP server needed. Run `./install.sh --help` for all options.
 
 ### Option C: Manual
 

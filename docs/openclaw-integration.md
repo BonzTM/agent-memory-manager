@@ -4,15 +4,23 @@ OpenClaw is the runtime; amm is the memory substrate. For HTTP API mode, see [AP
 
 ## Install
 
+### npm (HTTP API mode)
+
 ```bash
 openclaw plugins install @bonztm/amm
 ```
 
-Or from a local checkout:
+Requires `amm-http` running as an HTTP service. Configure `apiUrl` in plugin config or set `AMM_API_URL`. The npm package uses HTTP transport only — OpenClaw's security scanner blocks local binary (`child_process`) imports.
+
+### Local install (binary + HTTP mode)
+
+For environments where the `amm` binary and SQLite database are on the same machine:
 
 ```bash
 cd examples/openclaw && ./install.sh
 ```
+
+This copies the full plugin including local binary transport. No HTTP server required — the `amm` binary is called directly via subprocess.
 
 See [`examples/openclaw/README.md`](../examples/openclaw/README.md) for all install options.
 

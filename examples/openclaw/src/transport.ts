@@ -3,6 +3,11 @@
  *
  * When AMM_API_URL / config.apiUrl is set, all calls go to the REST API.
  * Otherwise, the local `amm` binary is invoked via spawnSync.
+ *
+ * This file is NOT included in the npm package (OpenClaw's security
+ * scanner blocks child_process imports). The npm package uses
+ * transport-http.ts instead. install.sh rewires imports to this file
+ * for local installs that need binary mode.
  */
 
 import { spawnSync } from "node:child_process";

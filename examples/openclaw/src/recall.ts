@@ -6,7 +6,7 @@
  */
 
 import type { AmmConfig } from "./config.ts";
-import { recall as ammRecall } from "./transport.ts";
+import { recall as ammRecall } from "./transport-http.ts";
 
 interface RecallItem {
   kind?: string;

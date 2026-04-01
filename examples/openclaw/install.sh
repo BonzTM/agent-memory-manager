@@ -104,13 +104,19 @@ echo "  Installing to: $PLUGIN_DIR"
 
 mkdir -p "$PLUGIN_DIR/src"
 
-cp "$SCRIPT_DIR/index.ts"              "$PLUGIN_DIR/index.ts"
 cp "$SCRIPT_DIR/openclaw.plugin.json"  "$PLUGIN_DIR/openclaw.plugin.json"
 cp "$SCRIPT_DIR/package.json"          "$PLUGIN_DIR/package.json"
-cp "$SCRIPT_DIR/src/capture.ts"        "$PLUGIN_DIR/src/capture.ts"
 cp "$SCRIPT_DIR/src/config.ts"         "$PLUGIN_DIR/src/config.ts"
-cp "$SCRIPT_DIR/src/recall.ts"         "$PLUGIN_DIR/src/recall.ts"
-cp "$SCRIPT_DIR/src/transport.ts"      "$PLUGIN_DIR/src/transport.ts"
+
+# Local install includes the full dual-transport (binary + HTTP).
+# The npm-published package uses transport-http.ts only (scanner-safe).
+# Rewrite imports to use the full transport.ts for binary mode support.
+cp "$SCRIPT_DIR/src/transport.ts"        "$PLUGIN_DIR/src/transport.ts"
+cp "$SCRIPT_DIR/src/transport-http.ts"   "$PLUGIN_DIR/src/transport-http.ts"
+
+sed 's|transport-http\.ts|transport.ts|g' "$SCRIPT_DIR/index.ts"       > "$PLUGIN_DIR/index.ts"
+sed 's|transport-http\.ts|transport.ts|g' "$SCRIPT_DIR/src/capture.ts" > "$PLUGIN_DIR/src/capture.ts"
+sed 's|transport-http\.ts|transport.ts|g' "$SCRIPT_DIR/src/recall.ts"  > "$PLUGIN_DIR/src/recall.ts"
 
 echo "  Plugin files copied."
 

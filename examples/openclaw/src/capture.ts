@@ -5,7 +5,7 @@
  */
 
 import type { AmmConfig } from "./config.ts";
-import { ingestEvent } from "./transport.ts";
+import { ingestEvent } from "./transport-http.ts";
 
 type HookContext = Record<string, unknown>;
 

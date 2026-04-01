@@ -1,6 +1,6 @@
 {
   "name": "@bonztm/amm",
-  "version": "1.2.0",
+  "version": "1.2.1-beta.2",
   "description": "AMM memory plugin for OpenClaw — claims the memory slot with memory_search/memory_get tools, ambient recall injection, and conversation event capture.",
   "type": "module",
   "openclaw": {
@@ -10,9 +10,12 @@
   },
   "files": [
     "index.ts",
-    "src/",
     "openclaw.plugin.json",
-    "install.sh"
+    "install.sh",
+    "src/capture.ts",
+    "src/config.ts",
+    "src/recall.ts",
+    "src/transport-http.ts"
   ],
   "scripts": {
     "install-plugin": "./install.sh"

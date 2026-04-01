@@ -13,7 +13,7 @@
 import { resolveConfig, type AmmConfig } from "./src/config.ts";
 import { captureEvent, type HookEvent } from "./src/capture.ts";
 import { ambientRecall } from "./src/recall.ts";
-import { memorySearch, memoryGet } from "./src/transport.ts";
+import { memorySearch, memoryGet } from "./src/transport-http.ts";
 
 // ---------------------------------------------------------------------------
 // OpenClaw plugin SDK types (minimal surface used by this plugin)
