@@ -2,6 +2,7 @@
 .claude/
 .opencode/
 .codex/
+.scratch/
 
 # ACM local state
 .acm/context.db

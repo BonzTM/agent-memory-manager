@@ -11,6 +11,8 @@ Use Steps 1-2 for every runtime. After that, choose the runtime-specific path th
 
 In every runtime, the worker model stays the same: amm background jobs are external `amm jobs run <kind>` calls against the amm database, not a built-in scheduler.
 
+> **LLM requirement:** Automatic memory extraction from session narratives requires an LLM endpoint (`AMM_SUMMARIZER_ENDPOINT`). Without an LLM, amm still stores events, supports explicit `amm remember` calls, and provides recall — but the extraction pipeline (`reflect`, `consolidate_sessions`) is disabled. Configure at least a summarizer endpoint for full functionality.
+
 ## Runtime-Neutral Operating Contract
 
 Once amm is installed, the agent should follow the same durable-memory rules regardless of runtime:
@@ -280,7 +282,7 @@ For fuller transparent memory capture, add hooks to `~/.claude/settings.json`. T
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.amm/hooks/on-user-message.sh \"$PROMPT\""
+            "command": "$HOME/.amm/hooks/on-user-message.sh"
           }
         ]
       }

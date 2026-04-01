@@ -150,10 +150,19 @@ maintenance:
 # =============================================================================
 
 summarizer:
-  # -- OpenAI-compatible API endpoint for summarization
+  # -- OpenAI-compatible API endpoint for summarization.
+  # Required for automatic memory extraction from session narratives.
+  # Without this, AMM still stores events and supports explicit amm remember
+  # calls, but the extraction pipeline (reflect, consolidate_sessions) is disabled.
   endpoint: ""
-  # -- Model name (defaults to gpt-4o-mini when endpoint is set)
+  # -- Model name (defaults to gpt-4o-mini when endpoint is set).
+  # Use a model with 128k+ context for session narrative summarization.
   model: ""
+  # -- Minutes of session inactivity before consolidation triggers (default: 15)
+  sessionIdleTimeoutMinutes: 15
+  # -- Token budget for the summarizer context window (default: 128000).
+  # Sessions exceeding this are automatically chunked via map-reduce.
+  summarizerContextWindow: 128000
 
 # =============================================================================
 # Review Model (LLM)

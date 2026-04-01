@@ -31,6 +31,8 @@ data:
   {{- if .Values.summarizer.model }}
   AMM_SUMMARIZER_MODEL: {{ .Values.summarizer.model | quote }}
   {{- end }}
+  AMM_SESSION_IDLE_TIMEOUT_MINUTES: {{ .Values.summarizer.sessionIdleTimeoutMinutes | default "15" | quote }}
+  AMM_SUMMARIZER_CONTEXT_WINDOW: {{ .Values.summarizer.summarizerContextWindow | default "128000" | quote }}
   {{- if .Values.review.endpoint }}
   AMM_REVIEW_ENDPOINT: {{ .Values.review.endpoint | quote }}
   {{- end }}

@@ -1,6 +1,6 @@
 # Integration Guide
 
-AMM (Agent Memory Manager) integrates with agent runtimes through five primary mechanisms:
+AMM (Agent Memory Manager) integrates with agent runtimes through five primary mechanisms. Event capture works without an LLM, but automatic memory extraction from session narratives requires a configured LLM endpoint (`AMM_SUMMARIZER_ENDPOINT`). Without an LLM, use explicit `amm remember` calls for durable memory.
 
 1. **Hooks**: Automatic capture of interactions (events in, ambient recall out).
 2. **MCP Tools**: Explicit agent-initiated memory management for MCP-compatible runtimes.

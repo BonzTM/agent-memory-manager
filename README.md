@@ -102,7 +102,7 @@ See the [HTTP API Reference](docs/http-api-reference.md) for details.
 AMM is a database-backed memory substrate, not a chat runtime or task engine. It focuses on the transition from ephemeral interaction to durable knowledge.
 
 - **Event Ingestion**: Captures every turn in an append-only, full-transcript archive.
-- **LLM Extraction**: Auto-extracts facts, preferences, and decisions with heuristic fallback when no LLM is configured.
+- **LLM Extraction**: Auto-extracts facts, preferences, and decisions from session narratives. Automatic memory extraction requires an LLM endpoint (`AMM_SUMMARIZER_*`). Without an LLM, event storage and explicit `amm remember` calls still work, but the extraction pipeline is disabled.
 - **Entity Graph**: Builds a relationship-aware model of the workspace for precision scoring.
 - **Multi-Signal Recall**: Supports associative retrieval with 9 modes to match agent intent.
 - **Background Pipeline**: Runs reflection, compression, and maintenance to keep memory fresh.
@@ -163,6 +163,8 @@ Set these environment variables to enable LLM-backed extraction and semantic sea
 - `AMM_EMBEDDINGS_ENABLED`: Set to `true` for vector-based recall.
 - `AMM_EMBEDDINGS_API_KEY`: API key for embedding generation.
 - `AMM_STORAGE_BACKEND`: Set to `postgres` to use a PostgreSQL database.
+- `AMM_SESSION_IDLE_TIMEOUT_MINUTES`: Minutes of inactivity before a session is consolidated (default: 15).
+- `AMM_SUMMARIZER_CONTEXT_WINDOW`: Token budget for the summarizer model (default: 128000). Sessions exceeding this are chunked automatically.
 
 Full reference in [Configuration Documentation](docs/configuration.md).
 
