@@ -19,7 +19,32 @@ The plugin is **hot-path only**. It does not run maintenance jobs. Keep maintena
 openclaw plugins install @bonztm/amm
 ```
 
-This installs the plugin, enables it, and claims the memory slot. **Requires `amm-http` running as an HTTP service** — configure via `apiUrl` in plugin config or `AMM_API_URL` env var. The npm package does not include local binary support due to OpenClaw's security scanner restrictions on `child_process`.
+This installs the plugin, enables it, and claims the memory slot. **Requires `amm-http` running as an HTTP service** — the npm package does not include local binary support due to OpenClaw's security scanner restrictions on `child_process`.
+
+After install, configure the plugin in `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "slots": {
+      "memory": "amm"
+    },
+    "entries": {
+      "amm": {
+        "enabled": true,
+        "config": {
+          "apiUrl": "http://localhost:8080",
+          "apiKey": "your-amm-api-key",
+          "projectId": "my-project",
+          "recallLimit": 5
+        }
+      }
+    }
+  }
+}
+```
+
+`apiUrl` is **required** for npm installs — point it at your `amm-http` instance. Restart OpenClaw after configuring.
 
 ### Option B: Local install (binary + HTTP mode)
 

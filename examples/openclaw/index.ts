@@ -44,15 +44,6 @@ interface OpenClawPluginApi {
   ): void;
 }
 
-interface PluginEntry {
-  id: string;
-  name: string;
-  kind?: string;
-  register(api: OpenClawPluginApi): void;
-}
-
-declare function definePluginEntry(entry: PluginEntry): PluginEntry;
-
 // ---------------------------------------------------------------------------
 // Hook context extraction helpers
 // ---------------------------------------------------------------------------
@@ -79,7 +70,7 @@ function extractUserQuery(event: PromptBuildEvent): string {
 // Plugin definition
 // ---------------------------------------------------------------------------
 
-export default definePluginEntry({
+export default {
   id: "amm",
   name: "AMM Memory",
   kind: "memory",
@@ -168,4 +159,4 @@ export default definePluginEntry({
       });
     }
   },
-});
+};

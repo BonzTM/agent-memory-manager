@@ -10,7 +10,32 @@ OpenClaw is the runtime; amm is the memory substrate. For HTTP API mode, see [AP
 openclaw plugins install @bonztm/amm
 ```
 
-Requires `amm-http` running as an HTTP service. Configure `apiUrl` in plugin config or set `AMM_API_URL`. The npm package uses HTTP transport only — OpenClaw's security scanner blocks local binary (`child_process`) imports.
+Requires `amm-http` running as an HTTP service. The npm package uses HTTP transport only — OpenClaw's security scanner blocks local binary (`child_process`) imports.
+
+After install, configure the plugin in `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "slots": {
+      "memory": "amm"
+    },
+    "entries": {
+      "amm": {
+        "enabled": true,
+        "config": {
+          "apiUrl": "http://localhost:8080",
+          "apiKey": "your-amm-api-key",
+          "projectId": "my-project",
+          "recallLimit": 5
+        }
+      }
+    }
+  }
+}
+```
+
+`apiUrl` is **required** for npm installs — point it at your `amm-http` instance. Restart OpenClaw after configuring.
 
 ### Local install (binary + HTTP mode)
 
@@ -20,9 +45,9 @@ For environments where the `amm` binary and SQLite database are on the same mach
 cd examples/openclaw && ./install.sh
 ```
 
-This copies the full plugin including local binary transport. No HTTP server required — the `amm` binary is called directly via subprocess.
+This copies the full plugin including local binary transport. No HTTP server required — the `amm` binary is called directly via subprocess. Configure via `ammBin`/`dbPath` in plugin config or `AMM_BIN`/`AMM_DB_PATH` env vars.
 
-See [`examples/openclaw/README.md`](../examples/openclaw/README.md) for all install options.
+See [`examples/openclaw/README.md`](../examples/openclaw/README.md) for all install options and configuration reference.
 
 ## What the Plugin Does
 
