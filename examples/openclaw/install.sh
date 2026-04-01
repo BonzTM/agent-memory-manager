@@ -137,9 +137,16 @@ if [ ! -f "$OPENCLAW_CONFIG" ]; then
   echo '{}' > "$OPENCLAW_CONFIG"
 fi
 
-# Use python3 for safe JSON manipulation
+# Use python3 for safe JSON manipulation (handles trailing commas in JSONC)
 python3 -c "
-import json, sys
+import json, re, sys
+
+def load_jsonc(path):
+    with open(path) as f:
+        text = f.read()
+    # Strip trailing commas before } or ] (JSONC -> JSON)
+    text = re.sub(r',\s*([}\]])', r'\1', text)
+    return json.loads(text)
 
 config_path = '$OPENCLAW_CONFIG'
 plugin_name = '$PLUGIN_NAME'
@@ -148,8 +155,7 @@ config_entries = '$CONFIG_ENTRIES'
 amm_bin = '${AMM_BIN:-/usr/local/bin/amm}'
 db_path = '${DB_PATH:-}'
 
-with open(config_path) as f:
-    config = json.load(f)
+config = load_jsonc(config_path)
 
 # Ensure structure
 config.setdefault('plugins', {})
