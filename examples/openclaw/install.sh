@@ -207,10 +207,9 @@ else:
 
 # Ensure amm is in the allow list
 config['plugins'].setdefault('allow', [])
-for plugin_id in [plugin_name, 'acpx']:
-    if plugin_id not in config['plugins']['allow']:
-        config['plugins']['allow'].append(plugin_id)
-        print(f'  Added {plugin_id} to plugins.allow')
+if plugin_name not in config['plugins']['allow']:
+    config['plugins']['allow'].append(plugin_name)
+    print(f'  Added {plugin_name} to plugins.allow')
 
 with open(config_path, 'w') as f:
     json.dump(config, f, indent=2)

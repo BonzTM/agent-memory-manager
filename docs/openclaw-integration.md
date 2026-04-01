@@ -146,24 +146,19 @@ Environment: `AMM_API_URL`, `AMM_API_KEY`
 
 This works with remote `amm-http` servers, sidecar deployments, and Kubernetes pods. No local binary needed.
 
-### MCP Sidecar
+### MCP Server
 
-For explicit agent tool access, wire `amm-mcp` separately in the `acpx` plugin config:
+For explicit agent tool access (`amm_recall`, `amm_remember`, `amm_expand`, etc.), configure `amm-mcp` as an MCP server in `openclaw.json`:
 
 **Local (stdio):**
 ```json
 {
-  "plugins": {
-    "entries": {
-      "acpx": {
-        "config": {
-          "mcpServers": {
-            "amm": {
-              "command": "/usr/local/bin/amm-mcp",
-              "env": { "AMM_DB_PATH": "/home/you/.amm/amm.db" }
-            }
-          }
-        }
+  "mcp": {
+    "servers": {
+      "amm": {
+        "command": "/usr/local/bin/amm-mcp",
+        "args": [],
+        "env": { "AMM_DB_PATH": "/home/you/.amm/amm.db" }
       }
     }
   }
@@ -173,23 +168,18 @@ For explicit agent tool access, wire `amm-mcp` separately in the `acpx` plugin c
 **Remote (MCP-over-HTTP):**
 ```json
 {
-  "plugins": {
-    "entries": {
-      "acpx": {
-        "config": {
-          "mcpServers": {
-            "amm": {
-              "url": "http://localhost:8080/v1/mcp"
-            }
-          }
-        }
+  "mcp": {
+    "servers": {
+      "amm": {
+        "url": "http://localhost:8080/v1/mcp",
+        "transport": "streamable-http"
       }
     }
   }
 }
 ```
 
-The MCP sidecar is independent of the plugin's hot-path transport. The plugin handles ambient recall; the sidecar gives agents explicit tools (`amm_recall`, `amm_expand`, `amm_remember`, `amm_jobs_run`).
+The MCP server is independent of the plugin's hot-path transport. The plugin handles ambient recall and event capture; the MCP server gives agents explicit tools. `install.sh` configures both automatically.
 
 ## Recommended Ingestion Policies
 

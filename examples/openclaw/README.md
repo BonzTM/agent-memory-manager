@@ -171,26 +171,22 @@ The plugin reads configuration from OpenClaw plugin config (via `configSchema`) 
 
 **HTTP API mode**: When `apiUrl` / `AMM_API_URL` is set, the plugin calls the AMM REST API (`POST /v1/events`, `POST /v1/recall`). Works with remote `amm-http` servers and supports bearer auth via `apiKey` / `AMM_API_KEY`.
 
-**MCP sidecar**: For explicit agent tool access, wire `amm-mcp` separately in the `acpx` plugin config (shown in `openclaw.json`). This is independent of the plugin's hot-path transport. For remote/sidecar deployments, use MCP-over-HTTP:
+**MCP server**: For explicit agent tool access (`amm_recall`, `amm_remember`, `amm_expand`), configure `amm-mcp` as an MCP server in `openclaw.json`. `install.sh` does this automatically. For manual setup:
 
 ```json
 {
-  "plugins": {
-    "entries": {
-      "acpx": {
-        "enabled": true,
-        "config": {
-          "mcpServers": {
-            "amm": {
-              "url": "http://localhost:8080/v1/mcp"
-            }
-          }
-        }
+  "mcp": {
+    "servers": {
+      "amm": {
+        "url": "http://localhost:8080/v1/mcp",
+        "transport": "streamable-http"
       }
     }
   }
 }
 ```
+
+Or for local binary mode: `"command": "/usr/local/bin/amm-mcp"` with `"env": { "AMM_DB_PATH": "..." }`.
 
 ## How It Works
 
