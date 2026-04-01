@@ -23,7 +23,8 @@ const DEFAULT_AMM_BIN = "amm";
 const DEFAULT_DB_PATH = `${process.env.HOME ?? "~"}/.amm/amm.db`;
 const DEFAULT_RECALL_LIMIT = 5;
 
-function normalizeApiUrl(raw: string): string {
+function normalizeApiUrl(raw: string | undefined | null): string {
+  if (!raw) return "";
   const trimmed = raw.trim().replace(/\/+$/, "");
   if (!trimmed) return "";
   return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
