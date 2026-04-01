@@ -29,7 +29,7 @@ func TestEventUpdateClaimAndListFilters(t *testing.T) {
 			ID:           "evt_filter_2",
 			Kind:         "message_user",
 			SourceSystem: "test",
-			SessionID:    "sess_filter_1",
+			SessionID:    "", // sessionless — claimable by Reflect
 			ProjectID:    "proj_filter_1",
 			PrivacyLevel: core.PrivacyPrivate,
 			Content:      "deploy beta",
@@ -40,7 +40,7 @@ func TestEventUpdateClaimAndListFilters(t *testing.T) {
 			ID:           "evt_filter_3",
 			Kind:         "system",
 			SourceSystem: "test",
-			SessionID:    "sess_filter_2",
+			SessionID:    "", // sessionless — claimable by Reflect
 			ProjectID:    "proj_filter_2",
 			PrivacyLevel: core.PrivacyPrivate,
 			Content:      "ops gamma",
@@ -113,8 +113,9 @@ func TestEventUpdateClaimAndListFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents with time filters: %v", err)
 	}
-	if len(filtered) != 2 {
-		t.Fatalf("expected 2 filtered events, got %+v", filtered)
+	// Only event[0] has sess_filter_1; event[1] is sessionless.
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 filtered event, got %+v", filtered)
 	}
 
 	seqLimited, err := repo.ListEvents(ctx, core.ListEventsOptions{BeforeSequenceID: evt2.SequenceID, Limit: 10})

@@ -424,6 +424,7 @@ func (r *SQLiteRepository) ClaimUnreflectedEvents(ctx context.Context, limit int
 		WHERE id IN (
 			SELECT id FROM events
 			WHERE reflected_at IS NULL
+			  AND (session_id IS NULL OR session_id = '')
 			ORDER BY sequence_id ASC
 			LIMIT ?
 		)
@@ -469,6 +470,18 @@ func (r *SQLiteRepository) InsertSummary(ctx context.Context, summary *core.Summ
 		timeToStr(summary.CreatedAt), timeToStr(summary.UpdatedAt),
 	)
 	return err
+}
+
+func (r *SQLiteRepository) DeleteSummary(ctx context.Context, id string) error {
+	_, err := r.ExecContext(ctx, `DELETE FROM summary_edges WHERE parent_summary_id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete summary edges for %s: %w", id, err)
+	}
+	_, err = r.ExecContext(ctx, `DELETE FROM summaries WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete summary %s: %w", id, err)
+	}
+	return nil
 }
 
 func (r *SQLiteRepository) GetSummary(ctx context.Context, id string) (*core.Summary, error) {
@@ -2049,6 +2062,11 @@ func (r *SQLiteRepository) GetEpisode(ctx context.Context, id string) (*core.Epi
 	return ep, nil
 }
 
+func (r *SQLiteRepository) DeleteEpisode(ctx context.Context, id string) error {
+	_, err := r.ExecContext(ctx, `DELETE FROM episodes WHERE id = ?`, id)
+	return err
+}
+
 func (r *SQLiteRepository) ListEpisodes(ctx context.Context, opts core.ListEpisodesOptions) ([]core.Episode, error) {
 	query := "SELECT " + episodeCols + " FROM episodes WHERE 1=1"
 	var args []interface{}
@@ -2060,6 +2078,10 @@ func (r *SQLiteRepository) ListEpisodes(ctx context.Context, opts core.ListEpiso
 	if opts.ProjectID != "" {
 		query += " AND project_id = ?"
 		args = append(args, opts.ProjectID)
+	}
+	if opts.SessionID != "" {
+		query += " AND session_id = ?"
+		args = append(args, opts.SessionID)
 	}
 	query += " ORDER BY created_at DESC LIMIT ?"
 	args = append(args, defaultLimit(opts.Limit))
@@ -2880,9 +2902,15 @@ func (r *SQLiteRepository) ResetDerived(ctx context.Context) (*core.ResetDerived
 	if result.SummaryEdgesDeleted, err = execDeleteCount(ctx, tx, "summary_edges"); err != nil {
 		return nil, fmt.Errorf("delete summary_edges: %w", err)
 	}
-	if result.MemoriesDeleted, err = execDeleteCount(ctx, tx, "memories"); err != nil {
+	// Preserve manually-created memories (source_system = "remember").
+	// Pre-upgrade memories without source_system are treated as derived and deleted.
+	// Operators should run `amm remember` to re-create any manual memories before
+	// upgrading if they haven't already been tagged with source_system.
+	memDelResult, err := tx.ExecContext(ctx, `DELETE FROM memories WHERE COALESCE(json_extract(metadata_json, '$.source_system'), '') != 'remember'`)
+	if err != nil {
 		return nil, fmt.Errorf("delete memories: %w", err)
 	}
+	result.MemoriesDeleted, _ = memDelResult.RowsAffected()
 	if result.EntitiesDeleted, err = execDeleteCount(ctx, tx, "entities"); err != nil {
 		return nil, fmt.Errorf("delete entities: %w", err)
 	}

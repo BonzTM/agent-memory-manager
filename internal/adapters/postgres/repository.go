@@ -394,6 +394,7 @@ func (r *Repository) ClaimUnreflectedEvents(ctx context.Context, limit int) ([]c
 			SELECT id
 			FROM events
 			WHERE reflected_at IS NULL
+			  AND (session_id IS NULL OR session_id = '')
 			ORDER BY sequence_id ASC
 			LIMIT $1
 			FOR UPDATE SKIP LOCKED
@@ -445,6 +446,18 @@ func (r *Repository) InsertSummary(ctx context.Context, summary *core.Summary) e
 		marshalSourceSpan(summary.SourceSpan), marshalMapJSON(summary.Metadata), summary.Depth, summary.CondensedKind, summary.CreatedAt.UTC(), summary.UpdatedAt.UTC(),
 	)
 	return wrapErr("insert summary", err)
+}
+
+func (r *Repository) DeleteSummary(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM summary_edges WHERE parent_summary_id = $1`, id)
+	if err != nil {
+		return wrapErr("delete summary edges", err)
+	}
+	_, err = r.db.ExecContext(ctx, `DELETE FROM summaries WHERE id = $1`, id)
+	if err != nil {
+		return wrapErr("delete summary", err)
+	}
+	return nil
 }
 
 func (r *Repository) GetSummary(ctx context.Context, id string) (*core.Summary, error) {
@@ -1804,6 +1817,11 @@ func (r *Repository) GetEpisode(ctx context.Context, id string) (*core.Episode, 
 	return ep, nil
 }
 
+func (r *Repository) DeleteEpisode(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM episodes WHERE id = $1`, id)
+	return wrapErr("delete episode", err)
+}
+
 func (r *Repository) ListEpisodes(ctx context.Context, opts core.ListEpisodesOptions) ([]core.Episode, error) {
 	query := `SELECT ` + episodeCols + ` FROM episodes WHERE 1=1`
 	args := make([]any, 0)
@@ -1816,6 +1834,11 @@ func (r *Repository) ListEpisodes(ctx context.Context, opts core.ListEpisodesOpt
 	if opts.ProjectID != "" {
 		query += fmt.Sprintf(" AND project_id = $%d", i)
 		args = append(args, opts.ProjectID)
+		i++
+	}
+	if opts.SessionID != "" {
+		query += fmt.Sprintf(" AND session_id = $%d", i)
+		args = append(args, opts.SessionID)
 		i++
 	}
 	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", i)
@@ -2582,9 +2605,13 @@ func (r *Repository) ResetDerived(ctx context.Context) (*core.ResetDerivedResult
 	if out.SummaryEdgesDeleted, err = execDeleteCount(ctx, tx, "summary_edges"); err != nil {
 		return nil, wrapErr("reset derived", err)
 	}
-	if out.MemoriesDeleted, err = execDeleteCount(ctx, tx, "memories"); err != nil {
+	// Preserve manually-created memories (source_system = "remember").
+	memRes, err := tx.ExecContext(ctx, `DELETE FROM memories WHERE COALESCE(metadata_json->>'source_system', '') != 'remember'`)
+	if err != nil {
 		return nil, wrapErr("reset derived", err)
 	}
+	out.MemoriesDeleted, _ = memRes.RowsAffected()
+	out.MemoriesDeleted = normalizeRowsAffected(out.MemoriesDeleted)
 	if out.EntitiesDeleted, err = execDeleteCount(ctx, tx, "entities"); err != nil {
 		return nil, wrapErr("reset derived", err)
 	}

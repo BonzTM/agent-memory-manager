@@ -29,7 +29,9 @@ type Repository interface {
 	SearchEvents(ctx context.Context, query string, limit int) ([]Event, error)
 	// CountUnreflectedEvents returns the number of events not yet reflected.
 	CountUnreflectedEvents(ctx context.Context) (int64, error)
-	// ClaimUnreflectedEvents atomically claims and returns unreflected events for processing.
+	// ClaimUnreflectedEvents atomically claims and returns unreflected sessionless
+	// events for processing. Only claims events without a session_id — session
+	// events are handled by ConsolidateSessions instead.
 	// Sets reflected_at to now for claimed events to prevent concurrent processing.
 	ClaimUnreflectedEvents(ctx context.Context, limit int) ([]Event, error)
 
@@ -46,6 +48,8 @@ type Repository interface {
 	// GetSummaryParents returns the parent edges for a given child (inverse of GetSummaryChildren).
 	GetSummaryParents(ctx context.Context, childID string) ([]SummaryEdge, error)
 	ListParentedSummaryIDs(ctx context.Context) (map[string]bool, error)
+	// DeleteSummary removes a summary by ID.
+	DeleteSummary(ctx context.Context, id string) error
 	// InsertSummaryEdge stores a summary hierarchy edge.
 	InsertSummaryEdge(ctx context.Context, edge *SummaryEdge) error
 
@@ -121,6 +125,8 @@ type Repository interface {
 	InsertEpisode(ctx context.Context, episode *Episode) error
 	// GetEpisode retrieves an episode by ID.
 	GetEpisode(ctx context.Context, id string) (*Episode, error)
+	// DeleteEpisode removes an episode by ID.
+	DeleteEpisode(ctx context.Context, id string) error
 	// ListEpisodes returns episodes matching the supplied options.
 	ListEpisodes(ctx context.Context, opts ListEpisodesOptions) ([]Episode, error)
 	// SearchEpisodes searches episodes by text query.
@@ -304,6 +310,7 @@ type ListRelationshipsOptions struct {
 type ListEpisodesOptions struct {
 	Scope     Scope
 	ProjectID string
+	SessionID string
 	Limit     int
 }
 
