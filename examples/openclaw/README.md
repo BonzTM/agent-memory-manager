@@ -16,7 +16,7 @@ The plugin is **hot-path only**. It does not run maintenance jobs. Keep maintena
 ### Option A: OpenClaw Plugin Manager (Recommended)
 
 ```bash
-openclaw plugins install @bonztm/amm-memory
+openclaw plugins install @bonztm/amm
 ```
 
 This installs the plugin, enables it, and claims the memory slot automatically.
@@ -70,7 +70,7 @@ cp -R examples/openclaw ~/.openclaw/extensions/amm-memory
 ## Files
 
 - `openclaw.plugin.json` — native plugin manifest (`kind: "memory"`)
-- `package.json` — publishable as `@bonztm/amm-memory`
+- `package.json` — publishable as `@bonztm/amm`
 - `index.ts` — plugin entry point with tool registration and hooks
 - `install.sh` — one-command local installer
 - `src/config.ts` — configuration resolution (plugin config + env vars)
