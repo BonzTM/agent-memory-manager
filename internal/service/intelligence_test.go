@@ -373,7 +373,7 @@ func TestAnalyzeEventsPrompt_IncludesExistingRules(t *testing.T) {
 		Content: "We decided to use SQLite.",
 	}})
 
-	for _, want := range []string{"10-15%", "tight_description", "source_events"} {
+	for _, want := range []string{"FILTERING", "tight_description", "source_events"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected AnalyzeEvents prompt to preserve extraction rule %q", want)
 		}

@@ -88,6 +88,105 @@ func TestIngestEvent(t *testing.T) {
 	}
 }
 
+func TestIngestEvent_InfersProjectIDFromCwd(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+
+	// Register a project with a path.
+	_, err := svc.RegisterProject(ctx, &core.Project{
+		Name: "my-project",
+		Path: "/home/user/git/my-project",
+	})
+	if err != nil {
+		t.Fatalf("RegisterProject: %v", err)
+	}
+
+	t.Run("matches cwd to registered project", func(t *testing.T) {
+		evt := &core.Event{
+			Kind:         "message_user",
+			SourceSystem: "test",
+			SessionID:    "sess_cwd",
+			Content:      "test content",
+			Metadata:     map[string]string{"cwd": "/home/user/git/my-project"},
+		}
+		got, err := svc.IngestEvent(ctx, evt)
+		if err != nil {
+			t.Fatalf("IngestEvent: %v", err)
+		}
+		if got.ProjectID == "" {
+			t.Error("expected ProjectID to be inferred from cwd")
+		}
+	})
+
+	t.Run("matches cwd subdirectory", func(t *testing.T) {
+		evt := &core.Event{
+			Kind:         "message_user",
+			SourceSystem: "test",
+			SessionID:    "sess_cwd2",
+			Content:      "test content",
+			Metadata:     map[string]string{"cwd": "/home/user/git/my-project/internal/pkg"},
+		}
+		got, err := svc.IngestEvent(ctx, evt)
+		if err != nil {
+			t.Fatalf("IngestEvent: %v", err)
+		}
+		if got.ProjectID == "" {
+			t.Error("expected ProjectID to be inferred from cwd subdirectory")
+		}
+	})
+
+	t.Run("no match for unrelated cwd", func(t *testing.T) {
+		evt := &core.Event{
+			Kind:         "message_user",
+			SourceSystem: "test",
+			SessionID:    "sess_cwd3",
+			Content:      "test content",
+			Metadata:     map[string]string{"cwd": "/home/user/git/other-project"},
+		}
+		got, err := svc.IngestEvent(ctx, evt)
+		if err != nil {
+			t.Fatalf("IngestEvent: %v", err)
+		}
+		if got.ProjectID != "" {
+			t.Errorf("expected empty ProjectID, got %s", got.ProjectID)
+		}
+	})
+
+	t.Run("no match when no cwd metadata", func(t *testing.T) {
+		evt := &core.Event{
+			Kind:         "message_user",
+			SourceSystem: "test",
+			SessionID:    "sess_cwd4",
+			Content:      "test content",
+		}
+		got, err := svc.IngestEvent(ctx, evt)
+		if err != nil {
+			t.Fatalf("IngestEvent: %v", err)
+		}
+		if got.ProjectID != "" {
+			t.Errorf("expected empty ProjectID, got %s", got.ProjectID)
+		}
+	})
+
+	t.Run("does not overwrite explicit project_id", func(t *testing.T) {
+		evt := &core.Event{
+			Kind:         "message_user",
+			SourceSystem: "test",
+			SessionID:    "sess_cwd5",
+			ProjectID:    "explicit-project",
+			Content:      "test content",
+			Metadata:     map[string]string{"cwd": "/home/user/git/my-project"},
+		}
+		got, err := svc.IngestEvent(ctx, evt)
+		if err != nil {
+			t.Fatalf("IngestEvent: %v", err)
+		}
+		if got.ProjectID != "explicit-project" {
+			t.Errorf("expected explicit ProjectID to be preserved, got %s", got.ProjectID)
+		}
+	})
+}
+
 func TestRemember(t *testing.T) {
 	svc := testService(t)
 	ctx := context.Background()

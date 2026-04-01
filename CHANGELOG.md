@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Automatic project_id inference from `cwd` event metadata at ingestion. When an event carries `cwd` in metadata and no explicit `project_id`, AMM matches against registered project paths and sets the project scope automatically. Enables correct project-scoped memories from global ingestion hooks.
+
+### Changed
+
+- Memory extraction prompt overhauled for higher quality output and better non-frontier model compliance:
+  - Prompt restructured into clear sections (FILTERING, BODY QUALITY, TYPE REFERENCE) with filtering rules before extraction guidance, improving instruction adherence on weaker models.
+  - Task framing changed from "extract memories" to "evaluate events, return [] unless genuinely durable" — default expectation is now an empty array.
+  - Selectivity reinforced at both the top and bottom of the prompt to reduce over-extraction.
+  - Hard percentages removed from selectivity guidance for batch-size independence.
+  - Body field now requires context and reasoning beyond tight_description; bodies that merely restate tight_description are flagged as defects.
+  - Confidence calibration anchors added (0.95 explicit, 0.85 implied, 0.7 inferred, 0.5 speculative) to reduce uniform scoring.
+  - All 10 memory types now have concise extraction guidance with body expectations: preference, decision, open_loop, constraint, procedure, incident, assumption, fact, identity, relationship.
+  - Decision guidance simplified from rigid template (Decision/Why/Tradeoff) to freeform with reasoning.
+  - Open loop guidance now requires describing what is unresolved, why it matters, and what would close the loop.
+
 ## [1.1.0] - 2026-03-31
 
 ### Added

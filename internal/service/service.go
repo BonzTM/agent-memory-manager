@@ -239,6 +239,15 @@ func (s *AMMService) IngestEvent(ctx context.Context, event *core.Event) (*core.
 		event.OccurredAt = event.IngestedAt
 	}
 
+	// Infer project_id from cwd metadata when not explicitly set.
+	if event.ProjectID == "" && event.Metadata != nil {
+		if cwd := event.Metadata["cwd"]; cwd != "" {
+			if pid := s.matchProjectByCwd(ctx, cwd); pid != "" {
+				event.ProjectID = pid
+			}
+		}
+	}
+
 	// Tag read-only events so Reflect skips them.
 	if !createMemory {
 		if event.Metadata == nil {
@@ -1085,4 +1094,26 @@ func (s *AMMService) Status(ctx context.Context) (*core.StatusResult, error) {
 func (s *AMMService) ResetDerived(ctx context.Context) (*core.ResetDerivedResult, error) {
 	slog.Debug("ResetDerived called")
 	return s.repo.ResetDerived(ctx)
+}
+
+// matchProjectByCwd looks up registered projects and returns the project ID
+// whose path is a prefix of the given cwd. Returns "" if no match is found.
+func (s *AMMService) matchProjectByCwd(ctx context.Context, cwd string) string {
+	projects, err := s.repo.ListProjects(ctx)
+	if err != nil || len(projects) == 0 {
+		return ""
+	}
+	// Find the longest matching project path (most specific match).
+	var bestID string
+	var bestLen int
+	for _, p := range projects {
+		if p.Path == "" {
+			continue
+		}
+		if strings.HasPrefix(cwd, p.Path) && len(p.Path) > bestLen {
+			bestID = p.ID
+			bestLen = len(p.Path)
+		}
+	}
+	return bestID
 }

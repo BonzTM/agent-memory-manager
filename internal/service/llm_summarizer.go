@@ -98,36 +98,43 @@ func buildMemoryExtractionPrompt(eventContents []string, includeSourceEvents boo
 	var fieldLines strings.Builder
 	fieldLines.WriteString("- type: one of \"preference\", \"fact\", \"decision\", \"procedure\", \"constraint\", \"open_loop\", \"identity\", \"relationship\", \"incident\", \"assumption\"\n")
 	fieldLines.WriteString("- subject: short noun phrase for entity/topic\n")
-	fieldLines.WriteString("- body: full memory text\n")
+	fieldLines.WriteString("- body: the full memory content. MUST go beyond tight_description — include the surrounding context, reasoning, or motivation that makes this memory useful in the future. A body that merely restates tight_description is a defect. Think: what would a future agent need to know to act on this memory without any other context?\n")
 	fieldLines.WriteString("- tight_description: a natural-language retrieval phrase (max 100 chars). Must be searchable — write it as if someone would type it to find this memory later. NO file paths, timestamps, or technical IDs. Good: 'CGO and FTS5 flags required for all builds'. Bad: '/home/user/project/build.go line 42'\n")
-	fieldLines.WriteString("- confidence: 0.0-1.0 certainty this is durable memory\n")
+	fieldLines.WriteString("- confidence: 0.0-1.0 certainty this is durable memory. Calibrate: 0.95 = explicitly stated by user; 0.85-0.94 = strongly implied from context; 0.7-0.84 = reasonable inference; 0.5-0.69 = speculative. Vary your scores.\n")
 	fieldLines.WriteString("- importance: 0.0-1.0 future recall value\n")
 	if includeSourceEvents {
 		fieldLines.WriteString("- source_events: array of event numbers (1-indexed) this memory was derived from\n")
 	}
 
 	var rules strings.Builder
-	rules.WriteString("- Only extract things worth remembering across sessions\n")
-	rules.WriteString("- Be highly selective: at most 10-15% of events should yield a memory. A batch of 20 events should produce 2-3 memories at most, not 10. Fewer high-quality memories is always better than many thin ones.\n")
-	rules.WriteString("- Durability check: before creating each memory, ask yourself — will this still matter in 30 days? If the answer is 'only if something goes wrong' or 'only during this task', skip it.\n")
-	rules.WriteString("- Skip transient task state, status noise, and greetings\n")
-	rules.WriteString("- Tool output (grep results, build logs, test output) should NOT be stored verbatim. Instead, if tool output reveals a durable lesson, constraint, or gotcha, extract the LESSON — not the output itself. For example: a build failure showing 'missing import' becomes a constraint memory about dependency requirements, not a copy of the build log.\n")
-	rules.WriteString("- Skip file trees, package inventories, raw config/env var dumps, diffs, logs, and JSON blobs\n")
-	rules.WriteString("- Before producing a memory, consider: is this information already obviously part of the project's README, AGENTS.md, or standard documentation? If so, skip it — agents can read those files directly. Only extract non-obvious truths, personal preferences, lessons learned, and contextual decisions.\n")
-	rules.WriteString("- Memory bodies should be self-contained and useful without context. Include the 'why' and 'so what', not just the 'what'. A body like 'Uses SQLite' is thin; 'Uses SQLite for local-first deployment — avoids network dependency, supports single-binary distribution' is rich.\n")
+	rules.WriteString("FILTERING — apply these rules first, before extracting anything:\n")
+	rules.WriteString("- Most events contain nothing worth remembering. Return [] unless you find something genuinely durable.\n")
+	rules.WriteString("- Durability check: will this still matter in 30 days? If not, skip it.\n")
+	rules.WriteString("- Skip: transient task state, status noise, greetings, file trees, package inventories, raw config/env var dumps, diffs, logs, and JSON blobs.\n")
+	rules.WriteString("- Skip: information already obvious from the project's README, AGENTS.md, or standard documentation.\n")
+	rules.WriteString("- Tool output (grep results, build logs, test output) should NOT be stored verbatim. Only extract the LESSON if one exists.\n")
 	if includeSourceEvents {
-		rules.WriteString("- Deduplicate across events: if multiple events express the same fact/preference/decision, produce ONE memory with higher confidence\n")
+		rules.WriteString("- Deduplicate across events: if multiple events express the same thing, produce ONE memory with higher confidence.\n")
 	}
-	rules.WriteString("- A \"preference\" is something the user consistently wants\n")
-	rules.WriteString("- A \"decision\" is an explicit architectural or design choice with rationale\n")
-	rules.WriteString("- Only emit a \"decision\" when the text shows a settled choice, not brainstorming, proposals, or open questions\n")
-	rules.WriteString("- For a \"decision\" body, start with \"Decision: <chosen option>\"\n")
-	rules.WriteString("- If rationale exists, add a new line \"Why: <brief rationale>\"\n")
-	rules.WriteString("- If a key tradeoff or constraint exists, optionally add a new line \"Tradeoff: <brief note>\"\n")
-	rules.WriteString("- Do not emit a \"decision\" for raw tool output, diffs, logs, file paths, or grep/code dumps unless the surrounding text explicitly frames a durable choice\n")
-	rules.WriteString("- A \"fact\" is a stable truth about the project or domain\n")
-	rules.WriteString("- Return [] if nothing is worth remembering\n")
-	rules.WriteString("- Return ONLY the JSON array, no markdown fences or commentary\n")
+	rules.WriteString("\n")
+	rules.WriteString("BODY QUALITY — for any memory you do extract:\n")
+	rules.WriteString("- Body must be self-contained and useful without context. Include the 'why' and 'so what', not just the 'what'.\n")
+	rules.WriteString("- Body MUST go beyond tight_description. A body like 'Uses SQLite' is thin; 'Uses SQLite for local-first deployment — avoids network dependency, supports single-binary distribution' is rich.\n")
+	rules.WriteString("\n")
+	rules.WriteString("TYPE REFERENCE — use these to pick the right type and shape the body:\n")
+	rules.WriteString("- preference: something the user wants or a way they like to work. Body: what they prefer and why.\n")
+	rules.WriteString("- decision: a settled architectural or design choice (not brainstorming or proposals). Body: what was chosen and the reasoning behind it. Do not extract decisions from raw tool output, diffs, or logs.\n")
+	rules.WriteString("- open_loop: an unresolved question or blocked work that spans sessions (not routine task completion). Body: what is unresolved, why it matters, and what would close the loop.\n")
+	rules.WriteString("- constraint: a hard requirement or boundary that limits future choices (not a preference). Body: what is constrained, why, and what it rules out.\n")
+	rules.WriteString("- procedure: a non-obvious multi-step workflow with gotchas (not already documented). Body: the steps and tricky parts.\n")
+	rules.WriteString("- incident: a notable failure or surprise with a durable lesson (not routine errors). Body: what happened, what was learned, and how to avoid it.\n")
+	rules.WriteString("- assumption: something believed but not verified. Body: the assumption, why it is being made, and what would confirm or refute it.\n")
+	rules.WriteString("- fact: a stable, verified truth not obvious from code or docs. If unverified, use assumption. Body: the fact and why it matters.\n")
+	rules.WriteString("- identity: who someone or something is. Body: the entity and its role or significance.\n")
+	rules.WriteString("- relationship: a connection between entities. Body: the entities and the nature of their relationship.\n")
+	rules.WriteString("\n")
+	rules.WriteString("IMPORTANT: Return [] for most inputs. An empty array is the correct and expected answer most of the time. Only return memories when the content is clearly worth remembering 30 days from now.\n")
+	rules.WriteString("Return ONLY the JSON array, no markdown fences or commentary.\n")
 
 	var eventsBlock strings.Builder
 	for i, content := range eventContents {
@@ -142,11 +149,10 @@ func buildMemoryExtractionPrompt(eventContents []string, includeSourceEvents boo
 		label = fmt.Sprintf("%d conversation events", len(eventContents))
 	}
 
-	return fmt.Sprintf(`Extract durable memories from the following %s.
+	return fmt.Sprintf(`Evaluate the following %s for durable memories worth keeping across sessions. Most events contain nothing worth remembering — return an empty JSON array [] unless you find something genuinely durable.
 
-For each memory, return a JSON array of objects with these fields:
+When you do find something worth keeping, return a JSON array of objects with these fields:
 %s
-Rules:
 %s
 Events:
 %s`, label, fieldLines.String(), rules.String(), eventsBlock.String())

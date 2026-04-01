@@ -124,10 +124,23 @@ func TestLLMSummarizer_ExtractPromptIncludesDecisionGuidance(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		`Only emit a "decision" when the text shows a settled choice, not brainstorming, proposals, or open questions`,
-		`For a "decision" body, start with "Decision: <chosen option>"`,
-		`If rationale exists, add a new line "Why: <brief rationale>"`,
-		`Do not emit a "decision" for raw tool output, diffs, logs, file paths, or grep/code dumps unless the surrounding text explicitly frames a durable choice`,
+		// Structural sections
+		`FILTERING`,
+		`BODY QUALITY`,
+		`TYPE REFERENCE`,
+		// Selectivity framing
+		`Return [] for most inputs`,
+		`Most events contain nothing worth remembering`,
+		// Field quality
+		`MUST go beyond tight_description`,
+		`Calibrate: 0.95 = explicitly stated by user`,
+		// Type guidance
+		`decision: a settled architectural or design choice`,
+		`open_loop: an unresolved question or blocked work`,
+		`constraint: a hard requirement or boundary`,
+		`procedure: a non-obvious multi-step workflow`,
+		`incident: a notable failure or surprise`,
+		`assumption: something believed but not verified`,
 	} {
 		if !strings.Contains(receivedPrompt, want) {
 			t.Fatalf("expected prompt to contain %q, got %q", want, receivedPrompt)
@@ -335,10 +348,12 @@ func TestLLMSummarizer_ExtractBatchPromptIncludesDecisionGuidance(t *testing.T) 
 	}
 
 	for _, want := range []string{
-		`Deduplicate across events: if multiple events express the same fact/preference/decision, produce ONE memory with higher confidence`,
-		`Only emit a "decision" when the text shows a settled choice, not brainstorming, proposals, or open questions`,
-		`For a "decision" body, start with "Decision: <chosen option>"`,
+		`Deduplicate across events`,
+		`decision: a settled architectural or design choice`,
 		`source_events: array of event numbers (1-indexed) this memory was derived from`,
+		`open_loop: an unresolved question`,
+		`FILTERING`,
+		`Return [] for most inputs`,
 	} {
 		if !strings.Contains(receivedPrompt, want) {
 			t.Fatalf("expected batch prompt to contain %q, got %q", want, receivedPrompt)
@@ -397,7 +412,7 @@ func TestLLMSummarizer_ExtractBatchTruncatesLongEvents(t *testing.T) {
 	}
 	s.ExtractMemoryCandidateBatch(context.Background(), []string{string(longContent)})
 
-	if len(receivedPrompt) > 5000 {
+	if len(receivedPrompt) > 7000 {
 		t.Fatalf("expected event content to be truncated within prompt, got total prompt length %d", len(receivedPrompt))
 	}
 	if len(receivedPrompt) < 1000 {
