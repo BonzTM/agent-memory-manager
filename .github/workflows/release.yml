@@ -98,6 +98,7 @@ jobs:
   npm-openclaw:
     name: Publish OpenClaw Plugin
     runs-on: ubuntu-latest
+    environment: npm
     permissions:
       contents: read
       id-token: write
@@ -116,11 +117,9 @@ jobs:
         run: |
           npm version "${{ env.VERSION }}" --no-git-tag-version --allow-same-version
 
-      - name: Publish to npm
+      - name: Publish to npm with provenance
         working-directory: examples/openclaw
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: npm publish --access public --provenance
 
   docker:
     name: Docker Image
