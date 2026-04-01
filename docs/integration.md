@@ -49,7 +49,7 @@ For runtimes that support lifecycle hooks (e.g., shell scripts triggered on user
 | Claude Code | MCP + CLI Hooks | [Agent Onboarding](agent-onboarding.md#step-3-configure-for-claude-code-full-reference-path) |
 | Codex | MCP + CLI Hooks | [Codex Integration](codex-integration.md) |
 | OpenCode | MCP + Local Plugin | [OpenCode Integration](opencode-integration.md) |
-| OpenClaw | MCP Sidecar | [OpenClaw Integration](openclaw-integration.md) |
+| OpenClaw | MCP + Native Plugin | [OpenClaw Integration](openclaw-integration.md) |
 | Hermes | MCP + Local Plugin | [Hermes Integration](hermes-agent-integration.md) |
 
 *Note: For all runtimes, the HTTP API mode is also an option for remote or containerized deployments.*

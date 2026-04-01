@@ -206,7 +206,7 @@ After Steps 1-2, pick the path that matches the user's host:
 | Claude Code | Continue below with Steps 3-7 | Full MCP + public hook reference implementation |
 | Codex | [Codex Integration](codex-integration.md) | MCP + Codex hooks + transcript-aware closeout |
 | OpenCode | [OpenCode Integration](opencode-integration.md) | MCP + local plugin glue + explicit recall |
-| OpenClaw | [OpenClaw Integration](openclaw-integration.md) | MCP sidecar + native hooks |
+| OpenClaw | [OpenClaw Integration](openclaw-integration.md) | MCP + native plugin + ambient recall injection |
 | Hermes-Agent | [Hermes-Agent Integration](hermes-agent-integration.md) | MCP + local plugin + optional helper scripts |
 
 The Claude sections below remain the most detailed copy-paste walkthrough, but they are no longer the only mental model.

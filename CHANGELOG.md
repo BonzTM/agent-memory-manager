@@ -23,10 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Known tech entity extraction: 60+ lowercase technology names (redis, kubernetes, postgres, docker, etc.) are now recognized by the heuristic entity extractor without requiring capitalization.
 - Hermes AMM plugin example for Hermes-Agent integration.
 - Durability check in LLM extraction prompt: candidates are now assessed for 30-day relevance before creation.
-
+- Native OpenClaw plugin (`examples/openclaw/`) for OpenClaw 2026.03.31+. Uses `definePluginEntry()` with `openclaw.plugin.json` manifest. Replaces the previous hook-bundle approach.
+- Automatic ambient recall injection for OpenClaw via `before_prompt_build` hook. Relevant memories are prepended to every LLM prompt without the agent needing to call any tool, matching the Hermes plugin's `pre_llm_call` behavior.
+- Dual transport support in the OpenClaw plugin: local `amm` binary (default) or HTTP API via `AMM_API_URL`, with MCP-over-HTTP sidecar support for remote deployments.
+- Plugin-level `configSchema` for the OpenClaw plugin, allowing configuration through OpenClaw's native plugin config in addition to environment variables.
 
 ### Changed
 
+- OpenClaw integration overhauled from a repo-local hook bundle to a native OpenClaw plugin with `openclaw.plugin.json` manifest and `definePluginEntry()` entry point.
+- OpenClaw event capture hooks consolidated from standalone `hooks/` directories into plugin-registered hooks within the plugin's `register()` function.
+- OpenClaw integration documentation (`docs/openclaw-integration.md`) rewritten for the native plugin architecture.
 - Built-in embedding provider now uses real GloVe word vectors (50d, 100K vocab + tech terms) instead of a hash-based stub. Pure Go, no CGo, no external API. Binary size increases ~5MB when built with `builtin_embeddings` tag.
 - Collapsed recency and freshness signals into a single recency signal. The former freshness weight (4%) was redistributed: +2% to entity overlap (18% to 20%) and +2% to recency (6% to 8%).
 - Fixed renormalization inversion: when semantic embeddings are available, other signals are no longer penalized. When embeddings are absent, their weight is now correctly redistributed upward to present signals.
@@ -47,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ANN search now falls back to brute-force when results are empty (not just on error).
 - Embedding upsert syncs the `embedding_vec` column when present, with logged warnings on failure instead of silent drops.
 - Test assertion ordering: source lookup assertions now run before memory supersede to prevent flaky test results.
+
+### Removed
+
+- OpenClaw `hooks/amm-memory-capture/` and `hooks/amm-session-maintenance/` standalone hook directories. Event capture is now handled by the native plugin. Session maintenance is external (host cron or systemd).
+- OpenClaw `cron.add.reflect.json` cron artifact. The plugin is hot-path only; maintenance scheduling stays external via `examples/scripts/run-workers.sh`.
 
 ## [1.0.0] - 2026-03-30
 

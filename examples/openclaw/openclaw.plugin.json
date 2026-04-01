@@ -1,0 +1,39 @@
+{
+  "id": "amm-memory",
+  "name": "AMM Memory",
+  "description": "Durable memory substrate for OpenClaw agents via amm. Injects ambient recall before each LLM call and captures conversation events.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ammBin": {
+        "type": "string",
+        "description": "Path to the local amm binary. Defaults to 'amm' on PATH.",
+        "default": "amm"
+      },
+      "dbPath": {
+        "type": "string",
+        "description": "Path to the amm SQLite database (binary mode only). Defaults to ~/.amm/amm.db."
+      },
+      "apiUrl": {
+        "type": "string",
+        "description": "Base URL for the AMM HTTP API. When set, the plugin uses HTTP transport instead of the local binary."
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "Bearer token for AMM HTTP API authentication."
+      },
+      "projectId": {
+        "type": "string",
+        "description": "Stable project identifier for scoped recall. Also settable via AMM_PROJECT_ID env."
+      },
+      "recallLimit": {
+        "type": "integer",
+        "description": "Maximum number of recall items to inject per turn.",
+        "default": 5,
+        "minimum": 1,
+        "maximum": 25
+      }
+    }
+  }
+}
