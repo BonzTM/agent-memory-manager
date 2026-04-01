@@ -12,19 +12,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - OpenClaw plugin published as `@bonztm/amm` on npm. Install via `openclaw plugins install @bonztm/amm`.
-- `install.sh` one-command local installer for the OpenClaw plugin with `--api-url`, `--project-id`, `--mcp` options.
+- `install.sh` one-command local installer for the OpenClaw plugin. Automatically configures: plugin entry, MCP server (local `amm-mcp` or MCP-over-HTTP), and `plugins.allow`. Supports `--api-url`, `--project-id`, `--api-key`, `--recall-limit` options.
 - Transport split: npm package uses HTTP-only transport (passes OpenClaw security scanner), `install.sh` provides full dual-transport (local binary + HTTP).
 - OpenCode plugin registers native `memory_search`/`memory_get` tools via the `tool` hook.
 - npm publish step in release workflow with trusted publishers (OIDC provenance).
+- OpenClaw MCP server configuration: `install.sh` configures `mcp.servers.amm` in `openclaw.json` — local `amm-mcp` stdio for binary installs, MCP-over-HTTP (`streamable-http`) for `--api-url` installs.
 
 ### Changed
 
 - OpenClaw plugin reverted from memory slot claim to hooks-based integration. The memory slot contract (`MemoryPluginRuntime`) requires plugins that own the full memory lifecycle (storage, embeddings, search managers, flush plans). AMM's Go binary architecture doesn't match — hooks-based integration (`before_prompt_build` + `registerHook`) is stable and fully functional.
 - OpenClaw plugin config resolution guards against undefined values.
+- OpenClaw `install.sh` handles JSONC trailing commas in `openclaw.json`.
 
 ### Fixed
 
 - Postgres `ClaimUnreflectedEvents` test updated for sessionless-only filtering.
+- OpenClaw `install.sh` expands `~` to full home path in `AMM_DB_PATH` for MCP env vars.
+- OpenClaw MCP server config placed under `mcp.servers` (was incorrectly at top-level `mcp`).
 
 ## [1.2.0] - 2026-04-01
 

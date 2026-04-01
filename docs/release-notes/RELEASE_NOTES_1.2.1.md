@@ -12,7 +12,7 @@ amm 1.2.1 is a patch release focused on the OpenClaw plugin and integration poli
 openclaw plugins install @bonztm/amm
 ```
 
-The npm package uses HTTP transport only (OpenClaw's security scanner blocks `child_process` imports). Configure `apiUrl` in plugin config to point at your `amm-http` instance.
+The npm package uses HTTP transport only (OpenClaw's security scanner blocks `child_process` imports). After install, configure the plugin (`apiUrl`) and an MCP server (`mcp.servers.amm`) in `openclaw.json`. See the [OpenClaw integration guide](../openclaw-integration.md) for the full config.
 
 For local binary mode (no HTTP server needed):
 
@@ -20,7 +20,7 @@ For local binary mode (no HTTP server needed):
 cd examples/openclaw && ./install.sh
 ```
 
-The install script provides the full dual-transport plugin with options for `--api-url`, `--project-id`, `--mcp`, and more.
+The install script automatically configures the plugin, MCP server (local `amm-mcp` or MCP-over-HTTP), and `plugins.allow`. For HTTP mode: `./install.sh --api-url http://host:8080 --api-key your-key`.
 
 ### OpenCode native tools
 
