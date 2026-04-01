@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Automatic project_id inference from `cwd` event metadata at ingestion. When an event carries `cwd` in metadata and no explicit `project_id`, AMM matches against registered project paths and sets the project scope automatically. Enables correct project-scoped memories from global ingestion hooks.
+- Helm chart CronJob template (`maintenance.cronjob`) for the full 7-phase maintenance pipeline. Enabled by default on `*/30 * * * *` schedule. Hits the AMM HTTP API from a lightweight busybox container using the chart's own service URL and API key secret. Configurable via `maintenance.cronjob.*` values.
 
 ### Changed
 
@@ -23,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - All 10 memory types now have concise extraction guidance with body expectations: preference, decision, open_loop, constraint, procedure, incident, assumption, fact, identity, relationship.
   - Decision guidance simplified from rigid template (Decision/Why/Tradeoff) to freeform with reasoning.
   - Open loop guidance now requires describing what is unresolved, why it matters, and what would close the loop.
+- `examples/scripts/run-workers.sh` rewritten with structured logging: UTC timestamps on every line, per-job duration and exit status, end-of-run summary with pass/fail counts and total duration. Suitable for both interactive use and cron log capture.
 
 ## [1.1.0] - 2026-03-31
 

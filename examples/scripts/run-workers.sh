@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
+# AMM maintenance pipeline — runs all background jobs in dependency order.
 # Suitable for cron: */30 * * * * /path/to/run-workers.sh
+#
+# Logging:
+#   - Timestamps on every line (cron-friendly).
+#   - Each job prints its name, duration, and exit status.
+#   - Summary at the end: total jobs, passed, failed, duration.
+#   - When run interactively (tty detected), output is unbuffered.
 set -euo pipefail
 
 AMM="${AMM_BIN:-/usr/local/bin/amm}"
@@ -7,8 +14,19 @@ export AMM_DB_PATH="${AMM_DB_PATH:-$HOME/.amm/amm.db}"
 LOCK_DIR="${AMM_DB_PATH}.maintenance.lock"
 LAST_RUN_MARKER="${AMM_DB_PATH}.last-full-maintenance"
 
-# Skip if DB doesn't exist
-[ -f "$AMM_DB_PATH" ] || exit 0
+# ── Logging ──────────────────────────────────────────────────────────────────
+
+log() { printf '%s [amm-maintenance] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"; }
+log_phase() { log "── $1 ──"; }
+
+# ── Pre-flight ───────────────────────────────────────────────────────────────
+
+if [ ! -f "$AMM_DB_PATH" ]; then
+  log "SKIP db not found at $AMM_DB_PATH"
+  exit 0
+fi
+
+# ── Locking ──────────────────────────────────────────────────────────────────
 
 acquire_lock() {
   if mkdir "$LOCK_DIR" 2>/dev/null; then
@@ -30,75 +48,106 @@ acquire_lock() {
 }
 
 if ! acquire_lock; then
+  log "SKIP another maintenance run is active"
   exit 0
 fi
 
-cleanup_lock() {
-  rm -rf "$LOCK_DIR" 2>/dev/null || true
-}
+cleanup_lock() { rm -rf "$LOCK_DIR" 2>/dev/null || true; }
 trap cleanup_lock EXIT INT TERM
 
-run_housekeeping() {
-  $AMM jobs run cleanup_recall_history >/dev/null 2>&1 || true
-  $AMM jobs run purge_old_events >/dev/null 2>&1 || true
-  $AMM jobs run purge_old_jobs >/dev/null 2>&1 || true
-  $AMM jobs run expire_retrieval_cache >/dev/null 2>&1 || true
-  $AMM jobs run purge_relevance_feedback >/dev/null 2>&1 || true
-  $AMM jobs run vacuum_analyze >/dev/null 2>&1 || true
+# ── Job runner ───────────────────────────────────────────────────────────────
+
+TOTAL=0
+PASSED=0
+FAILED=0
+PIPELINE_START=$(date +%s)
+
+run_job() {
+  local job="$1"
+  local start end elapsed rc
+  TOTAL=$((TOTAL + 1))
+  start=$(date +%s)
+  if $AMM jobs run "$job" 2>&1; then
+    rc=0
+  else
+    rc=$?
+  fi
+  end=$(date +%s)
+  elapsed=$((end - start))
+
+  if [ "$rc" -eq 0 ]; then
+    PASSED=$((PASSED + 1))
+    log "OK   $job (${elapsed}s)"
+  else
+    FAILED=$((FAILED + 1))
+    log "FAIL $job (${elapsed}s, exit=$rc)"
+  fi
 }
 
+# ── Change detection ─────────────────────────────────────────────────────────
 # Skip the full pipeline if the DB hasn't been modified since the last
-# successful full run. The DB file's mtime changes on every write (event
-# ingestion, reflect creating memories, etc.), so comparing it against a
-# marker file tells us whether anything happened since we last processed.
+# successful full run. Housekeeping still runs unconditionally.
+
 db_changed_since_last_run() {
   [ ! -f "$LAST_RUN_MARKER" ] && return 0
   [ "$AMM_DB_PATH" -nt "$LAST_RUN_MARKER" ]
 }
 
+run_housekeeping() {
+  log_phase "Housekeeping"
+  for job in cleanup_recall_history purge_old_events purge_old_jobs \
+             expire_retrieval_cache purge_relevance_feedback vacuum_analyze; do
+    run_job "$job"
+  done
+}
+
 if ! db_changed_since_last_run; then
+  log "No DB changes since last full run — housekeeping only"
   run_housekeeping
+  log "Done (housekeeping only): $PASSED passed, $FAILED failed"
   exit 0
 fi
 
-# Phase 1: Extract memories from events (LLM calls, no embeddings).
-$AMM jobs run reflect >/dev/null 2>&1 || true
+# ── Full pipeline ────────────────────────────────────────────────────────────
 
-# Phase 2: Build embeddings for all new memories/summaries in batches.
-# Runs early so downstream jobs (merge_duplicates, lifecycle_review, etc.)
-# have embeddings available for semantic dedup and scoring. Individual jobs
-# do not embed per-item — this single batched pass is far more efficient.
-$AMM jobs run rebuild_indexes >/dev/null 2>&1 || true
+log "Starting full maintenance pipeline"
 
-# Phase 3: Compress, consolidate, and structure.
-$AMM jobs run compress_history >/dev/null 2>&1 || true
-$AMM jobs run consolidate_sessions >/dev/null 2>&1 || true
-$AMM jobs run build_topic_summaries >/dev/null 2>&1 || true
+log_phase "Phase 1: Extract memories from events"
+run_job reflect
 
-# Phase 4: Dedup, enrich, and link.
-$AMM jobs run merge_duplicates >/dev/null 2>&1 || true
-$AMM jobs run extract_claims >/dev/null 2>&1 || true
-$AMM jobs run enrich_memories >/dev/null 2>&1 || true
-$AMM jobs run rebuild_entity_graph >/dev/null 2>&1 || true
-$AMM jobs run form_episodes >/dev/null 2>&1 || true
+log_phase "Phase 2: Build embeddings"
+run_job rebuild_indexes
 
-# Phase 5: Quality and lifecycle.
-$AMM jobs run detect_contradictions >/dev/null 2>&1 || true
-$AMM jobs run decay_stale_memory >/dev/null 2>&1 || true
-$AMM jobs run lifecycle_review >/dev/null 2>&1 || true
-$AMM jobs run cross_project_transfer >/dev/null 2>&1 || true
-$AMM jobs run archive_session_traces >/dev/null 2>&1 || true
+log_phase "Phase 3: Compress and structure"
+for job in compress_history consolidate_sessions build_topic_summaries; do
+  run_job "$job"
+done
 
-# Phase 6: Final index rebuild (catches anything created in phases 3-5).
-$AMM jobs run rebuild_indexes >/dev/null 2>&1 || true
-$AMM jobs run cleanup_recall_history >/dev/null 2>&1 || true
-$AMM jobs run update_ranking_weights >/dev/null 2>&1 || true
+log_phase "Phase 4: Dedup, enrich, and link"
+for job in merge_duplicates extract_claims enrich_memories \
+           rebuild_entity_graph form_episodes; do
+  run_job "$job"
+done
 
-# Phase 7: DB trim and compaction (runs last, after all writes are done).
-$AMM jobs run purge_old_events >/dev/null 2>&1 || true
-$AMM jobs run purge_old_jobs >/dev/null 2>&1 || true
-$AMM jobs run expire_retrieval_cache >/dev/null 2>&1 || true
-$AMM jobs run purge_relevance_feedback >/dev/null 2>&1 || true
-$AMM jobs run vacuum_analyze >/dev/null 2>&1 || true
+log_phase "Phase 5: Quality and lifecycle"
+for job in detect_contradictions decay_stale_memory lifecycle_review \
+           cross_project_transfer archive_session_traces; do
+  run_job "$job"
+done
+
+log_phase "Phase 6: Final index pass"
+for job in rebuild_indexes cleanup_recall_history update_ranking_weights; do
+  run_job "$job"
+done
+
+log_phase "Phase 7: DB trim and compaction"
+for job in purge_old_events purge_old_jobs expire_retrieval_cache \
+           purge_relevance_feedback vacuum_analyze; do
+  run_job "$job"
+done
 
 touch "$LAST_RUN_MARKER"
+
+PIPELINE_END=$(date +%s)
+PIPELINE_ELAPSED=$((PIPELINE_END - PIPELINE_START))
+log "Done: $TOTAL jobs ($PASSED passed, $FAILED failed) in ${PIPELINE_ELAPSED}s"

@@ -125,6 +125,26 @@ maintenance:
   # -- Enable automatic contradiction detection
   autoDetectContradictions: true
 
+  cronjob:
+    # -- Enable the maintenance CronJob
+    enabled: true
+    # -- Cron schedule expression
+    schedule: "*/30 * * * *"
+    # -- Container image for the maintenance job (lightweight HTTP client)
+    image: "busybox:latest"
+    # -- Override the AMM API URL (defaults to the in-cluster service)
+    ammUrl: ""
+    # -- Number of retries before marking the job as failed
+    backoffLimit: 2
+    # -- Maximum runtime in seconds (15 min)
+    activeDeadlineSeconds: 900
+    # -- Number of successful job runs to keep
+    successfulJobsHistoryLimit: 3
+    # -- Number of failed job runs to keep
+    failedJobsHistoryLimit: 3
+    # -- Resource requests/limits for the maintenance container
+    resources: {}
+
 # =============================================================================
 # Summarizer (LLM)
 # =============================================================================

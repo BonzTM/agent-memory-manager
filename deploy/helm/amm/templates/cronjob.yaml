@@ -1,0 +1,125 @@
+{{- if .Values.maintenance.cronjob.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "amm.fullname" . }}-maintenance
+  labels:
+    {{- include "amm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: maintenance
+spec:
+  schedule: {{ .Values.maintenance.cronjob.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.maintenance.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.maintenance.cronjob.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.maintenance.cronjob.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.maintenance.cronjob.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "amm.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: maintenance
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: maintenance
+              image: {{ .Values.maintenance.cronjob.image | default "busybox:latest" | quote }}
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  AMM_URL="{{ .Values.maintenance.cronjob.ammUrl | default (printf "http://%s:%v" (include "amm.fullname" .) .Values.service.port) }}"
+                  AUTH="Authorization: Bearer ${AMM_API_KEY}"
+
+                  log() { printf '%s [amm-maintenance] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"; }
+
+                  TOTAL=0; PASSED=0; FAILED=0
+
+                  run_job() {
+                    TOTAL=$((TOTAL + 1))
+                    START=$(date +%s)
+                    HTTP_CODE=$(wget -qO- -S --header="$AUTH" \
+                      --header="Content-Type: application/json" \
+                      --post-data="{}" \
+                      "${AMM_URL}/v1/jobs/$1" 2>&1 | head -1) && RC=0 || RC=$?
+                    ELAPSED=$(( $(date +%s) - START ))
+                    if [ "$RC" -eq 0 ]; then
+                      PASSED=$((PASSED + 1))
+                      log "OK   $1 (${ELAPSED}s)"
+                    else
+                      FAILED=$((FAILED + 1))
+                      log "FAIL $1 (${ELAPSED}s, exit=$RC)"
+                    fi
+                  }
+
+                  log "Starting full maintenance pipeline"
+
+                  log "── Phase 1: Extract memories from events ──"
+                  run_job reflect
+
+                  log "── Phase 2: Build embeddings ──"
+                  run_job rebuild_indexes
+
+                  log "── Phase 3: Compress and structure ──"
+                  for JOB in compress_history consolidate_sessions build_topic_summaries; do
+                    run_job $JOB
+                  done
+
+                  log "── Phase 4: Dedup, enrich, and link ──"
+                  for JOB in merge_duplicates extract_claims enrich_memories rebuild_entity_graph form_episodes; do
+                    run_job $JOB
+                  done
+
+                  log "── Phase 5: Quality and lifecycle ──"
+                  for JOB in detect_contradictions decay_stale_memory lifecycle_review cross_project_transfer archive_session_traces; do
+                    run_job $JOB
+                  done
+
+                  log "── Phase 6: Final index pass ──"
+                  for JOB in rebuild_indexes cleanup_recall_history update_ranking_weights; do
+                    run_job $JOB
+                  done
+
+                  log "── Phase 7: DB trim and compaction ──"
+                  for JOB in purge_old_events purge_old_jobs expire_retrieval_cache purge_relevance_feedback vacuum_analyze; do
+                    run_job $JOB
+                  done
+
+                  log "Done: $TOTAL jobs ($PASSED passed, $FAILED failed)"
+
+                  if [ "$FAILED" -gt 0 ]; then
+                    exit 1
+                  fi
+              env:
+                - name: AMM_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "amm.secretName" . }}
+                      key: AMM_API_KEY
+              {{- with .Values.maintenance.cronjob.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}
