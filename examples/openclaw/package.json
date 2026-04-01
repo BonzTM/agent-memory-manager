@@ -4,7 +4,9 @@
   "description": "AMM memory plugin for OpenClaw — claims the memory slot with memory_search/memory_get tools, ambient recall injection, and conversation event capture.",
   "type": "module",
   "openclaw": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
   },
   "files": [
     "index.ts",
@@ -15,7 +17,13 @@
   "scripts": {
     "install-plugin": "./install.sh"
   },
-  "keywords": ["openclaw", "plugin", "memory", "amm", "agent-memory"],
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "memory",
+    "amm",
+    "agent-memory"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/bonztm/agent-memory-manager",

@@ -1,7 +1,7 @@
 {
   "plugins": {
     "entries": {
-      "amm-memory": {
+      "@bonztm/amm": {
         "enabled": true,
         "config": {
           "projectId": "my-project",
