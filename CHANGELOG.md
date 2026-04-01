@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-01
+
 ### Added
 
 - **Session-first memory extraction pipeline.** ConsolidateSessions is now the primary extraction path for conversation events. Two-pass LLM: narrative summarization (summarizer model) then structured extraction (review model) on the full session narrative. Produces fewer, richer memories with full conversation context instead of per-event fragments.
@@ -127,7 +129,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background maintenance pipeline with reflect, compression, indexing, contradiction detection, graph rebuild, lifecycle review, and related worker jobs.
 - Helm chart and sidecar deployment artifacts for Kubernetes-based installations.
 
-[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.1.1...HEAD
+[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.2.0...HEAD
+[1.2.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.2.0
 [1.1.1]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.1.1
 [1.1.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.1.0
 [1.0.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.0.0
