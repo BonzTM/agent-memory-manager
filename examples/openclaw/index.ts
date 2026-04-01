@@ -1,10 +1,10 @@
 /**
  * AMM native OpenClaw plugin.
  *
- * Claims the memory slot via registerMemoryRuntime, providing
- * memory_search and memory_get to the agent. Injects ambient recall
- * via registerMemoryPromptSection and captures conversation events
- * via registerHook.
+ * Claims the memory slot via registerMemoryRuntime, providing the full
+ * MemoryPluginRuntime contract. Injects ambient recall via
+ * registerMemoryPromptSection and captures conversation events via
+ * registerHook.
  *
  * This plugin is intentionally hot-path only. It does not run maintenance
  * jobs. Keep maintenance on an external schedule via host cron or systemd
@@ -32,8 +32,8 @@ interface OpenClawPluginApi {
     handler: (event: unknown) => Promise<void>,
     opts?: { name?: string; description?: string },
   ): void;
-  registerMemoryRuntime(runtime: Record<string, unknown>): void;
-  registerMemoryPromptSection(section: Record<string, unknown>): void;
+  registerMemoryRuntime(runtime: unknown): void;
+  registerMemoryPromptSection(builder: unknown): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +58,34 @@ function extractUserQuery(event: PromptBuildEvent): string {
 }
 
 // ---------------------------------------------------------------------------
+// AMM Memory Search Manager (implements RegisteredMemorySearchManager)
+// ---------------------------------------------------------------------------
+
+function createAmmSearchManager(config: AmmConfig) {
+  return {
+    status() {
+      return {
+        ready: config.apiUrl !== "" || config.ammBin !== "",
+        provider: "amm",
+        backend: config.apiUrl ? "http" : "local",
+        summary: config.apiUrl
+          ? `AMM HTTP API at ${config.apiUrl}`
+          : `AMM local binary (${config.ammBin})`,
+      };
+    },
+    async probeEmbeddingAvailability() {
+      return { available: false, reason: "AMM manages its own embeddings" };
+    },
+    async probeVectorAvailability() {
+      return false; // AMM manages its own vector indexes
+    },
+    async close() {
+      // No persistent connections to close
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Plugin definition
 // ---------------------------------------------------------------------------
 
@@ -69,36 +97,31 @@ export default {
   register(api: OpenClawPluginApi) {
     const config: AmmConfig = resolveConfig(api.pluginConfig);
 
-    // --- Memory slot runtime (memory_search / memory_get) ------------------
+    // --- Memory runtime (required by memory slot contract) -----------------
+    // Implements MemoryPluginRuntime interface.
+    const searchManager = createAmmSearchManager(config);
+
     api.registerMemoryRuntime({
-      search: async (query: string, opts?: Record<string, unknown>) => {
-        if (!query || !query.trim()) return [];
-        const limit = typeof opts?.limit === "number" ? opts.limit : config.recallLimit;
-        const type = typeof opts?.type === "string" ? opts.type : undefined;
-        const projectId = typeof opts?.project_id === "string" ? opts.project_id : undefined;
-        return memorySearch(config, query, { limit, type, projectId });
+      async getMemorySearchManager(_params: unknown) {
+        return { manager: searchManager };
       },
-      get: async (id: string) => {
-        if (!id || !id.trim()) return null;
-        return memoryGet(config, id);
+      resolveMemoryBackendConfig(_params: unknown) {
+        return { backend: "builtin" };
+      },
+      async closeAllMemorySearchManagers() {
+        await searchManager.close();
       },
     });
 
-    // --- Memory prompt builder (required by memory slot contract) -----------
-    // registerMemoryPromptSection takes a function directly, not an object.
-    // OpenClaw calls it with (params) and expects an array of prompt sections.
-    api.registerMemoryPromptSection(async (params: Record<string, unknown>) => {
-      const query = typeof params?.query === "string" ? params.query : "";
-      const sessionId = typeof params?.sessionKey === "string" ? params.sessionKey : "";
-      if (!query.trim()) return [];
-
-      const raw = await recall(config, query, sessionId);
-      const rendered = renderRecall(raw, config.recallLimit);
-      if (!rendered) return [];
-      return [{ role: "system", content: `<amm-context>\n${rendered}\n</amm-context>` }];
+    // --- Memory prompt section builder (synchronous, returns string[]) -----
+    api.registerMemoryPromptSection((_params: unknown) => {
+      // The prompt section builder must be synchronous per the contract.
+      // We can't do async recall here. Return empty and rely on the
+      // before_prompt_build hook for actual recall injection.
+      return [];
     });
 
-    // --- Fallback: before_prompt_build for non-slot recall -----------------
+    // --- Ambient recall injection (before_prompt_build) -------------------
     api.on(
       "before_prompt_build",
       async (event) => {
