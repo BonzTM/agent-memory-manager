@@ -177,13 +177,31 @@ config['plugins']['entries'][plugin_name] = {
 # AMM tools (amm_recall, amm_remember, amm_expand, etc.) to agents.
 config.setdefault('mcp', {})
 config['mcp'].setdefault('servers', {})
+api_url = '$API_URL'
 if 'amm' not in config['mcp']['servers']:
-    config['mcp']['servers']['amm'] = {
-        'command': amm_bin + '-mcp',
-        'args': [],
-        'env': {'AMM_DB_PATH': db_path or os.path.expanduser('~/.amm/amm.db')},
-    }
-    print('  MCP server: configured (amm-mcp)')
+    if api_url:
+        # HTTP transport: connect to remote amm-http MCP endpoint
+        mcp_url = api_url.rstrip('/')
+        if not mcp_url.endswith('/v1/mcp'):
+            mcp_url = mcp_url.rstrip('/') + '/v1/mcp'
+        config['mcp']['servers']['amm'] = {
+            'url': mcp_url,
+            'transport': 'streamable-http',
+        }
+        api_key_val = '$API_KEY'
+        if api_key_val:
+            config['mcp']['servers']['amm']['headers'] = {
+                'Authorization': f'Bearer {api_key_val}',
+            }
+        print(f'  MCP server: configured (HTTP: {mcp_url})')
+    else:
+        # Stdio transport: spawn local amm-mcp binary
+        config['mcp']['servers']['amm'] = {
+            'command': amm_bin + '-mcp',
+            'args': [],
+            'env': {'AMM_DB_PATH': db_path or os.path.expanduser('~/.amm/amm.db')},
+        }
+        print('  MCP server: configured (amm-mcp)')
 else:
     print('  MCP server: already configured')
 
