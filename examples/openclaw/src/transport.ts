@@ -101,6 +101,61 @@ export async function ingestEvent(
   runAmm(config, ["ingest", "event", "--in", "-"], JSON.stringify(event));
 }
 
+/** Search memories by query text. Returns the raw result object. */
+export async function memorySearch(
+  config: AmmConfig,
+  query: string,
+  opts?: { limit?: number; type?: string; scope?: string; projectId?: string },
+): Promise<Record<string, unknown>> {
+  if (useHttpApi(config)) {
+    return postJson(config, "/recall", {
+      query,
+      opts: {
+        mode: "hybrid",
+        limit: opts?.limit ?? config.recallLimit,
+        type: opts?.type ?? "",
+        scope: opts?.scope ?? "",
+        project_id: opts?.projectId ?? config.projectId,
+      },
+    });
+  }
+
+  const args = ["recall", "--mode", "hybrid", "--json"];
+  if (opts?.limit) args.push("--limit", String(opts.limit));
+  if (opts?.type) args.push("--type", opts.type);
+  if (opts?.projectId ?? config.projectId) args.push("--project", opts?.projectId ?? config.projectId);
+  args.push(query);
+  return runAmmJson(config, args);
+}
+
+/** Get a single memory by ID. Returns the raw result object. */
+export async function memoryGet(
+  config: AmmConfig,
+  memoryId: string,
+): Promise<Record<string, unknown>> {
+  if (useHttpApi(config)) {
+    const url = `${config.apiUrl}/memories/${encodeURIComponent(memoryId)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: httpHeaders(config),
+        signal: controller.signal,
+      });
+      if (!response.ok) return {};
+      const text = await response.text();
+      return text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return runAmmJson(config, ["get-memory", memoryId, "--json"]);
+}
+
 /** Run ambient recall and return the raw result object. */
 export async function recall(
   config: AmmConfig,

@@ -1,7 +1,8 @@
 {
   "id": "amm-memory",
   "name": "AMM Memory",
-  "description": "Durable memory substrate for OpenClaw agents via amm. Injects ambient recall before each LLM call and captures conversation events.",
+  "kind": "memory",
+  "description": "Durable memory substrate for OpenClaw agents via amm. Claims the memory slot to provide memory_search/memory_get tools, injects ambient recall before each LLM call, and captures conversation events.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
