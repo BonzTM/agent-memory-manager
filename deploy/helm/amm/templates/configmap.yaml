@@ -21,6 +21,7 @@ data:
   AMM_ENABLE_EXPLAIN: {{ .Values.retrieval.enableExplain | quote }}
   AMM_MAX_EXPAND_DEPTH: {{ .Values.config.maxExpandDepth | default "1" | quote }}
   AMM_DEFAULT_PRIVACY: {{ .Values.retrieval.defaultPrivacy | quote }}
+  AMM_ENTITY_HUB_THRESHOLD: {{ .Values.retrieval.entityHubThreshold | default "10" | quote }}
   AMM_AUTO_REFLECT: {{ .Values.maintenance.autoReflect | quote }}
   AMM_AUTO_COMPRESS: {{ .Values.maintenance.autoCompress | quote }}
   AMM_AUTO_CONSOLIDATE: {{ .Values.maintenance.autoConsolidate | quote }}

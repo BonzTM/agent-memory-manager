@@ -110,6 +110,8 @@ retrieval:
   enableExplain: true
   # -- Default memory privacy level
   defaultPrivacy: "private"
+  # -- Entity link count before hub dampening activates (default: 10)
+  entityHubThreshold: 10
 
 # =============================================================================
 # Maintenance Toggles

@@ -60,7 +60,11 @@ helm upgrade --install amm amm/amm \
 - `backend=sqlite|postgres`
 - `secrets.apiKey` or `secrets.existingSecret`
 - `summarizer.endpoint`, `summarizer.model`, `secrets.summarizerApiKey`
+- `summarizer.sessionIdleTimeoutMinutes` (default: 15) — minutes of inactivity before session consolidation
+- `summarizer.summarizerContextWindow` (default: 128000) — token budget; sessions exceeding this are chunked
+- `review.endpoint`, `review.model`, `secrets.reviewApiKey` — separate model for extraction/reasoning
 - `embeddings.enabled=true`, `embeddings.endpoint`, `embeddings.model`, `secrets.embeddingsApiKey`
+- `retrieval.entityHubThreshold` (default: 10) — entity link count before hub dampening
 - `service.type=ClusterIP|LoadBalancer`
 - `ingress.enabled=true`
 
