@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-04-01
+
+### Added
+
+- OpenClaw plugin published as `@bonztm/amm` on npm. Install via `openclaw plugins install @bonztm/amm`.
+- `install.sh` one-command local installer for the OpenClaw plugin with `--api-url`, `--project-id`, `--mcp` options.
+- Transport split: npm package uses HTTP-only transport (passes OpenClaw security scanner), `install.sh` provides full dual-transport (local binary + HTTP).
+- OpenCode plugin registers native `memory_search`/`memory_get` tools via the `tool` hook.
+- npm publish step in release workflow with trusted publishers (OIDC provenance).
+
+### Changed
+
+- OpenClaw plugin reverted from memory slot claim to hooks-based integration. The memory slot contract (`MemoryPluginRuntime`) requires plugins that own the full memory lifecycle (storage, embeddings, search managers, flush plans). AMM's Go binary architecture doesn't match — hooks-based integration (`before_prompt_build` + `registerHook`) is stable and fully functional.
+- OpenClaw plugin config resolution guards against undefined values.
+
+### Fixed
+
+- Postgres `ClaimUnreflectedEvents` test updated for sessionless-only filtering.
+
 ## [1.2.0] - 2026-04-01
 
 ### Added
@@ -131,7 +150,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background maintenance pipeline with reflect, compression, indexing, contradiction detection, graph rebuild, lifecycle review, and related worker jobs.
 - Helm chart and sidecar deployment artifacts for Kubernetes-based installations.
 
-[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.2.0...HEAD
+[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.2.1...HEAD
+[1.2.1]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.2.1
 [1.2.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.2.0
 [1.1.1]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.1.1
 [1.1.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.1.0
