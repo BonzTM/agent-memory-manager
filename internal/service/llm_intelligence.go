@@ -70,6 +70,35 @@ func (p *LLMIntelligenceProvider) ModelName() string {
 	return p.LLMSummarizer.model
 }
 
+// ExtractMemoryCandidateBatch overrides the embedded LLMSummarizer to route
+// extraction through the review model (strong instruction following) instead
+// of the summarizer model. Falls back to the summarizer if no review model.
+func (p *LLMIntelligenceProvider) ExtractMemoryCandidateBatch(ctx context.Context, eventContents []string) ([]core.MemoryCandidate, error) {
+	if len(eventContents) == 0 {
+		return nil, nil
+	}
+	chatComplete := p.reviewChatComplete
+	if chatComplete == nil {
+		// No review model configured — fall through to summarizer.
+		return p.LLMSummarizer.ExtractMemoryCandidateBatch(ctx, eventContents)
+	}
+
+	// includeSourceEvents=true for multi-event batches (Reflect path, needs
+	// source_events indexing and truncation), false for single-input narrative
+	// summaries (ConsolidateSessions path, no truncation needed).
+	prompt := buildMemoryExtractionPrompt(eventContents, len(eventContents) > 1)
+	result, err := chatComplete(ctx, prompt)
+	if err != nil {
+		return p.LLMSummarizer.ExtractMemoryCandidateBatch(ctx, eventContents)
+	}
+
+	var candidates []core.MemoryCandidate
+	if err := json.Unmarshal([]byte(trimLLMJSON(result)), &candidates); err != nil {
+		return p.LLMSummarizer.ExtractMemoryCandidateBatch(ctx, eventContents)
+	}
+	return candidates, nil
+}
+
 func (p *LLMIntelligenceProvider) AnalyzeEvents(ctx context.Context, events []core.EventContent) (*core.AnalysisResult, error) {
 	if len(events) == 0 {
 		return &core.AnalysisResult{
@@ -79,12 +108,17 @@ func (p *LLMIntelligenceProvider) AnalyzeEvents(ctx context.Context, events []co
 			EventQuality:  map[int]string{},
 		}, nil
 	}
-	if p.extractChatComplete == nil {
+	// AnalyzeEvents is a structured extraction/reasoning task → review model.
+	chatComplete := p.reviewChatComplete
+	if chatComplete == nil {
+		chatComplete = p.extractChatComplete
+	}
+	if chatComplete == nil {
 		return p.fallback.AnalyzeEvents(ctx, events)
 	}
 
 	prompt := buildAnalyzeEventsPrompt(events)
-	raw, err := p.extractChatComplete(ctx, prompt)
+	raw, err := chatComplete(ctx, prompt)
 	if err != nil {
 		return p.fallback.AnalyzeEvents(ctx, events)
 	}
@@ -101,12 +135,17 @@ func (p *LLMIntelligenceProvider) TriageEvents(ctx context.Context, events []cor
 	if len(events) == 0 {
 		return map[int]core.TriageDecision{}, nil
 	}
-	if p.extractChatComplete == nil {
+	// Triage is a classification/reasoning task → review model.
+	chatComplete := p.reviewChatComplete
+	if chatComplete == nil {
+		chatComplete = p.extractChatComplete
+	}
+	if chatComplete == nil {
 		return p.fallback.TriageEvents(ctx, events)
 	}
 
 	prompt := buildTriageEventsPrompt(events)
-	raw, err := p.extractChatComplete(ctx, prompt)
+	raw, err := chatComplete(ctx, prompt)
 	if err != nil {
 		return p.fallback.TriageEvents(ctx, events)
 	}
@@ -150,10 +189,8 @@ func (p *LLMIntelligenceProvider) SummarizeTopicBatches(ctx context.Context, top
 		return []core.CompressionResult{}, nil
 	}
 
-	chatComplete := p.reviewChatComplete
-	if chatComplete == nil {
-		chatComplete = p.extractChatComplete
-	}
+	// Topic summarization is compression → summarizer model.
+	chatComplete := p.extractChatComplete
 	if chatComplete == nil {
 		return p.fallback.SummarizeTopicBatches(ctx, topics)
 	}
@@ -217,12 +254,14 @@ func (p *LLMIntelligenceProvider) ConsolidateNarrative(ctx context.Context, even
 	if len(events) == 0 {
 		return &core.NarrativeResult{}, nil
 	}
-	if p.reviewChatComplete == nil {
+	// ConsolidateNarrative is a compression task → summarizer model (large context, cheap).
+	chatComplete := p.extractChatComplete
+	if chatComplete == nil {
 		return p.fallback.ConsolidateNarrative(ctx, events, existingMemories)
 	}
 
 	prompt := buildConsolidateNarrativePrompt(events, existingMemories)
-	raw, err := p.reviewChatComplete(ctx, prompt)
+	raw, err := chatComplete(ctx, prompt)
 	if err != nil {
 		return p.fallback.ConsolidateNarrative(ctx, events, existingMemories)
 	}
