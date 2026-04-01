@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 function nowRfc3339(value = Date.now()) {
   const date = new Date(value > 1_000_000_000_000 ? value : value * 1000);
@@ -240,10 +240,69 @@ trap cleanup EXIT INT TERM
   child.unref();
 }
 
+function runAmmSync(args, stdin) {
+  const ammBin = process.env.AMM_BIN ?? "/usr/local/bin/amm";
+  const dbPath = process.env.AMM_DB_PATH ?? `${process.env.HOME ?? "~"}/.amm/amm.db`;
+  const result = spawnSync(ammBin, args, {
+    input: stdin,
+    encoding: "utf8",
+    timeout: 10_000,
+    env: { ...process.env, AMM_DB_PATH: dbPath },
+  });
+  if (result.error || result.status !== 0 || !result.stdout) return {};
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    return {};
+  }
+}
+
 export const AMMMemoryPlugin = async ({ project }) => {
   const projectID = project?.id ?? "opencode-project";
 
   return {
+    // --- Native tools (memory_search / memory_get) -------------------------
+    tool: [
+      {
+        name: "memory_search",
+        description: "Search durable memories by natural language query. Returns scored results with type, subject, body, and tight_description.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Natural language search query" },
+            limit: { type: "number", description: "Maximum results (default: 5)" },
+            type: { type: "string", description: "Filter by memory type" },
+            project_id: { type: "string", description: "Filter by project scope" },
+          },
+          required: ["query"],
+        },
+        async execute({ query, limit, type: memType, project_id: pid }) {
+          if (!query?.trim()) return { items: [] };
+          const args = ["recall", "--mode", "hybrid", "--json"];
+          if (limit) args.push("--limit", String(limit));
+          if (memType) args.push("--type", memType);
+          if (pid ?? projectID) args.push("--project", pid ?? projectID);
+          args.push(query);
+          return runAmmSync(args);
+        },
+      },
+      {
+        name: "memory_get",
+        description: "Retrieve a single memory by ID. Returns the full record including body, metadata, and source event IDs.",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Memory ID (e.g. mem_abc123)" },
+          },
+          required: ["id"],
+        },
+        async execute({ id }) {
+          if (!id?.trim()) return { error: "id is required" };
+          return runAmmSync(["get-memory", id, "--json"]);
+        },
+      },
+    ],
+
     "shell.env": async (input, output) => {
       output.env.AMM_BIN ??= "/usr/local/bin/amm";
       output.env.AMM_DB_PATH ??= `${process.env.HOME ?? "~"}/.amm/amm.db`;
