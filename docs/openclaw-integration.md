@@ -171,13 +171,13 @@ Plugin config (`openclaw.json`) takes precedence over environment variables:
 ### Managed Plugin
 
 ```bash
-cp -R examples/openclaw ~/.openclaw/plugins/@bonztm/amm
+cp -R examples/openclaw ~/.openclaw/plugins/amm
 ```
 
 ### Workspace Plugin
 
 ```bash
-cp -R examples/openclaw .openclaw/plugins/@bonztm/amm
+cp -R examples/openclaw .openclaw/plugins/amm
 ```
 
 Then merge the contents of `openclaw.json` into your `~/.openclaw/openclaw.json`.
@@ -211,7 +211,7 @@ See [`examples/scripts/run-workers.sh`](../examples/scripts/run-workers.sh) for 
 
 ## Verification Checklist
 
-- `openclaw plugins list` shows `@bonztm/amm` as loaded
+- `openclaw plugins list` shows `amm` as loaded
 - a sample conversation produces `message_user` and `message_assistant` events in `amm history --limit 5`
 - ambient recall items appear in the LLM prompt when relevant memories exist
 - if `AMM_API_URL` is set, the plugin works without the local `amm` binary on PATH

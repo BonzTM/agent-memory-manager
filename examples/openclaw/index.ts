@@ -80,7 +80,7 @@ function extractUserQuery(event: PromptBuildEvent): string {
 // ---------------------------------------------------------------------------
 
 export default definePluginEntry({
-  id: "@bonztm/amm",
+  id: "amm",
   name: "AMM Memory",
   kind: "memory",
 
@@ -148,7 +148,7 @@ export default definePluginEntry({
         if (!context) return {};
         return { prependContext: `<amm-context>\n${context}\n</amm-context>` };
       },
-      { name: "@bonztm/amm.recall", description: "Inject AMM ambient recall before LLM prompt" },
+      { name: "amm.recall", description: "Inject AMM ambient recall before LLM prompt" },
     );
 
     // --- Event capture hooks ----------------------------------------------
@@ -163,7 +163,7 @@ export default definePluginEntry({
       "tool:completed",
     ]) {
       api.registerHook(hookEvent, captureHandler, {
-        name: `@bonztm/amm.capture.${hookEvent}`,
+        name: `amm.capture.${hookEvent}`,
         description: `Capture ${hookEvent} events into AMM history`,
       });
     }

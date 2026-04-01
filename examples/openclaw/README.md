@@ -46,17 +46,17 @@ Run `./install.sh --help` for all options.
 Copy the plugin directory and update your `openclaw.json`:
 
 ```bash
-cp -R examples/openclaw ~/.openclaw/extensions/@bonztm/amm
+cp -R examples/openclaw ~/.openclaw/extensions/amm
 ```
 
 ```json
 {
   "plugins": {
     "slots": {
-      "memory": "@bonztm/amm"
+      "memory": "amm"
     },
     "entries": {
-      "@bonztm/amm": {
+      "amm": {
         "enabled": true,
         "config": {
           "projectId": "my-project"

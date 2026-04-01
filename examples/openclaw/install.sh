@@ -7,7 +7,7 @@
 #
 # Usage:
 #   # Install from npm (published package)
-#   openclaw plugins install @bonztm/@bonztm/amm
+#   openclaw plugins install @bonztm/amm
 #
 #   # Install from local directory (development / release binary)
 #   ./install.sh [options]
@@ -32,7 +32,7 @@ set -euo pipefail
 
 OPENCLAW_DIR="${OPENCLAW_DIR:-$HOME/.openclaw}"
 OPENCLAW_CONFIG="${OPENCLAW_DIR}/openclaw.json"
-PLUGIN_NAME="@bonztm/amm"
+PLUGIN_NAME="amm"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 AMM_BIN=""
