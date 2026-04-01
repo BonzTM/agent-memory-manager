@@ -26,10 +26,6 @@ The install script provides the full dual-transport plugin with options for `--a
 
 The OpenCode plugin now registers `memory_search` and `memory_get` as native tools via the `tool` hook, providing direct memory access without requiring the MCP sidecar.
 
-### Trusted publisher workflow
-
-The release workflow now publishes the OpenClaw npm package via GitHub OIDC trusted publishers with provenance attestation. No npm token secret needed.
-
 ## OpenClaw Memory Slot
 
 The 1.2.0 changelog mentioned the plugin claiming the OpenClaw memory slot. After testing, this was reverted. OpenClaw's memory slot contract (`MemoryPluginRuntime`) requires plugins that own the full memory lifecycle — storage, embeddings, search managers, flush plans, sync. AMM's architecture (Go binary + thin TypeScript client) doesn't match this contract. The hooks-based integration (`before_prompt_build` for ambient recall, `registerHook` for event capture) has been stable since 1.1.0 and provides the same user-facing functionality.
