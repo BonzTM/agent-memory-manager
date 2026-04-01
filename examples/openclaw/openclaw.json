@@ -1,10 +1,12 @@
 {
   "mcp": {
-    "amm": {
-      "command": "/usr/local/bin/amm-mcp",
-      "args": [],
-      "env": {
-        "AMM_DB_PATH": "/home/you/.amm/amm.db"
+    "servers": {
+      "amm": {
+        "command": "/usr/local/bin/amm-mcp",
+        "args": [],
+        "env": {
+          "AMM_DB_PATH": "/home/you/.amm/amm.db"
+        }
       }
     }
   },

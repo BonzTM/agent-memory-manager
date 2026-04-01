@@ -173,11 +173,12 @@ config['plugins']['entries'][plugin_name] = {
 }
 
 
-# Configure amm-mcp as a top-level MCP server so OpenClaw exposes
+# Configure amm-mcp as an MCP server so OpenClaw exposes
 # AMM tools (amm_recall, amm_remember, amm_expand, etc.) to agents.
 config.setdefault('mcp', {})
-if 'amm' not in config['mcp']:
-    config['mcp']['amm'] = {
+config['mcp'].setdefault('servers', {})
+if 'amm' not in config['mcp']['servers']:
+    config['mcp']['servers']['amm'] = {
         'command': amm_bin + '-mcp',
         'args': [],
         'env': {'AMM_DB_PATH': db_path or os.path.expanduser('~/.amm/amm.db')},
