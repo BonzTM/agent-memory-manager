@@ -43,9 +43,9 @@ The summarizer/review model assignments were backwards. Fixed:
 
 **Breaking change for split-model users:** If you have separate `AMM_SUMMARIZER_*` and `AMM_REVIEW_*` configs, methods have been reassigned to match their names. Single-model deployments are unaffected.
 
-### OpenClaw memory slot
+### OpenClaw plugin on npm
 
-The OpenClaw plugin now declares `kind: "memory"` and registers `memory_search`/`memory_get` tools via `api.registerTool()`. When configured in `plugins.slots.memory`, AMM replaces OpenClaw's built-in memory-core. Existing hooks (ambient recall injection, event capture) continue to work alongside the slot tools.
+The OpenClaw plugin is now published as `@bonztm/amm` on npm. Install via `openclaw plugins install @bonztm/amm`. The npm package uses HTTP transport (requires `amm-http` running). For local binary mode, use `install.sh`. Dual transport: npm installs are HTTP-only (OpenClaw security scanner restriction), local installs support both binary and HTTP.
 
 ### OpenCode native tools
 

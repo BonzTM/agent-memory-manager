@@ -32,7 +32,7 @@ Recall → Expand → Act → Remember
 | [Claude Code](docs/agent-onboarding.md) | Hooks + MCP sidecar | — |
 | [Codex](docs/codex-integration.md) | Hooks | — |
 | [OpenCode](docs/opencode-integration.md) | Native plugin + MCP sidecar | Native tools |
-| [OpenClaw](docs/openclaw-integration.md) | Native plugin | Claims `plugins.slots.memory` |
+| [OpenClaw](docs/openclaw-integration.md) | Native plugin + MCP sidecar | — |
 | [Hermes](docs/hermes-agent-integration.md) | Python plugin | — |
 | Any HTTP client | [HTTP API](docs/http-api-reference.md) | — |
 

@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hermes agent `on-session-start.sh` hook for session bookending.
 - Full event capture hooks for api-mode claude-code (user, assistant, tool events over HTTP).
 - `session_start` event emission in api-mode hooks for claude-code, codex, and opencode.
-- **OpenClaw plugin claims the memory slot.** Plugin manifest now declares `kind: "memory"` and registers `memory_search`/`memory_get` tools via `api.registerTool()`. AMM replaces OpenClaw's built-in memory-core when configured in `plugins.slots.memory`.
+- **OpenClaw plugin published as `@bonztm/amm` on npm.** Install via `openclaw plugins install @bonztm/amm`. Dual transport: HTTP API for npm installs, local binary for `install.sh` installs.
 - **OpenCode plugin registers native `memory_search`/`memory_get` tools** via the `tool` hook, providing direct memory access without requiring the MCP sidecar.
 
 ### Changed

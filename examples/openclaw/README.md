@@ -2,12 +2,10 @@
 
 Native OpenClaw plugin for [amm](https://github.com/bonztm/agent-memory-manager) (Agent Memory Manager). Targets **OpenClaw 2026.03.31+**.
 
-**Claims the memory slot** — replaces OpenClaw's built-in `memory-core` with AMM's full extraction and recall pipeline.
-
-- **`memory_search` / `memory_get` tools** registered via the memory slot
 - **Automatic ambient recall injection** via `before_prompt_build` — relevant memories prepended to every LLM prompt
 - **Event capture** for messages and tool invocations into amm history
 - **Dual transport** — local `amm` binary or remote HTTP API via `AMM_API_URL`
+- **MCP sidecar** wiring for explicit agent tool access (`amm_recall`, `amm_remember`, `amm_expand`)
 
 The plugin is **hot-path only**. It does not run maintenance jobs. Keep maintenance on an external schedule.
 
@@ -19,16 +17,13 @@ The plugin is **hot-path only**. It does not run maintenance jobs. Keep maintena
 openclaw plugins install @bonztm/amm
 ```
 
-This installs the plugin, enables it, and claims the memory slot. **Requires `amm-http` running as an HTTP service** — the npm package does not include local binary support due to OpenClaw's security scanner restrictions on `child_process`.
+**Requires `amm-http` running as an HTTP service** — the npm package does not include local binary support due to OpenClaw's security scanner restrictions on `child_process`.
 
 After install, configure the plugin in `~/.openclaw/openclaw.json`:
 
 ```json
 {
   "plugins": {
-    "slots": {
-      "memory": "amm"
-    },
     "entries": {
       "amm": {
         "enabled": true,
@@ -93,7 +88,7 @@ cp -R examples/openclaw ~/.openclaw/extensions/amm
 
 ## Files
 
-- `openclaw.plugin.json` — native plugin manifest (`kind: "memory"`)
+- `openclaw.plugin.json` — native plugin manifest
 - `package.json` — publishable as `@bonztm/amm`
 - `index.ts` — plugin entry point with tool registration and hooks
 - `install.sh` — one-command local installer

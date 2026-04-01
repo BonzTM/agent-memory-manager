@@ -2,8 +2,7 @@
 # AMM OpenClaw Plugin Installer
 #
 # One-command install for the AMM memory plugin into OpenClaw.
-# Claims the memory slot, providing memory_search/memory_get tools,
-# ambient recall injection, and conversation event capture.
+# Provides ambient recall injection and conversation event capture.
 #
 # Usage:
 #   # Install from npm (published package)
@@ -19,8 +18,6 @@
 #   --api-key KEY         API key for HTTP API mode
 #   --project-id ID       Default project ID for scoped recall
 #   --recall-limit N      Max ambient recall items per turn (default: 5)
-#   --slot                Claim the memory slot (default: true)
-#   --no-slot             Don't claim the memory slot (hooks only)
 #   --mcp                 Also configure amm-mcp as an MCP sidecar
 #   --help                Show this help message
 
@@ -41,7 +38,6 @@ API_URL=""
 API_KEY=""
 PROJECT_ID=""
 RECALL_LIMIT=""
-CLAIM_SLOT=true
 INSTALL_MCP=false
 
 # ---------------------------------------------------------------------------
@@ -56,8 +52,6 @@ while [[ $# -gt 0 ]]; do
     --api-key)     API_KEY="$2"; shift 2 ;;
     --project-id)  PROJECT_ID="$2"; shift 2 ;;
     --recall-limit) RECALL_LIMIT="$2"; shift 2 ;;
-    --slot)        CLAIM_SLOT=true; shift ;;
-    --no-slot)     CLAIM_SLOT=false; shift ;;
     --mcp)         INSTALL_MCP=true; shift ;;
     --help|-h)
       sed -n '2,/^$/{ s/^# //; s/^#$//; p }' "$0"
@@ -149,7 +143,6 @@ import json, sys
 
 config_path = '$OPENCLAW_CONFIG'
 plugin_name = '$PLUGIN_NAME'
-claim_slot = $( [ "$CLAIM_SLOT" = true ] && echo True || echo False )
 install_mcp = $( [ "$INSTALL_MCP" = true ] && echo True || echo False )
 config_entries = '$CONFIG_ENTRIES'
 amm_bin = '${AMM_BIN:-/usr/local/bin/amm}'
@@ -173,13 +166,6 @@ config['plugins']['entries'][plugin_name] = {
     'config': plugin_config,
 }
 
-# Claim memory slot if requested
-if claim_slot:
-    config['plugins'].setdefault('slots', {})
-    config['plugins']['slots']['memory'] = plugin_name
-    print(f'  Memory slot: claimed by {plugin_name}')
-else:
-    print(f'  Memory slot: not claimed (hooks only)')
 
 # Add MCP sidecar if requested
 if install_mcp:
@@ -216,14 +202,7 @@ else
   echo "Mode: Local binary ($(command -v "${AMM_BIN:-amm}"))"
 fi
 
-if [ "$CLAIM_SLOT" = true ]; then
-  echo "Slot: memory (replaces OpenClaw built-in memory-core)"
-  echo ""
-  echo "The agent now has memory_search and memory_get tools"
-  echo "plus automatic ambient recall on every turn."
-else
-  echo "Slot: none (hooks only — ambient recall + event capture)"
-fi
+echo "Features: ambient recall injection + event capture"
 
 echo ""
 echo "To verify after restart:"

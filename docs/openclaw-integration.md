@@ -17,9 +17,6 @@ After install, configure the plugin in `~/.openclaw/openclaw.json`:
 ```json
 {
   "plugins": {
-    "slots": {
-      "memory": "amm"
-    },
     "entries": {
       "amm": {
         "enabled": true,
@@ -51,10 +48,7 @@ See [`examples/openclaw/README.md`](../examples/openclaw/README.md) for all inst
 
 ## What the Plugin Does
 
-The plugin **claims the memory slot** (`plugins.slots.memory`), replacing OpenClaw's built-in `memory-core` with AMM's full extraction and recall pipeline.
-
-1. **`memory_search` / `memory_get` tools** — registered via `api.registerTool()`, available to the agent for explicit memory queries
-2. **Ambient recall injection** — the `before_prompt_build` hook queries amm and returns a `prependContext` block with relevant memories before the LLM sees the prompt
+1. **Ambient recall injection** — the `before_prompt_build` hook queries amm and returns a `prependContext` block with relevant memories before the LLM sees the prompt
 3. **Event capture** — plugin-registered hooks capture `message:preprocessed`, `message:sent`, `tool:called`, and `tool:completed` events into amm history
 4. **Dual transport** — local `amm` binary (default) or HTTP API via `AMM_API_URL`
 
