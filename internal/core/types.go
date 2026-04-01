@@ -410,6 +410,8 @@ type RepairReport struct {
 type StatusResult struct {
 	DBPath            string `json:"db_path"`
 	Initialized       bool   `json:"initialized"`
+	LLMConfigured     bool   `json:"llm_configured"`
+	ExtractionActive  bool   `json:"extraction_active"`
 	EventCount        int64  `json:"event_count"`
 	PendingEventCount int64  `json:"pending_event_count"`
 	MemoryCount       int64  `json:"memory_count"`
