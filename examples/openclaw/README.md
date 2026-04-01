@@ -2,51 +2,59 @@
 
 Native OpenClaw plugin for [amm](https://github.com/bonztm/agent-memory-manager) (Agent Memory Manager). Targets **OpenClaw 2026.03.31+**.
 
-This plugin provides:
+**Claims the memory slot** — replaces OpenClaw's built-in `memory-core` with AMM's full extraction and recall pipeline.
 
-- **Automatic ambient recall injection** via the `before_prompt_build` hook — relevant memories are prepended to every LLM prompt without the agent needing to call any tool
+- **`memory_search` / `memory_get` tools** registered via the memory slot
+- **Automatic ambient recall injection** via `before_prompt_build` — relevant memories prepended to every LLM prompt
 - **Event capture** for messages and tool invocations into amm history
 - **Dual transport** — local `amm` binary or remote HTTP API via `AMM_API_URL`
-- **MCP sidecar** wiring for explicit agent tool access (`amm_recall`, `amm_remember`, `amm_expand`)
 
 The plugin is **hot-path only**. It does not run maintenance jobs. Keep maintenance on an external schedule.
 
-## Files
-
-- `openclaw.plugin.json` — native plugin manifest with config schema
-- `package.json` — plugin package metadata
-- `index.ts` — plugin entry point (`definePluginEntry`)
-- `src/config.ts` — configuration resolution (plugin config + env vars)
-- `src/transport.ts` — dual transport layer (binary CLI / HTTP API)
-- `src/recall.ts` — ambient recall query and rendering
-- `src/capture.ts` — event normalization and ingestion
-- `openclaw.json` — example OpenClaw config fragment
-
 ## Install
 
-### Option A: Managed Plugin (Recommended)
-
-Copy the plugin directory into your OpenClaw managed extensions path:
+### Option A: OpenClaw Plugin Manager (Recommended)
 
 ```bash
-cp -R examples/openclaw ~/.openclaw/plugins/amm-memory
+openclaw plugins install @bonztm/amm-memory
 ```
 
-### Option B: Workspace Plugin
+This installs the plugin, enables it, and claims the memory slot automatically.
 
-Copy into your workspace for per-project use:
+### Option B: Install Script
+
+For local/release builds:
 
 ```bash
-cp -R examples/openclaw .openclaw/plugins/amm-memory
+# Basic install (local binary mode)
+./install.sh
+
+# With options
+./install.sh --project-id my-project --recall-limit 10
+
+# HTTP API mode (remote amm-http server)
+./install.sh --api-url http://localhost:8080 --api-key your-key
+
+# With MCP sidecar for the full tool suite
+./install.sh --mcp --amm-bin /usr/local/bin/amm-mcp
 ```
 
-### Option C: Config Reference
+Run `./install.sh --help` for all options.
 
-Point your `openclaw.json` at the plugin directory:
+### Option C: Manual
+
+Copy the plugin directory and update your `openclaw.json`:
+
+```bash
+cp -R examples/openclaw ~/.openclaw/extensions/amm-memory
+```
 
 ```json
 {
   "plugins": {
+    "slots": {
+      "memory": "amm-memory"
+    },
     "entries": {
       "amm-memory": {
         "enabled": true,
@@ -58,6 +66,18 @@ Point your `openclaw.json` at the plugin directory:
   }
 }
 ```
+
+## Files
+
+- `openclaw.plugin.json` — native plugin manifest (`kind: "memory"`)
+- `package.json` — publishable as `@bonztm/amm-memory`
+- `index.ts` — plugin entry point with tool registration and hooks
+- `install.sh` — one-command local installer
+- `src/config.ts` — configuration resolution (plugin config + env vars)
+- `src/transport.ts` — dual transport layer (binary CLI / HTTP API)
+- `src/recall.ts` — ambient recall query and rendering
+- `src/capture.ts` — event normalization and ingestion
+- `openclaw.json` — example OpenClaw config fragment
 
 ## Configuration
 
