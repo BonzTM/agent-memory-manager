@@ -15,10 +15,17 @@ This chart deploys `amm-http` as a Kubernetes service.
 - Kubernetes cluster
 - Helm 3
 
+## Add the chart repository
+
+```bash
+helm repo add amm https://bonztm.github.io/agent-memory-manager
+helm repo update
+```
+
 ## SQLite install (fastest path)
 
 ```bash
-helm upgrade --install amm ./deploy/helm/amm \
+helm upgrade --install amm amm/amm \
   --set backend=sqlite \
   --set sqlite.persistence.enabled=true \
   --set sqlite.persistence.size=1Gi
@@ -31,7 +38,7 @@ This creates a PVC and stores the SQLite database at `/data/amm.db`.
 Use PostgreSQL when you want a shared multi-agent backend.
 
 ```bash
-helm upgrade --install amm ./deploy/helm/amm \
+helm upgrade --install amm amm/amm \
   --set backend=postgres \
   --set postgres.dsn='postgres://user:pass@postgres.example:5432/amm?sslmode=require'
 ```
@@ -43,7 +50,7 @@ kubectl create secret generic amm-secrets \
   --from-literal=AMM_API_KEY='replace-me' \
   --from-literal=AMM_POSTGRES_DSN='postgres://user:pass@postgres.example:5432/amm?sslmode=require'
 
-helm upgrade --install amm ./deploy/helm/amm \
+helm upgrade --install amm amm/amm \
   --set backend=postgres \
   --set secrets.existingSecret=amm-secrets
 ```

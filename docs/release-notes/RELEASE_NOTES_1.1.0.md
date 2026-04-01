@@ -67,11 +67,12 @@ amm 1.1.0 is a minor release focused on recall intelligence, scoring accuracy, m
 
 - Release binaries: `amm`, `amm-mcp`, `amm-http`
 - Docker image: `ghcr.io/bonztm/agent-memory-manager`
-- Helm chart path: `deploy/helm/amm`
+- Helm chart: published at `https://bonztm.github.io/agent-memory-manager`
 
 ```bash
 docker pull ghcr.io/bonztm/agent-memory-manager:1.1.0
-helm upgrade --install amm ./deploy/helm/amm --set image.tag=1.1.0
+helm repo add amm https://bonztm.github.io/agent-memory-manager
+helm upgrade --install amm amm/amm --set image.tag=1.1.0
 ```
 
 ## Breaking Changes

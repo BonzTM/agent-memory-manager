@@ -13,7 +13,7 @@ AMM (Agent Memory Manager) provides durable, structured memory for AI agents. Th
 | Hermes Agent with per-turn ambient recall injection | Release binaries + `amm-mcp` + the [Hermes plugin example](hermes-agent-integration.md), or `amm-http` + the same plugin in API mode |
 | Shared network service / container / sidecar | Docker or `amm-http` |
 | Shared multi-agent backend | PostgreSQL + `amm-http` |
-| Kubernetes deployment | [Helm quickstart](../deploy/helm/amm/README.md) or [HTTP sidecar example](../deploy/sidecar/README.md) |
+| Kubernetes deployment | [Helm chart](../deploy/helm/amm/README.md) (`helm repo add amm https://bonztm.github.io/agent-memory-manager`) or [HTTP sidecar example](../deploy/sidecar/README.md) |
 
 ### 1. Release Binary (Recommended)
 The fastest way to get started is by downloading a pre-compiled binary:

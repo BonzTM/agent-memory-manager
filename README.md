@@ -45,7 +45,7 @@ See [Configuration: Ingestion Policies](docs/configuration.md#ingestion-policies
 | Connect an agent runtime over MCP | [Agent Onboarding](docs/agent-onboarding.md) |
 | Run a shared HTTP/API instance | [Getting Started](docs/getting-started.md) + [HTTP API Reference](docs/http-api-reference.md) |
 | Use PostgreSQL instead of SQLite | [PostgreSQL Backend](docs/postgres.md) |
-| Deploy in Kubernetes | [Helm Quickstart](deploy/helm/amm/README.md) or [HTTP Sidecar Example](deploy/sidecar/README.md) |
+| Deploy in Kubernetes | [Helm Chart](deploy/helm/amm/README.md) (`helm repo add amm https://bonztm.github.io/agent-memory-manager`) or [HTTP Sidecar Example](deploy/sidecar/README.md) |
 | Wire up Claude, Codex, OpenCode, OpenClaw, or Hermes | [Integration Guide](docs/integration.md) |
 
 ## Installation
