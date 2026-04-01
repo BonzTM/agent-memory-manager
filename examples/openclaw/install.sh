@@ -139,7 +139,7 @@ fi
 
 # Use python3 for safe JSON manipulation (handles trailing commas in JSONC)
 python3 -c "
-import json, re, sys
+import json, os, re, sys
 
 def load_jsonc(path):
     with open(path) as f:
@@ -182,7 +182,7 @@ if 'amm' not in config['plugins']['entries']['acpx']['config']['mcpServers']:
     config['plugins']['entries']['acpx']['config']['mcpServers']['amm'] = {
         'command': amm_bin + '-mcp',
         'args': [],
-        'env': {'AMM_DB_PATH': db_path or '~/.amm/amm.db'},
+        'env': {'AMM_DB_PATH': db_path or os.path.expanduser('~/.amm/amm.db')},
     }
     print('  MCP sidecar: configured via acpx')
 else:
