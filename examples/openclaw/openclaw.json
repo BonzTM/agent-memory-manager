@@ -1,25 +1,21 @@
 {
+  "mcp": {
+    "amm": {
+      "command": "/usr/local/bin/amm-mcp",
+      "args": [],
+      "env": {
+        "AMM_DB_PATH": "/home/you/.amm/amm.db"
+      }
+    }
+  },
   "plugins": {
+    "allow": ["amm"],
     "entries": {
       "amm": {
         "enabled": true,
         "config": {
           "projectId": "my-project",
           "recallLimit": 5
-        }
-      },
-      "acpx": {
-        "enabled": true,
-        "config": {
-          "mcpServers": {
-            "amm": {
-              "command": "/usr/local/bin/amm-mcp",
-              "args": [],
-              "env": {
-                "AMM_DB_PATH": "/home/you/.amm/amm.db"
-              }
-            }
-          }
         }
       }
     }

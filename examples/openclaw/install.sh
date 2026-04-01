@@ -173,20 +173,18 @@ config['plugins']['entries'][plugin_name] = {
 }
 
 
-# Always ensure acpx MCP sidecar is configured for explicit agent tools
-# (amm_recall, amm_remember, amm_expand, etc.)
-config['plugins']['entries'].setdefault('acpx', {'enabled': True, 'config': {}})
-config['plugins']['entries']['acpx'].setdefault('config', {})
-config['plugins']['entries']['acpx']['config'].setdefault('mcpServers', {})
-if 'amm' not in config['plugins']['entries']['acpx']['config']['mcpServers']:
-    config['plugins']['entries']['acpx']['config']['mcpServers']['amm'] = {
+# Configure amm-mcp as a top-level MCP server so OpenClaw exposes
+# AMM tools (amm_recall, amm_remember, amm_expand, etc.) to agents.
+config.setdefault('mcp', {})
+if 'amm' not in config['mcp']:
+    config['mcp']['amm'] = {
         'command': amm_bin + '-mcp',
         'args': [],
         'env': {'AMM_DB_PATH': db_path or os.path.expanduser('~/.amm/amm.db')},
     }
-    print('  MCP sidecar: configured via acpx')
+    print('  MCP server: configured (amm-mcp)')
 else:
-    print('  MCP sidecar: already configured')
+    print('  MCP server: already configured')
 
 # Ensure amm is in the allow list
 config['plugins'].setdefault('allow', [])
