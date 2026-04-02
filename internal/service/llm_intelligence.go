@@ -37,7 +37,7 @@ func NewLLMIntelligenceProvider(summarizer *LLMSummarizer, reviewChatComplete Ch
 	return provider
 }
 
-func NewLLMIntelligenceProviderWithReviewConfig(summarizer *LLMSummarizer, reviewEndpoint, reviewAPIKey, reviewModel string) *LLMIntelligenceProvider {
+func NewLLMIntelligenceProviderWithReviewConfig(summarizer *LLMSummarizer, reviewEndpoint, reviewAPIKey, reviewModel, reviewReasoningEffort string) *LLMIntelligenceProvider {
 	if summarizer == nil {
 		return NewLLMIntelligenceProvider(nil, nil)
 	}
@@ -56,6 +56,9 @@ func NewLLMIntelligenceProviderWithReviewConfig(summarizer *LLMSummarizer, revie
 		apiKey = summarizer.apiKey
 	}
 	reviewSummarizer := NewLLMSummarizer(reviewEndpoint, apiKey, model)
+	if effort := strings.TrimSpace(reviewReasoningEffort); effort != "" {
+		reviewSummarizer.SetReasoningEffort(effort)
+	}
 	return NewLLMIntelligenceProvider(summarizer, reviewSummarizer.chatComplete)
 }
 
@@ -640,7 +643,8 @@ The episode should tell a clear story (who did what, why decisions were made, wh
 
 Return a JSON object with exactly these keys:
 - summary: concise chronological summary of the event sequence
-- tight_description: retrieval-optimized phrase under 100 chars, written as something an agent would search for later
+- title: short human-readable session headline (under 80 chars). Names the project and primary activity. This is what a human or agent reads when scanning a list of sessions to decide which to expand. It should answer "what was this session about?" at a glance. Example: "AMM: session consolidation pipeline — idle timeout + incremental"
+- tight_description: retrieval-optimized keyword phrase (under 120 chars). Written as a search query an agent would type to find this session later. Include key technical terms, project names, tool names, and decision topics. Do NOT write this as a sentence — write it as search keywords. Example: "amm consolidation pipeline idle-timeout incremental map-reduce chunking reflect session-first extraction candidates"
 - episode: object {
     title: short episode title,
     body: coherent narrative body,
@@ -655,6 +659,7 @@ Return a JSON object with exactly these keys:
 Rules:
 - Ground outputs in the provided events; do not invent facts
 - Keep summary and episode consistent with each other
+- Both title and tight_description MUST be populated. Title is for humans scanning; tight_description is for machines searching. They serve different purposes.
 - If no clear decisions or unresolved items exist, return empty arrays
 - Return ONLY the JSON object (no markdown fences or commentary)
 

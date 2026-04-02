@@ -62,8 +62,8 @@ func TestCoverageGapIntelligenceProviders(t *testing.T) {
 
 func TestCoverageGapLLMIntelligenceFallbacks(t *testing.T) {
 	ctx := context.Background()
-	if p := NewLLMIntelligenceProviderWithReviewConfig(nil, "", "", ""); p == nil { t.Fatal("expected provider from nil review config") }
-	if p := NewLLMIntelligenceProviderWithReviewConfig(NewLLMSummarizer("https://example.com", "key", "model"), "https://review.example.com", "review-key", "review-model"); p == nil { t.Fatal("expected provider from review config") }
+	if p := NewLLMIntelligenceProviderWithReviewConfig(nil, "", "", "", ""); p == nil { t.Fatal("expected provider from nil review config") }
+	if p := NewLLMIntelligenceProviderWithReviewConfig(NewLLMSummarizer("https://example.com", "key", "model"), "https://review.example.com", "review-key", "review-model", ""); p == nil { t.Fatal("expected provider from review config") }
 	p := NewLLMIntelligenceProvider(nil, nil)
 	if a, err := p.AnalyzeEvents(ctx, nil); err != nil || a == nil || len(a.Memories) != 0 { t.Fatalf("analyze empty: %+v %v", a, err) }
 	if a, err := p.AnalyzeEvents(ctx, []core.EventContent{{Content: "i prefer go"}}); err != nil || a == nil { t.Fatalf("analyze fallback: %+v %v", a, err) }
