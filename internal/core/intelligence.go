@@ -109,6 +109,7 @@ type MemorySummary struct {
 
 type NarrativeResult struct {
 	Summary      string            `json:"summary"`
+	Title        string            `json:"title"`
 	TightDesc    string            `json:"tight_description"`
 	Episode      *EpisodeCandidate `json:"episode,omitempty"`
 	KeyDecisions []string          `json:"key_decisions,omitempty"`
