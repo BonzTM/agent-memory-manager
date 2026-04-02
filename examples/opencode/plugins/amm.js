@@ -131,7 +131,6 @@ function extractMessagePayload(event) {
 }
 
 const AMM_INGEST_TIMEOUT_MS = 5_000;
-const AMM_JOB_TIMEOUT_MS = 120_000;
 
 function runAmmAsync(command, input, timeoutMs = AMM_INGEST_TIMEOUT_MS) {
   const ammBin = process.env.AMM_BIN ?? "/usr/local/bin/amm";
@@ -167,78 +166,9 @@ function ingestEvent(event) {
   runAmmAsync(["ingest", "event", "--in", "-"], JSON.stringify(event), AMM_INGEST_TIMEOUT_MS);
 }
 
-let maintenanceRunning = false;
-const maintenanceBySession = new Map();
 const emittedMessageVersions = new Map();
+const lastIdleBySession = new Map();
 const activitySinceLastIdle = new Map();
-
-function runMaintenanceAsync() {
-  if (maintenanceRunning) return;
-  maintenanceRunning = true;
-
-  const ammBin = process.env.AMM_BIN ?? "/usr/local/bin/amm";
-  const dbPath = process.env.AMM_DB_PATH ?? `${process.env.HOME ?? "~"}/.amm/amm.db`;
-  const lockDir = `${dbPath}.opencode-maintenance.lock`;
-
-  const maintenanceScript = `
-lock_dir="$1"
-amm_bin="$2"
-
-if mkdir "$lock_dir" 2>/dev/null; then
-  printf '%s\n' "$$" > "$lock_dir/pid"
-else
-  if [ -f "$lock_dir/pid" ]; then
-    pid=$(cat "$lock_dir/pid" 2>/dev/null || true)
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      exit 0
-    fi
-  fi
-  rm -rf "$lock_dir" 2>/dev/null || exit 0
-  mkdir "$lock_dir" 2>/dev/null || exit 0
-  printf '%s\n' "$$" > "$lock_dir/pid"
-fi
-
-cleanup() {
-  trap - EXIT INT TERM
-  kill 0 2>/dev/null || true
-  rm -rf "$lock_dir" 2>/dev/null || true
-}
-
-trap cleanup EXIT INT TERM
-
-"$amm_bin" jobs run reflect >/dev/null 2>&1 || true
-"$amm_bin" jobs run compress_history >/dev/null 2>&1 || true
-`;
-
-  const child = spawn(
-    "/bin/sh",
-    ["-c", maintenanceScript, "sh", lockDir, ammBin],
-    {
-      stdio: "ignore",
-      env: { ...process.env, AMM_DB_PATH: dbPath },
-      detached: true,
-    },
-  );
-
-  const timer = setTimeout(() => {
-    try { process.kill(-child.pid, "SIGTERM"); } catch {}
-    setTimeout(() => {
-      try { process.kill(-child.pid, "SIGKILL"); } catch {}
-    }, 2_000);
-    maintenanceRunning = false;
-  }, AMM_JOB_TIMEOUT_MS);
-
-  child.on("exit", () => {
-    clearTimeout(timer);
-    maintenanceRunning = false;
-  });
-  child.on("error", () => {
-    clearTimeout(timer);
-    maintenanceRunning = false;
-  });
-
-  child.unref();
-}
 
 function runAmmSync(args, stdin) {
   const ammBin = process.env.AMM_BIN ?? "/usr/local/bin/amm";
@@ -402,12 +332,12 @@ export const AMMMemoryPlugin = async ({ project }) => {
 
       if (event.type === "session.idle") {
         const sessionID = event.properties.sessionID;
-        const lastRun = maintenanceBySession.get(sessionID) ?? 0;
+        const lastIdle = lastIdleBySession.get(sessionID) ?? 0;
         const now = Date.now();
-        if (now - lastRun < 60_000) {
+        if (now - lastIdle < 60_000) {
           return;
         }
-        maintenanceBySession.set(sessionID, now);
+        lastIdleBySession.set(sessionID, now);
 
         // Only ingest idle event and run maintenance if there was real
         // activity (messages or tool calls) since the last idle. This
@@ -428,7 +358,9 @@ export const AMMMemoryPlugin = async ({ project }) => {
           occurred_at: nowRfc3339(now),
         });
 
-        runMaintenanceAsync();
+        // Maintenance jobs (reflect, consolidate_sessions, compress_history, etc.)
+        // should run on a schedule via cron/systemd timer, not triggered from hooks.
+        // See examples/scripts/run-workers.sh for a ready-made maintenance script.
       }
     },
   };

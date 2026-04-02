@@ -78,10 +78,8 @@ print(json.dumps({
 
 printf '%s' "$STOP_EVENT" | AMM_DB_PATH="$DB" "$AMM" ingest event --in - >/dev/null 2>&1 || true
 
-AMM_DB_PATH="$DB" "$AMM" jobs run reflect >/dev/null 2>&1 || true
-AMM_DB_PATH="$DB" "$AMM" jobs run rebuild_indexes >/dev/null 2>&1 || true
-AMM_DB_PATH="$DB" "$AMM" jobs run compress_history >/dev/null 2>&1 || true
-AMM_DB_PATH="$DB" "$AMM" jobs run consolidate_sessions >/dev/null 2>&1 || true
-AMM_DB_PATH="$DB" "$AMM" jobs run extract_claims >/dev/null 2>&1 || true
+# Maintenance jobs (reflect, consolidate_sessions, compress_history, etc.) should
+# run on a schedule via cron/systemd timer, not in the stop hook. See
+# examples/scripts/run-workers.sh for a ready-made maintenance script.
 
 exit 0

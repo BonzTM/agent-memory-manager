@@ -234,10 +234,11 @@ def main() -> int:
     }
     run_amm(["ingest", "event", "--in", "-"], json.dumps(event))
 
-    for job in ["reflect", "rebuild_indexes", "compress_history", "consolidate_sessions"]:
-        run_amm(["jobs", "run", job])
+    # Maintenance jobs (reflect, consolidate_sessions, compress_history, etc.) should
+    # run on a schedule via cron/systemd timer, not in the stop hook. See
+    # examples/scripts/run-workers.sh for a ready-made maintenance script.
 
-    print(json.dumps({"systemMessage": "amm recorded Codex session stop and ran maintenance jobs."}))
+    print(json.dumps({"systemMessage": "amm recorded Codex session stop."}))
     return 0
 
 
