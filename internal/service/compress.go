@@ -519,11 +519,28 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 			}
 		}
 
-		summaryNow := time.Now().UTC()
+		// Use earliest source event time as the summary's CreatedAt so that
+		// temporal session recall filters by when the session happened, not
+		// when consolidation ran.
+		summaryCreatedAt := time.Now().UTC()
+		if len(evts) > 0 {
+			earliest := evts[0].OccurredAt
+			for _, evt := range evts[1:] {
+				if !evt.OccurredAt.IsZero() && evt.OccurredAt.Before(earliest) {
+					earliest = evt.OccurredAt
+				}
+			}
+			if !earliest.IsZero() {
+				summaryCreatedAt = earliest
+			}
+		}
+		summaryUpdatedAt := time.Now().UTC()
 
-		// Build summary title including burst number if this is an incremental pass.
+		// Use LLM-generated title if available; fall back to session ID.
 		summaryTitle := fmt.Sprintf("Session %s", sessionID)
-		if priorSummary != nil {
+		if narrativeResult != nil && strings.TrimSpace(narrativeResult.Title) != "" {
+			summaryTitle = strings.TrimSpace(narrativeResult.Title)
+		} else if priorSummary != nil {
 			summaryTitle = fmt.Sprintf("Session %s (continued)", sessionID)
 		}
 
@@ -541,8 +558,8 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 			SourceSpan: core.SourceSpan{
 				EventIDs: eventIDs,
 			},
-			CreatedAt: summaryNow,
-			UpdatedAt: summaryNow,
+			CreatedAt: summaryCreatedAt,
+			UpdatedAt: summaryUpdatedAt,
 		}
 
 		if err := s.repo.InsertSummary(ctx, summary); err != nil {
@@ -1385,19 +1402,26 @@ func (s *AMMService) chunkSessionIfNeeded(
 	return finalContents, finalJoined.String()
 }
 
-// latestSessionSummary returns the most recent session summary for a given
-// session, or nil if none exists. Used for context continuity in incremental
-// consolidation.
+// latestSessionSummary returns the most recently consolidated session summary
+// for a given session, or nil if none exists. Uses UpdatedAt (consolidation
+// time) rather than CreatedAt (event time) so that incremental bursts with
+// out-of-order event timestamps still pick up the latest narrative context.
 func (s *AMMService) latestSessionSummary(ctx context.Context, sessionID string) *core.Summary {
 	summaries, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{
 		Kind:      "session",
 		SessionID: sessionID,
-		Limit:     1,
+		Limit:     10, // fetch all bursts, pick latest by UpdatedAt
 	})
 	if err != nil || len(summaries) == 0 {
 		return nil
 	}
-	return &summaries[0]
+	latest := &summaries[0]
+	for i := 1; i < len(summaries); i++ {
+		if summaries[i].UpdatedAt.After(latest.UpdatedAt) {
+			latest = &summaries[i]
+		}
+	}
+	return latest
 }
 
 // markEventsReflected sets reflected_at on events that haven't been reflected yet.
