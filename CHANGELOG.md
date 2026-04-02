@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-04-02
+
+### Fixed
+
+- **LLM reasoning request format.** The `reasoning` parameter is now sent as the correct object format (`{"effort": "high"}` or `{"enabled": true}`) instead of a bare boolean. The previous `"reasoning": true` format caused API errors on OpenRouter and OpenAI endpoints.
+- **LLM timeout too short for large context.** The HTTP client timeout for summarizer and review model calls was hardcoded at 30 seconds, causing timeouts on large-context summarization calls (e.g., 900k token sessions). The heuristic fallback produced raw tool output as summaries instead of meaningful narratives.
+
+### Added
+
+- **Configurable LLM timeouts.** `AMM_SUMMARIZER_TIMEOUT_SECONDS` (default 300s/5min) and `AMM_EMBEDDING_TIMEOUT_SECONDS` (default 30s) control HTTP client deadlines for LLM and embedding API calls. Configurable via env vars, JSON, and TOML.
+- **Configurable HTTP server timeouts.** `AMM_HTTP_READ_TIMEOUT_SECONDS` (default 30), `AMM_HTTP_WRITE_TIMEOUT_SECONDS` (default 60), `AMM_HTTP_IDLE_TIMEOUT_SECONDS` (default 120) for the amm-http server.
+- **Independent reasoning tunables.** `AMM_SUMMARIZER_REASONING` and `AMM_REVIEW_REASONING` (`enabled` or empty) control the `reasoning: {"enabled": true}` toggle independently from `AMM_SUMMARIZER_REASONING_EFFORT` / `AMM_REVIEW_REASONING_EFFORT` (`low`/`medium`/`high`) which sends `reasoning: {"effort": "..."}`. Different models support different subsets; setting an unsupported parameter no longer breaks the request.
+
+### Changed
+
+- **Reasoning effort takes precedence.** When both `reasoning` and `reasoning_effort` are set, only `reasoning_effort` is sent (as `{"effort": "..."}`) since it's more specific than the simple toggle.
+
 ## [1.3.0] - 2026-04-02
 
 ### Added
@@ -15,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Temporal search.** All recall modes support `--after` and `--before` (RFC3339) for date-range filtering. Natural-language temporal references in queries ("last week", "yesterday", "in March 2025") are automatically extracted and applied when explicit flags are not set.
 - **Deterministic temporal parser.** Covers: today, yesterday, earlier/previously/recently, last week, this week, N days/weeks ago, last month, this month, named months with optional year, quarters (Q1-Q4), last year.
 - **`SearchScopedSummaries` repository method.** Combines FTS text search with kind/project/session/date filters in SQL before the LIMIT, preventing valid sessions from being crowded out by non-session summaries.
-- **Reasoning effort support for LLM calls.** New `AMM_SUMMARIZER_REASONING_EFFORT` and `AMM_REVIEW_REASONING_EFFORT` env vars (low/medium/high). When set, sends `reasoning: true` and `reasoning_effort` in OpenAI-compatible API requests. Supports reasoning-capable models (o1, o3, o4-mini).
+- **Reasoning effort support for LLM calls.** New `AMM_SUMMARIZER_REASONING_EFFORT` and `AMM_REVIEW_REASONING_EFFORT` env vars (low/medium/high). When set, sends `reasoning: {"effort": "..."}` in OpenAI-compatible API requests. Supports reasoning-capable models (o1, o3, o4-mini).
 - **`AMM_TEMPORAL_ATTENUATION` env var.** Configurable score multiplier (0.0-1.0, default 0.3) for recall items outside the active temporal window.
 
 ### Changed
@@ -187,7 +204,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background maintenance pipeline with reflect, compression, indexing, contradiction detection, graph rebuild, lifecycle review, and related worker jobs.
 - Helm chart and sidecar deployment artifacts for Kubernetes-based installations.
 
-[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.3.0...HEAD
+[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.3.1...HEAD
+[1.3.1]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.3.1
 [1.3.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.3.0
 [1.2.1]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.2.1
 [1.2.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.2.0
