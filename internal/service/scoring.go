@@ -8,6 +8,8 @@ import (
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
+const defaultTemporalAttenuation = 0.3
+
 // Recall scoring uses a weighted blend of positive signals plus a repetition
 // penalty. Semantic similarity is optional and only participates when both query
 // and candidate embeddings are available. When semantic is absent, positive
@@ -76,6 +78,9 @@ type ScoringContext struct {
 	RecentRecalls      map[string]bool // item IDs shown recently
 	Now                time.Time
 	Weights            *ScoringWeights
+	TemporalAfter      *time.Time // temporal window from extraction or explicit flags
+	TemporalBefore     *time.Time // temporal window from extraction or explicit flags
+	TemporalAttenuation float64   // multiplier for items outside temporal window (0.0–1.0)
 }
 
 // SignalBreakdown records the per-signal contributions used to explain a final
@@ -192,6 +197,9 @@ func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 	kindMultiplier := signalKindBoost(item.Kind)
 	b.FinalScore *= (1 - weights.KindBoost) + (weights.KindBoost * kindMultiplier)
 
+	// Temporal window multiplier: attenuate items outside the requested time range.
+	b.FinalScore *= temporalWindowMultiplier(item, sctx)
+
 	// Clamp to [0, 1].
 	if b.FinalScore < 0 {
 		b.FinalScore = 0
@@ -201,6 +209,25 @@ func ScoreItem(item ScoringCandidate, sctx ScoringContext) SignalBreakdown {
 	}
 
 	return b
+}
+
+// temporalWindowMultiplier returns 1.0 if the item falls within the temporal
+// window (or no window is set), otherwise returns the configured attenuation.
+func temporalWindowMultiplier(item ScoringCandidate, sctx ScoringContext) float64 {
+	if sctx.TemporalAfter == nil && sctx.TemporalBefore == nil {
+		return 1.0
+	}
+	ts := occurrenceTimestamp(item)
+	if ts.IsZero() {
+		return 1.0 // no timestamp — don't penalize
+	}
+	if sctx.TemporalAfter != nil && ts.Before(*sctx.TemporalAfter) {
+		return sctx.TemporalAttenuation
+	}
+	if sctx.TemporalBefore != nil && ts.After(*sctx.TemporalBefore) {
+		return sctx.TemporalAttenuation
+	}
+	return 1.0
 }
 
 func signalKindBoost(kind string) float64 {
@@ -511,6 +538,16 @@ func mostRecentTimestamp(item ScoringCandidate) time.Time {
 		best = *item.LastConfirmedAt
 	}
 	return best
+}
+
+// occurrenceTimestamp returns the time an item was originally observed or created,
+// ignoring updates/reprocessing. Used for temporal window filtering where we need
+// to know when the content was produced, not when it was last touched.
+func occurrenceTimestamp(item ScoringCandidate) time.Time {
+	if item.ObservedAt != nil && !item.ObservedAt.IsZero() {
+		return *item.ObservedAt
+	}
+	return item.CreatedAt
 }
 
 // --- conversion helpers ---
