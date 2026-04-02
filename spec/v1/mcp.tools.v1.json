@@ -44,7 +44,11 @@
             "description": "When the event occurred (RFC3339)"
           }
         },
-        "required": ["kind", "source_system", "content"]
+        "required": [
+          "kind",
+          "source_system",
+          "content"
+        ]
       }
     },
     {
@@ -82,7 +86,11 @@
             "description": "Agent identifier"
           }
         },
-        "required": ["type", "body", "tight_description"]
+        "required": [
+          "type",
+          "body",
+          "tight_description"
+        ]
       }
     },
     {
@@ -93,7 +101,7 @@
         "properties": {
           "query": {
             "type": "string",
-            "description": "Search query"
+            "description": "Search query (required for all modes except sessions)"
           },
           "agent_id": {
             "type": "string",
@@ -107,19 +115,20 @@
             "type": "object",
             "properties": {
               "mode": {
-				"type": "string",
-				"enum": [
-				  "ambient",
-				  "facts",
-				  "contradictions",
-				  "episodes",
-				  "timeline",
-				  "project",
-				  "entity",
-				  "active",
-				  "history",
-				  "hybrid"
-				]
+                "type": "string",
+                "enum": [
+                  "ambient",
+                  "facts",
+                  "contradictions",
+                  "episodes",
+                  "timeline",
+                  "project",
+                  "entity",
+                  "active",
+                  "history",
+                  "hybrid",
+                  "sessions"
+                ]
               },
               "project_id": {
                 "type": "string"
@@ -135,11 +144,21 @@
               },
               "explain": {
                 "type": "boolean"
+              },
+              "after": {
+                "type": "string",
+                "description": "RFC3339 \u2014 filter results to after this time"
+              },
+              "before": {
+                "type": "string",
+                "description": "RFC3339 \u2014 filter results to before this time"
               }
             }
           }
         },
-        "required": ["query"]
+        "required": [
+          "query"
+        ]
       }
     },
     {
@@ -155,7 +174,9 @@
             }
           }
         },
-        "required": ["ids"]
+        "required": [
+          "ids"
+        ]
       }
     },
     {
@@ -182,7 +203,9 @@
             "description": "Current delegation depth for recursion control"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -260,7 +283,9 @@
             "type": "integer"
           }
         },
-        "required": ["pattern"]
+        "required": [
+          "pattern"
+        ]
       }
     },
     {
@@ -274,7 +299,9 @@
             "description": "Item ID"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -288,7 +315,9 @@
             "description": "Job kind to run"
           }
         },
-        "required": ["kind"]
+        "required": [
+          "kind"
+        ]
       }
     },
     {
@@ -306,7 +335,10 @@
             "description": "Privacy level: private, shared, public_safe"
           }
         },
-        "required": ["id", "privacy"]
+        "required": [
+          "id",
+          "privacy"
+        ]
       }
     },
     {
@@ -322,7 +354,10 @@
             "type": "string"
           }
         },
-        "required": ["query", "item_id"]
+        "required": [
+          "query",
+          "item_id"
+        ]
       }
     },
     {
@@ -386,11 +421,17 @@
                   "description": "When the event occurred (RFC3339)"
                 }
               },
-              "required": ["kind", "source_system", "content"]
+              "required": [
+                "kind",
+                "source_system",
+                "content"
+              ]
             }
           }
         },
-        "required": ["events"]
+        "required": [
+          "events"
+        ]
       }
     },
     {
@@ -416,7 +457,9 @@
             "description": "Memory status: active, superseded, archived, retracted"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -454,7 +497,11 @@
             "description": "Pattern match mode: exact, glob, regex"
           }
         },
-        "required": ["pattern_type", "pattern", "mode"]
+        "required": [
+          "pattern_type",
+          "pattern",
+          "mode"
+        ]
       }
     },
     {
@@ -468,7 +515,9 @@
             "description": "Policy ID to remove"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -490,7 +539,9 @@
             "description": "Project description"
           }
         },
-        "required": ["name"]
+        "required": [
+          "name"
+        ]
       }
     },
     {
@@ -504,7 +555,9 @@
             "description": "Item ID"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -526,7 +579,9 @@
             "description": "Item ID"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -548,7 +603,11 @@
             "description": "Relationship type"
           }
         },
-        "required": ["from_entity_id", "to_entity_id", "relationship_type"]
+        "required": [
+          "from_entity_id",
+          "to_entity_id",
+          "relationship_type"
+        ]
       }
     },
     {
@@ -562,7 +621,9 @@
             "description": "Item ID"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -597,7 +658,9 @@
             "description": "Item ID"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -611,7 +674,9 @@
             "description": "Item ID"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -625,7 +690,9 @@
             "description": "Item ID"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -639,7 +706,9 @@
             "description": "Item ID"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -653,7 +722,9 @@
             "description": "Item ID"
           }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -666,7 +737,9 @@
             "type": "boolean"
           }
         },
-        "required": ["confirm"]
+        "required": [
+          "confirm"
+        ]
       }
     }
   ]

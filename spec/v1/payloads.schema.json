@@ -829,9 +829,6 @@
     },
     "RecallRequest": {
       "type": "object",
-      "required": [
-        "query"
-      ],
       "properties": {
         "agent_id": {
           "type": "string"
@@ -860,19 +857,34 @@
             "entity",
             "active",
             "history",
-            "hybrid"
+            "hybrid",
+            "sessions"
           ]
         },
         "project_id": {
           "type": "string"
         },
         "query": {
-          "type": "string"
+          "type": "string",
+          "description": "Search query. Required for all modes except sessions."
         },
         "session_id": {
           "type": "string"
+        },
+        "after": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC3339 timestamp \u2014 filter results to after this time"
+        },
+        "before": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC3339 timestamp \u2014 filter results to before this time"
         }
-      }
+      },
+      "required": [
+        "query"
+      ]
     },
     "RecallResponse": {
       "type": "object",

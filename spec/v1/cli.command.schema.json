@@ -5,11 +5,16 @@
   "description": "Full JSON envelope for AMM CLI commands (used with amm run)",
   "version": "amm.v1",
   "type": "object",
-  "required": ["version", "command"],
+  "required": [
+    "version",
+    "command"
+  ],
   "properties": {
     "version": {
       "type": "string",
-      "enum": ["amm.v1"],
+      "enum": [
+        "amm.v1"
+      ],
       "description": "API version identifier"
     },
     "command": {
@@ -62,7 +67,11 @@
   "definitions": {
     "Event": {
       "type": "object",
-      "required": ["kind", "source_system", "content"],
+      "required": [
+        "kind",
+        "source_system",
+        "content"
+      ],
       "properties": {
         "kind": {
           "type": "string",
@@ -94,14 +103,23 @@
         },
         "actor_type": {
           "type": "string",
-          "enum": ["user", "assistant", "system", "tool"]
+          "enum": [
+            "user",
+            "assistant",
+            "system",
+            "tool"
+          ]
         },
         "actor_id": {
           "type": "string"
         },
         "privacy_level": {
           "type": "string",
-          "enum": ["private", "shared", "public_safe"]
+          "enum": [
+            "private",
+            "shared",
+            "public_safe"
+          ]
         },
         "metadata": {
           "type": "object"
@@ -115,7 +133,11 @@
     },
     "Memory": {
       "type": "object",
-      "required": ["type", "body", "tight_description"],
+      "required": [
+        "type",
+        "body",
+        "tight_description"
+      ],
       "properties": {
         "type": {
           "type": "string",
@@ -140,7 +162,11 @@
         },
         "scope": {
           "type": "string",
-          "enum": ["global", "project", "session"],
+          "enum": [
+            "global",
+            "project",
+            "session"
+          ],
           "default": "global"
         },
         "project_id": {
@@ -184,7 +210,8 @@
             "entity",
             "active",
             "history",
-            "hybrid"
+            "hybrid",
+            "sessions"
           ],
           "default": "hybrid"
         },
@@ -198,6 +225,16 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 1000
+        },
+        "after": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC3339 \u2014 filter results to after this time"
+        },
+        "before": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC3339 \u2014 filter results to before this time"
         }
       }
     },
@@ -219,11 +256,23 @@
     },
     "IngestionPolicy": {
       "type": "object",
-      "required": ["pattern_type", "pattern", "mode"],
+      "required": [
+        "pattern_type",
+        "pattern",
+        "mode"
+      ],
       "properties": {
         "pattern_type": {
           "type": "string",
-          "enum": ["kind", "session", "source", "surface", "agent", "project", "runtime"]
+          "enum": [
+            "kind",
+            "session",
+            "source",
+            "surface",
+            "agent",
+            "project",
+            "runtime"
+          ]
         },
         "pattern": {
           "type": "string",
@@ -231,7 +280,11 @@
         },
         "mode": {
           "type": "string",
-          "enum": ["full", "read_only", "ignore"]
+          "enum": [
+            "full",
+            "read_only",
+            "ignore"
+          ]
         },
         "metadata": {
           "type": "object"
@@ -240,7 +293,11 @@
     },
     "ResultEnvelope": {
       "type": "object",
-      "required": ["ok", "command", "timestamp"],
+      "required": [
+        "ok",
+        "command",
+        "timestamp"
+      ],
       "properties": {
         "ok": {
           "type": "boolean",
@@ -254,7 +311,11 @@
           "format": "date-time"
         },
         "result": {
-          "type": ["object", "array", "null"]
+          "type": [
+            "object",
+            "array",
+            "null"
+          ]
         },
         "error": {
           "type": "object",
@@ -266,7 +327,10 @@
               "type": "string"
             }
           },
-          "required": ["code", "message"]
+          "required": [
+            "code",
+            "message"
+          ]
         }
       }
     }

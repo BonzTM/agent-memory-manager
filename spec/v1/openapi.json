@@ -3,7 +3,7 @@
   "info": {
     "title": "AMM \u2014 Agent Memory Manager",
     "description": "REST API for the Agent Memory Manager. Provides durable, structured memory for AI agents.",
-    "version": "1.2.1"
+    "version": "1.3.0"
   },
   "tags": [
     {
@@ -2179,7 +2179,8 @@
           "entity",
           "active",
           "history",
-          "hybrid"
+          "hybrid",
+          "sessions"
         ]
       },
       "SourceSpan": {
@@ -2923,6 +2924,16 @@
           },
           "explain": {
             "type": "boolean"
+          },
+          "after": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RFC3339 timestamp \u2014 filter results to after this time"
+          },
+          "before": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RFC3339 timestamp \u2014 filter results to before this time"
           }
         }
       },
@@ -3262,12 +3273,10 @@
       },
       "RecallRequest": {
         "type": "object",
-        "required": [
-          "query"
-        ],
         "properties": {
           "query": {
-            "type": "string"
+            "type": "string",
+            "description": "Search query. Required for all modes except sessions, which supports empty query for listing."
           },
           "agent_id": {
             "type": "string"
@@ -3278,7 +3287,10 @@
           "opts": {
             "$ref": "#/components/schemas/RecallOptions"
           }
-        }
+        },
+        "required": [
+          "query"
+        ]
       },
       "DescribeRequest": {
         "type": "object",
