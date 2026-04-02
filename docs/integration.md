@@ -76,7 +76,7 @@ Regardless of the mechanism, the ideal integration follows this loop:
 4. **Ingest Interaction**: Capture the user message and assistant response as events.
 5. **Grep for Reference**: When the agent needs to find a specific past detail, use the `grep` tool for a high-precision search across all memory types.
 6. **Remember Durable Facts**: Agent explicitly calls "remember" for high-confidence knowledge.
-7. **Background Maintenance**: Run periodic jobs (reflect, compress, detect_contradictions) to consolidate and clean up information.
+7. **Background Maintenance**: Run `amm jobs run` on a schedule (cron, systemd timer, K8s CronJob) every 15–30 minutes. Do not run maintenance in hooks — hooks should only capture events.
 
 ---
 

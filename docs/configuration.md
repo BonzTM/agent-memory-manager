@@ -35,6 +35,7 @@ AMM loads configuration in the following order:
 | `AMM_ENABLE_SEMANTIC` | Enable semantic vector scoring in recall (requires embeddings to be enabled and populated) | `false` |
 | `AMM_ENABLE_EXPLAIN` | Enable explain-recall signal breakdowns | `true` |
 | `AMM_MAX_EXPAND_DEPTH` | Maximum recursive delegation depth for Expand calls | `1` |
+| `AMM_TEMPORAL_ATTENUATION` | Score multiplier for recall items outside the active temporal window (0.0-1.0) | `0.3` |
 
 ### Privacy
 | Variable | Description | Default |
@@ -79,6 +80,7 @@ Set `AMM_SUMMARIZER_ENDPOINT` and `AMM_SUMMARIZER_API_KEY` to enable LLM-backed 
 | `AMM_SUMMARIZER_ENDPOINT` | Base URL for OpenAI-compatible API (e.g. `https://api.openai.com/v1`) | _(unset)_ |
 | `AMM_SUMMARIZER_API_KEY` | API key for the extraction/summarization model | _(unset)_ |
 | `AMM_SUMMARIZER_MODEL` | Model name for extraction and summarization | `gpt-4o-mini` |
+| `AMM_SUMMARIZER_REASONING_EFFORT` | Reasoning effort for summarizer LLM calls (`low`, `medium`, `high`). Empty disables. | _(empty)_ |
 | `AMM_REPROCESS_BATCH_SIZE` | Number of events per reprocess/summarization batch | `20` |
 | `AMM_REFLECT_BATCH_SIZE` | Number of events claimed per reflect iteration | `100` |
 | `AMM_REFLECT_LLM_BATCH_SIZE` | Number of claimed reflect events sent to each LLM analysis call | `20` |
@@ -97,6 +99,7 @@ A separate model can be used for lifecycle review, consolidation, and contradict
 | `AMM_REVIEW_ENDPOINT` | Base URL for the review model API | _(falls back to `AMM_SUMMARIZER_ENDPOINT`)_ |
 | `AMM_REVIEW_API_KEY` | API key for the review model | _(falls back to `AMM_SUMMARIZER_API_KEY`)_ |
 | `AMM_REVIEW_MODEL` | Model name for review/consolidation tasks | _(falls back to `AMM_SUMMARIZER_MODEL`)_ |
+| `AMM_REVIEW_REASONING_EFFORT` | Reasoning effort for review model LLM calls (`low`, `medium`, `high`). Empty disables. | _(empty)_ |
 
 ### Embeddings (Semantic Search)
 Set `AMM_EMBEDDINGS_ENABLED=true` to generate/store embeddings. Semantic scoring at recall time is separately controlled by `AMM_ENABLE_SEMANTIC`. Supports any OpenAI-compatible embeddings API (OpenAI, Ollama, OpenRouter, etc.).
@@ -135,7 +138,8 @@ Full reference — all supported keys shown with their defaults:
       "default_limit": 10,
       "ambient_limit": 5,
       "enable_semantic": false,
-      "enable_explain": true
+      "enable_explain": true,
+      "temporal_attenuation": 0.3
     },
     "max_expand_depth": 1,
   "privacy": {

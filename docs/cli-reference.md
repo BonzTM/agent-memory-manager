@@ -1152,13 +1152,14 @@ All 16 valid values for the `--type` flag on `remember`:
 
 ## Recall Modes
 
-All 9 valid values for the `--mode` flag on `recall`:
+All 11 valid values for the `--mode` flag on `recall`:
 
 | Mode | Description |
 |---|---|
 | `ambient` | General-purpose retrieval across all memory types |
 | `facts` | Retrieve factual memories and claims |
 | `episodes` | Retrieve narrative episode records |
+| `sessions` | List and search session summaries with optional date filtering |
 | `timeline` | Chronological ordering of events and memories |
 | `project` | Scoped to a specific project |
 | `entity` | Retrieve memories related to specific entities |
@@ -1166,6 +1167,13 @@ All 9 valid values for the `--mode` flag on `recall`:
 | `history` | Raw event history search |
 | `contradictions` | Retrieve memories with detected contradictions |
 | `hybrid` | Combined scoring across multiple strategies (default) |
+
+### Temporal Filtering
+
+All recall modes support `--after` and `--before` flags (RFC3339 timestamps) to
+filter results by time range. Natural-language temporal references in the query
+text (e.g., "last week", "yesterday", "in March") are automatically extracted
+and applied when explicit flags are not set.
 
 ## Scopes
 

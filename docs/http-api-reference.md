@@ -202,9 +202,11 @@ Perform associative retrieval.
 **Request Body**
 - `query`: The search string.
 - `opts`:
-  - `mode`: `ambient`, `facts`, `episodes`, `timeline`, `project`, `entity`, `active`, `history`, `contradictions`, `hybrid`.
+  - `mode`: `ambient`, `facts`, `episodes`, `sessions`, `timeline`, `project`, `entity`, `active`, `history`, `contradictions`, `hybrid`.
   - `limit`: Max items to return.
   - `project_id`: Filter by project.
+  - `after`: RFC3339 timestamp — filter results to after this time.
+  - `before`: RFC3339 timestamp — filter results to before this time.
   - `explain`: Include scoring signals in response.
 
 ### POST /v1/explain-recall

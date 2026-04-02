@@ -9,7 +9,7 @@ AMM is a database-backed memory substrate, not a chat runtime or task engine. It
 - **Session-First Extraction** — Conversations are summarized as full session narratives, then memories are extracted with the complete arc as context. Produces rich, reasoned memories instead of thin fragments.
 - **Event Ingestion** — Every turn is captured in an append-only, full-transcript archive.
 - **Entity Graph** — Builds a relationship-aware model of the workspace for precision scoring.
-- **Multi-Signal Recall** — 9 retrieval modes with learned ranking, temporal decay, and contradiction surfacing.
+- **Multi-Signal Recall** — 11 retrieval modes with learned ranking, temporal search, and contradiction surfacing.
 - **Background Pipeline** — Automated reflection, compression, consolidation, and maintenance.
 
 > **LLM requirement:** Automatic memory extraction requires an LLM endpoint (`AMM_SUMMARIZER_ENDPOINT`). Without one, event storage and explicit `amm remember` calls still work, but the extraction pipeline is disabled.

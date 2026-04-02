@@ -71,13 +71,13 @@ Codex currently exposes three confirmed lifecycle hooks for amm capture:
 |---|---|
 | `SessionStart` | Record session metadata and establish project/session identity |
 | `UserPromptSubmit` | Ingest the user prompt and return thin ambient recall hints |
-| `Stop` | Backfill assistant/tool history from `transcript_path` when available, then record session closeout and trigger maintenance jobs |
+| `Stop` | Backfill assistant/tool history from `transcript_path` when available, then record session closeout |
 
 The example files in [`examples/codex/`](../examples/codex/) show one grounded pattern:
 
 - `session-start.py` logs a lightweight session-start event
 - `user-prompt-submit.py` ingests the user prompt and turns amm recall results into Codex hook `additionalContext`
-- `session-stop.py` imports assistant/tool history from `transcript_path` when possible (assistant messages, tool calls, and tool results), falls back to `last_assistant_message` when not, then records concise session metadata and runs maintenance jobs
+- `session-stop.py` imports assistant/tool history from `transcript_path` when possible (assistant messages, tool calls, and tool results), falls back to `last_assistant_message` when not, then records concise session metadata
 - `config.toml` enables `codex_hooks` and registers `amm-mcp`
 - `hooks.json` is the separate Codex hook manifest that wires those scripts into Codex
 
@@ -190,9 +190,10 @@ The existing shared runner in [`examples/scripts/run-workers.sh`](../examples/sc
 Use a split hot-path / warm-path / cold-path model to manage SQLite's single-writer constraint:
 
 - **Hot path**: `UserPromptSubmit` ingests the prompt and asks for `ambient` recall
-- **Warm path**: `Stop` runs the repo's warm-path maintenance sequence (`reflect`, `compress_history`, `consolidate_sessions`) serially
-- **Cold path**: external serialized jobs run the **baseline** maintenance sequence (consolidate_sessions, extract_claims, etc.) via the shared runner
-That keeps the Codex interaction fast while still letting amm build structure from the accumulated history.
+- **Capture path**: `Stop` captures the final transcript and session_stop marker — no LLM processing
+- **Maintenance path**: external scheduler (cron, systemd timer, K8s CronJob) runs `amm jobs run` every 15–30 minutes for reflect, consolidate_sessions, compress_history, etc.
+
+This keeps session start/stop instant while amm builds structure in the background.
 
 ## Notes on Transcript Capture
 
@@ -213,8 +214,7 @@ Codex does not need a dedicated tool lifecycle hook for this pattern: richer too
 - Codex loads `~/.codex/hooks.json` and the three hook handlers
 - `UserPromptSubmit` writes an event and returns recall hints when amm has relevant data
 - `Stop` backfills assistant/tool history from `transcript_path` or falls back to `last_assistant_message`
-- `Stop` can run `amm jobs run reflect`, `amm jobs run compress_history`, and `amm jobs run consolidate_sessions`
-- Your external scheduler can run the heavier jobs against the same database
+- Your external scheduler (cron, systemd timer, K8s CronJob) runs `amm jobs run` periodically for maintenance
 
 ## What This Repo Does Not Promise
 

@@ -31,7 +31,7 @@ Response:
     "protocolVersion": "2024-11-05",
     "serverInfo": {
       "name": "amm-mcp",
-      "version": "1.2.1"
+      "version": "1.3.0"
     },
     "capabilities": {
       "tools": {
@@ -271,11 +271,14 @@ Retrieve memories using various recall modes.
       }
     }
   },
-  "required": ["query"]
 }
 ```
 
-**Recall modes:** `ambient`, `facts`, `episodes`, `timeline`, `project`, `entity`, `active`, `history`, `contradictions`, `hybrid` (default).
+`query` is optional when `mode=sessions` (lists sessions without text search).
+
+**Recall modes:** `ambient`, `facts`, `episodes`, `sessions`, `timeline`, `project`, `entity`, `active`, `history`, `contradictions`, `hybrid` (default).
+
+**Temporal filtering:** Pass `after` and/or `before` (RFC3339) in opts to filter by date range. Natural-language temporal references in the query (e.g., "last week") are automatically parsed when explicit flags are not set.
 
 **Example:**
 
@@ -1383,7 +1386,7 @@ All 16 valid memory types: `identity`, `preference`, `fact`, `decision`, `episod
 
 ## Recall Modes
 
-All 10 recall modes: `ambient`, `facts`, `episodes`, `timeline`, `project`, `entity`, `active`, `history`, `contradictions`, `hybrid`.
+All 11 recall modes: `ambient`, `facts`, `episodes`, `sessions`, `timeline`, `project`, `entity`, `active`, `history`, `contradictions`, `hybrid`.
 
 ## Scopes
 
