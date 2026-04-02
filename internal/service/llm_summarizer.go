@@ -16,11 +16,12 @@ import (
 // LLMSummarizer uses an OpenAI-compatible chat completion endpoint for
 // summarization and memory extraction, with heuristic fallback on failure.
 type LLMSummarizer struct {
-	endpoint string
-	apiKey   string
-	model    string
-	client   *http.Client
-	fallback *HeuristicSummarizer
+	endpoint        string
+	apiKey          string
+	model           string
+	reasoningEffort string // low, medium, high — empty means reasoning disabled
+	client          *http.Client
+	fallback        *HeuristicSummarizer
 }
 
 // NewLLMSummarizer constructs an LLM-backed summarizer for the supplied
@@ -33,6 +34,12 @@ func NewLLMSummarizer(endpoint, apiKey, model string) *LLMSummarizer {
 		client:   &http.Client{Timeout: 30 * time.Second},
 		fallback: &HeuristicSummarizer{},
 	}
+}
+
+// SetReasoningEffort configures the reasoning_effort parameter for LLM calls.
+// Valid values: "low", "medium", "high". Empty disables reasoning parameters.
+func (s *LLMSummarizer) SetReasoningEffort(effort string) {
+	s.reasoningEffort = strings.ToLower(strings.TrimSpace(effort))
 }
 
 // Summarize asks the configured LLM for a concise summary and falls back to the
@@ -160,8 +167,10 @@ Events:
 }
 
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
+	Model           string        `json:"model"`
+	Messages        []chatMessage `json:"messages"`
+	Reasoning       *bool         `json:"reasoning,omitempty"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
 }
 
 type chatMessage struct {
@@ -181,6 +190,11 @@ func (s *LLMSummarizer) chatComplete(ctx context.Context, prompt string) (string
 		Messages: []chatMessage{
 			{Role: "user", Content: prompt},
 		},
+	}
+	if s.reasoningEffort != "" {
+		t := true
+		body.Reasoning = &t
+		body.ReasoningEffort = s.reasoningEffort
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
