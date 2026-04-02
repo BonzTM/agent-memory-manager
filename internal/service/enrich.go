@@ -48,6 +48,7 @@ func (s *AMMService) EnrichMemories(ctx context.Context) (int, error) {
 		batch := pending[i:end]
 
 		analysisEntities := make([]core.EntityCandidate, 0)
+		analysisRelationships := make([]core.RelationshipCandidate, 0)
 		usedAnalysis := false
 		if s.intelligence != nil && s.intelligence.IsLLMBacked() {
 			analysisInputs := make([]core.EventContent, 0, len(batch))
@@ -64,6 +65,7 @@ func (s *AMMService) EnrichMemories(ctx context.Context) (int, error) {
 				usedAnalysis = true
 				if analysis != nil {
 					analysisEntities = append(analysisEntities, analysis.Entities...)
+					analysisRelationships = append(analysisRelationships, analysis.Relationships...)
 				}
 			}
 		}
@@ -74,15 +76,23 @@ func (s *AMMService) EnrichMemories(ctx context.Context) (int, error) {
 			method := MethodHeuristic
 			if usedAnalysis {
 				candidateEntities := selectAnalysisEntitiesForContent(analysisEntities, mem.Body)
+				candidateRelationships := selectAnalysisRelationshipsForContent(analysisRelationships, analysisEntities, mem.Body)
 				if len(candidateEntities) > 0 {
 					if err := s.linkEntitiesFromAnalysis(ctx, mem.ID, candidateEntities); err != nil {
 						return enriched, fmt.Errorf("link analysis entities for memory %s: %w", mem.ID, err)
 					}
-					method = MethodLLM
 				} else {
 					if err := s.linkEntitiesToMemory(ctx, mem.ID, mem.Body); err != nil {
 						return enriched, fmt.Errorf("link entities for memory %s: %w", mem.ID, err)
 					}
+				}
+				if len(candidateRelationships) > 0 {
+					if err := s.createRelationshipsFromAnalysis(ctx, candidateRelationships); err != nil {
+						return enriched, fmt.Errorf("create analysis relationships for memory %s: %w", mem.ID, err)
+					}
+				}
+				if len(candidateEntities) > 0 || len(candidateRelationships) > 0 {
+					method = MethodLLM
 				}
 			} else {
 				if err := s.linkEntitiesToMemory(ctx, mem.ID, mem.Body); err != nil {

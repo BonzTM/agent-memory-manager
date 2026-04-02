@@ -138,6 +138,78 @@ func TestEnrichMemories_DoesNotModifyBody(t *testing.T) {
 	}
 }
 
+func TestEnrichMemories_CreatesRelationshipsFromAnalysis(t *testing.T) {
+	svc, repo := testServiceAndRepoWithSummarizer(t, reflectTestSummarizer{})
+	ctx := context.Background()
+	svc.SetIntelligenceProvider(enrichAnalysisStub{
+		isLLM: true,
+		result: &core.AnalysisResult{
+			Entities: []core.EntityCandidate{
+				{CanonicalName: "API Gateway", Type: "service", Aliases: []string{"api gateway"}},
+				{CanonicalName: "Redis Cache", Type: "technology", Aliases: []string{"redis cache"}},
+			},
+			Relationships: []core.RelationshipCandidate{{
+				FromEntity: "API Gateway",
+				ToEntity:   "Redis Cache",
+				Type:       "uses",
+			}},
+		},
+	})
+
+	mem, err := svc.Remember(ctx, &core.Memory{
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "API Gateway uses Redis Cache for throttling",
+		TightDescription: "api gateway redis cache",
+	})
+	if err != nil {
+		t.Fatalf("remember memory: %v", err)
+	}
+
+	count, err := svc.EnrichMemories(ctx)
+	if err != nil {
+		t.Fatalf("enrich memories: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 enriched memory, got %d", count)
+	}
+
+	updated, err := repo.GetMemory(ctx, mem.ID)
+	if err != nil {
+		t.Fatalf("get enriched memory: %v", err)
+	}
+	if updated.Metadata[MetaEntitiesExtractedMethod] != MethodLLM {
+		t.Fatalf("expected llm entity extraction method, got %q", updated.Metadata[MetaEntitiesExtractedMethod])
+	}
+
+	apiEntities, err := repo.SearchEntities(ctx, "API Gateway", 10)
+	if err != nil {
+		t.Fatalf("search api gateway entity: %v", err)
+	}
+	redisEntities, err := repo.SearchEntities(ctx, "Redis Cache", 10)
+	if err != nil {
+		t.Fatalf("search redis cache entity: %v", err)
+	}
+	if len(apiEntities) == 0 || len(redisEntities) == 0 {
+		t.Fatalf("expected analysis entities to be created, got api=%#v redis=%#v", apiEntities, redisEntities)
+	}
+
+	rels, err := repo.ListRelationshipsByEntityIDs(ctx, []string{apiEntities[0].ID, redisEntities[0].ID})
+	if err != nil {
+		t.Fatalf("list relationships by entity ids: %v", err)
+	}
+	foundUses := false
+	for _, rel := range rels {
+		if rel.FromEntityID == apiEntities[0].ID && rel.ToEntityID == redisEntities[0].ID && rel.RelationshipType == "uses" {
+			foundUses = true
+			break
+		}
+	}
+	if !foundUses {
+		t.Fatalf("expected analysis relationship API Gateway -> Redis Cache uses, got %#v", rels)
+	}
+}
+
 func TestEnrichMemories_RunJob(t *testing.T) {
 	svc, _ := testServiceAndRepo(t)
 	ctx := context.Background()
