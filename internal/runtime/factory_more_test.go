@@ -77,7 +77,7 @@ func TestBuildIntelligenceProvider_RoutesLLMSummarizerToLLMProvider(t *testing.T
 	cfg.Summarizer.ReviewAPIKey = "review-key"
 	cfg.Summarizer.ReviewModel = "review-model"
 
-	provider := buildIntelligenceProvider(cfg, service.NewLLMSummarizer("https://summary.example/v1", "summary-key", "summary-model"))
+	provider := buildIntelligenceProvider(cfg, service.NewLLMSummarizer("https://summary.example/v1", "summary-key", "summary-model", 0))
 	if _, ok := provider.(*service.LLMIntelligenceProvider); !ok {
 		t.Fatalf("expected LLM intelligence provider, got %T", provider)
 	}

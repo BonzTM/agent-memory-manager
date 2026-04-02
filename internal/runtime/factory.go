@@ -21,24 +21,44 @@ func buildSummarizer(cfg Config) core.Summarizer {
 		if model == "" {
 			model = "gpt-4o-mini"
 		}
-		s := service.NewLLMSummarizer(cfg.Summarizer.Endpoint, cfg.Summarizer.APIKey, model)
-		if cfg.Summarizer.ReasoningEffort != "" {
-			s.SetReasoningEffort(cfg.Summarizer.ReasoningEffort)
-		}
+		timeout := time.Duration(cfg.Summarizer.TimeoutSeconds) * time.Second
+		s := service.NewLLMSummarizer(cfg.Summarizer.Endpoint, cfg.Summarizer.APIKey, model, timeout)
+		applyReasoning(s, cfg.Summarizer.Reasoning, cfg.Summarizer.ReasoningEffort)
 		return s
 	}
 	return nil
 }
 
+// applyReasoning configures the reasoning toggle and effort independently.
+// Some models support only the boolean, others only the effort string, and
+// a few support both. Omitting a field avoids sending unsupported parameters.
+//
+// reasoning: "enabled" sends reasoning=true; any other value (including empty)
+// omits the field entirely.
+func applyReasoning(s *service.LLMSummarizer, reasoning, effort string) {
+	if strings.TrimSpace(strings.ToLower(reasoning)) == "enabled" {
+		t := true
+		s.SetReasoning(&t)
+	}
+	if strings.TrimSpace(effort) != "" {
+		s.SetReasoningEffort(effort)
+	}
+}
+
 func buildIntelligenceProvider(cfg Config, summarizer core.Summarizer) core.IntelligenceProvider {
 	if llm, ok := summarizer.(*service.LLMSummarizer); ok {
-		return service.NewLLMIntelligenceProviderWithReviewConfig(
-			llm,
-			cfg.Summarizer.ReviewEndpoint,
-			cfg.Summarizer.ReviewAPIKey,
-			cfg.Summarizer.ReviewModel,
-			cfg.Summarizer.ReviewReasoningEffort,
-		)
+		rc := service.ReviewConfig{
+			Endpoint:        cfg.Summarizer.ReviewEndpoint,
+			APIKey:          cfg.Summarizer.ReviewAPIKey,
+			Model:           cfg.Summarizer.ReviewModel,
+			ReasoningEffort: cfg.Summarizer.ReviewReasoningEffort,
+			Timeout:         time.Duration(cfg.Summarizer.TimeoutSeconds) * time.Second,
+		}
+		if strings.TrimSpace(strings.ToLower(cfg.Summarizer.ReviewReasoning)) == "enabled" {
+			t := true
+			rc.Reasoning = &t
+		}
+		return service.NewLLMIntelligenceProviderWithReviewConfig(llm, rc)
 	}
 	return service.NewSummarizerIntelligenceAdapter(summarizer)
 }
@@ -58,7 +78,8 @@ func buildEmbeddingProvider(cfg Config) core.EmbeddingProvider {
 		if model == "" {
 			model = "text-embedding-3-small"
 		}
-		return service.NewAPIEmbeddingProvider(cfg.Embeddings.Endpoint, cfg.Embeddings.APIKey, model)
+		embTimeout := time.Duration(cfg.Summarizer.EmbeddingTimeoutSeconds) * time.Second
+		return service.NewAPIEmbeddingProvider(cfg.Embeddings.Endpoint, cfg.Embeddings.APIKey, model, embTimeout)
 	}
 	if service.BuiltinEmbeddingAvailable() {
 		return service.NewBuiltinEmbeddingProvider()

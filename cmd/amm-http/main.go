@@ -30,9 +30,12 @@ func main() {
 	defer cleanup()
 
 	server := httpapi.NewServer(svc, httpapi.Config{
-		Addr:        cfg.HTTP.Addr,
-		CORSOrigins: cfg.HTTP.CORSOrigins,
-		APIKey:      cfg.API.Key,
+		Addr:                cfg.HTTP.Addr,
+		CORSOrigins:         cfg.HTTP.CORSOrigins,
+		APIKey:              cfg.API.Key,
+		ReadTimeoutSeconds:  cfg.HTTP.ReadTimeoutSeconds,
+		WriteTimeoutSeconds: cfg.HTTP.WriteTimeoutSeconds,
+		IdleTimeoutSeconds:  cfg.HTTP.IdleTimeoutSeconds,
 	})
 
 	errCh := make(chan error, 1)

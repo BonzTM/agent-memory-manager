@@ -22,9 +22,12 @@ type Server struct {
 }
 
 type Config struct {
-	Addr        string
-	CORSOrigins string
-	APIKey      string
+	Addr                string
+	CORSOrigins         string
+	APIKey              string
+	ReadTimeoutSeconds  int // 0 uses default (30)
+	WriteTimeoutSeconds int // 0 uses default (60)
+	IdleTimeoutSeconds  int // 0 uses default (120)
 }
 
 func NewServer(svc core.Service, cfg Config) *Server {
@@ -54,13 +57,25 @@ func NewServer(svc core.Service, cfg Config) *Server {
 	}
 	handler = requestLogging(handler)
 
+	readTimeout := 30 * time.Second
+	writeTimeout := 60 * time.Second
+	idleTimeout := 120 * time.Second
+	if cfg.ReadTimeoutSeconds > 0 {
+		readTimeout = time.Duration(cfg.ReadTimeoutSeconds) * time.Second
+	}
+	if cfg.WriteTimeoutSeconds > 0 {
+		writeTimeout = time.Duration(cfg.WriteTimeoutSeconds) * time.Second
+	}
+	if cfg.IdleTimeoutSeconds > 0 {
+		idleTimeout = time.Duration(cfg.IdleTimeoutSeconds) * time.Second
+	}
 	s.server = &nethttp.Server{
 		Addr:              cfg.Addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 	return s
 }
