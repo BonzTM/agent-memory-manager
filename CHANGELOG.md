@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-04-02
+
+### Added
+
+- **Session recall mode.** New `--mode sessions` lists and searches session summaries with date filtering. Supports empty-query listing (show recent sessions) and FTS text search scoped to session summaries only.
+- **Temporal search.** All recall modes support `--after` and `--before` (RFC3339) for date-range filtering. Natural-language temporal references in queries ("last week", "yesterday", "in March 2025") are automatically extracted and applied when explicit flags are not set.
+- **Deterministic temporal parser.** Covers: today, yesterday, earlier/previously/recently, last week, this week, N days/weeks ago, last month, this month, named months with optional year, quarters (Q1-Q4), last year.
+- **`SearchScopedSummaries` repository method.** Combines FTS text search with kind/project/session/date filters in SQL before the LIMIT, preventing valid sessions from being crowded out by non-session summaries.
+- **Reasoning effort support for LLM calls.** New `AMM_SUMMARIZER_REASONING_EFFORT` and `AMM_REVIEW_REASONING_EFFORT` env vars (low/medium/high). When set, sends `reasoning: true` and `reasoning_effort` in OpenAI-compatible API requests. Supports reasoning-capable models (o1, o3, o4-mini).
+- **`AMM_TEMPORAL_ATTENUATION` env var.** Configurable score multiplier (0.0-1.0, default 0.3) for recall items outside the active temporal window.
+
+### Changed
+
+- **Hooks are capture-only.** All integration hooks (Claude Code, Codex, Hermes, OpenCode) no longer run maintenance jobs on session end. Hooks capture events only. Maintenance (reflect, consolidate_sessions, compress_history, etc.) should run on a schedule via cron/systemd timer or the Helm CronJob.
+- **Session summary `CreatedAt` reflects event time.** Session summaries now set `CreatedAt` to the earliest source event timestamp, not the consolidation time. Temporal recall filters sessions by when they happened.
+- **Improved consolidation prompt.** `buildConsolidateNarrativePrompt` now requests a human-readable `title` (under 80 chars) and retrieval-optimized `tight_description` (search keywords, under 120 chars) with explicit guidance on their distinct purposes.
+- **`NarrativeResult` gains `Title` field.** LLM-generated session titles used for summary `Title` instead of generic "Session \<uuid\>".
+- **Hard temporal filtering in scoring.** `scoreAndConvert` hard-filters candidates outside the temporal window before scoring. All scored recall modes (hybrid, facts, ambient, etc.) now exclude out-of-window items rather than just attenuating their scores.
+- **Temporal filtering uses occurrence time.** New `occurrenceTimestamp()` function prefers `ObservedAt`/`CreatedAt` over `UpdatedAt` for temporal window filtering. Reprocessed or updated items are filtered by when they originally happened.
+- **Inclusive boundary comparisons.** `ListEvents` SQL changed from strict `>` / `<` to inclusive `>=` / `<=` in both SQLite and Postgres, so boundary events (e.g., exactly at midnight) are included.
+- **Temporal-only queries route to timeline.** Queries like "yesterday" or "last week" (empty after temporal stripping) route to timeline mode for all FTS-dependent modes, not just hybrid.
+- **Over-fetch for temporal recall.** Hybrid (10x) and history (20x) modes over-fetch from FTS when temporal bounds are active to ensure in-window candidates survive past the per-source LIMIT.
+
+### Fixed
+
+- `ValidateRecall` allows empty query for `mode=sessions`.
+- MCP adapter forwards `after`/`before` fields in recall validation.
+- `latestSessionSummary` selects by `UpdatedAt` (consolidation time) for stable incremental ordering regardless of event timestamps.
+- SQLite `normalizeRFC3339ToUTC` ensures consistent text comparison for date-filtered summary queries.
+- OpenCode plugin `maintenanceBySession` reference error after maintenance removal (replaced with `lastIdleBySession` idle-event throttle).
+- Hermes `on-session-end.sh` exports `SESSION_ID`/`PROJECT_ID` so Python subprocess can read them.
+- TOML config parser handles `summarizer.reasoning_effort` and `summarizer.review_reasoning_effort`.
+
 ## [1.2.1] - 2026-04-01
 
 ### Added
@@ -154,7 +187,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background maintenance pipeline with reflect, compression, indexing, contradiction detection, graph rebuild, lifecycle review, and related worker jobs.
 - Helm chart and sidecar deployment artifacts for Kubernetes-based installations.
 
-[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.2.1...HEAD
+[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.3.0...HEAD
+[1.3.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.3.0
 [1.2.1]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.2.1
 [1.2.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.2.0
 [1.1.1]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.1.1
