@@ -89,6 +89,12 @@ type staticEmbeddingProvider struct {
 	vectors map[string][]float32
 }
 
+type countingEmbeddingProvider struct {
+	model   string
+	vectors map[string][]float32
+	calls   atomic.Int32
+}
+
 type failingEmbeddingProvider struct{}
 
 func (p staticEmbeddingProvider) Name() string { return "test-static" }
@@ -101,6 +107,28 @@ func (p staticEmbeddingProvider) Model() string {
 }
 
 func (p staticEmbeddingProvider) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i, text := range texts {
+		if vec, ok := p.vectors[text]; ok {
+			out[i] = vec
+			continue
+		}
+		out[i] = []float32{}
+	}
+	return out, nil
+}
+
+func (p *countingEmbeddingProvider) Name() string { return "test-counting" }
+
+func (p *countingEmbeddingProvider) Model() string {
+	if p.model == "" {
+		return "test-model"
+	}
+	return p.model
+}
+
+func (p *countingEmbeddingProvider) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	p.calls.Add(1)
 	out := make([][]float32, len(texts))
 	for i, text := range texts {
 		if vec, ok := p.vectors[text]; ok {
@@ -3634,6 +3662,175 @@ func TestEmbeddingDedup_FallsBackOnEmbedFailure(t *testing.T) {
 	}
 	if len(active) != 3 {
 		t.Fatalf("expected embed failure fallback to insert new memory, got %d active", len(active))
+	}
+}
+
+func TestProcessMemoryCandidates_UsesEmbeddingFallbackAfterJaccardMiss(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	scope := core.ScopeProject
+
+	existing := &core.Memory{
+		ID:               "mem_candidate_embed_existing",
+		Type:             core.MemoryTypeOpenLoop,
+		Scope:            scope,
+		ProjectID:        "proj_issue13",
+		SessionID:        "sess_a",
+		Subject:          "dedup backlog",
+		Body:             "embedding recall register backlog unresolved renormalization priority cleanup",
+		TightDescription: "embedding recall backlog renormalization",
+		Confidence:       0.55,
+		Importance:       0.75,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		SourceEventIDs:   []string{"evt_session_a"},
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := repo.InsertMemory(ctx, existing); err != nil {
+		t.Fatalf("insert existing memory: %v", err)
+	}
+
+	candidate := core.MemoryCandidate{
+		Type:             core.MemoryTypeOpenLoop,
+		Subject:          existing.Subject,
+		Body:             "embedding recall register backlog unresolved",
+		TightDescription: "embedding recall backlog",
+		Confidence:       0.9,
+	}
+	candidateMemory := core.Memory{
+		Type:             candidate.Type,
+		Scope:            scope,
+		ProjectID:        existing.ProjectID,
+		Subject:          candidate.Subject,
+		Body:             candidate.Body,
+		TightDescription: candidate.TightDescription,
+		Status:           core.MemoryStatusActive,
+	}
+
+	provider := &countingEmbeddingProvider{
+		model: "issue13-candidate-model",
+		vectors: map[string][]float32{
+			buildMemoryEmbeddingText(&candidateMemory): {1, 0},
+		},
+	}
+	svc.embeddingProvider = provider
+
+	existingVector := []float32{0.82, float32(math.Sqrt(1 - 0.82*0.82))}
+	if err := repo.UpsertEmbedding(ctx, &core.EmbeddingRecord{
+		ObjectID:   existing.ID,
+		ObjectKind: "memory",
+		Model:      provider.Model(),
+		Vector:     existingVector,
+		CreatedAt:  now,
+	}); err != nil {
+		t.Fatalf("upsert existing embedding: %v", err)
+	}
+
+	created, err := svc.processMemoryCandidates(ctx, candidateProcessingInput{
+		candidates:       []core.MemoryCandidate{candidate},
+		sourceEvents:     []core.Event{{ID: "evt_session_b", Content: "session b event", OccurredAt: now, IngestedAt: now}},
+		sourceSystem:     "consolidate_sessions",
+		scopeOverride:    &scope,
+		projectOverride:  existing.ProjectID,
+		sessionID:        "sess_b",
+		extractionMethod: MethodLLM,
+	})
+	if err != nil {
+		t.Fatalf("processMemoryCandidates: %v", err)
+	}
+	if created != 0 {
+		t.Fatalf("expected embedding duplicate fallback to merge instead of insert, got created=%d", created)
+	}
+	if calls := provider.calls.Load(); calls != 1 {
+		t.Fatalf("expected one embedding call after Jaccard miss, got %d", calls)
+	}
+
+	mems, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatalf("list active memories: %v", err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected one active memory after duplicate merge, got %d", len(mems))
+	}
+
+	updated, err := repo.GetMemory(ctx, existing.ID)
+	if err != nil {
+		t.Fatalf("get merged memory: %v", err)
+	}
+	if updated.Body != candidate.Body {
+		t.Fatalf("expected higher-confidence candidate body to replace existing body, got %q", updated.Body)
+	}
+	if len(updated.SourceEventIDs) != 2 || updated.SourceEventIDs[0] != "evt_session_a" || updated.SourceEventIDs[1] != "evt_session_b" {
+		t.Fatalf("expected merged source event ids from both sessions, got %#v", updated.SourceEventIDs)
+	}
+}
+
+func TestProcessMemoryCandidates_SkipsEmbeddingWhenJaccardFindsDuplicate(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	scope := core.ScopeProject
+
+	existing := &core.Memory{
+		ID:               "mem_candidate_jaccard_existing",
+		Type:             core.MemoryTypeFact,
+		Scope:            scope,
+		ProjectID:        "proj_issue13_jaccard",
+		SessionID:        "sess_a",
+		Subject:          "storage choice",
+		Body:             "postgres remains the production system of record",
+		TightDescription: "postgres is production system of record",
+		Confidence:       0.7,
+		Importance:       0.65,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		SourceEventIDs:   []string{"evt_jaccard_a"},
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := repo.InsertMemory(ctx, existing); err != nil {
+		t.Fatalf("insert existing memory: %v", err)
+	}
+
+	provider := &countingEmbeddingProvider{
+		model:   "issue13-jaccard-model",
+		vectors: map[string][]float32{},
+	}
+	svc.embeddingProvider = provider
+
+	created, err := svc.processMemoryCandidates(ctx, candidateProcessingInput{
+		candidates: []core.MemoryCandidate{{
+			Type:             core.MemoryTypeFact,
+			Subject:          existing.Subject,
+			Body:             existing.Body,
+			TightDescription: existing.TightDescription,
+			Confidence:       0.9,
+		}},
+		sourceEvents:     []core.Event{{ID: "evt_jaccard_b", Content: "session b event", OccurredAt: now, IngestedAt: now}},
+		sourceSystem:     "consolidate_sessions",
+		scopeOverride:    &scope,
+		projectOverride:  existing.ProjectID,
+		sessionID:        "sess_b",
+		extractionMethod: MethodLLM,
+	})
+	if err != nil {
+		t.Fatalf("processMemoryCandidates: %v", err)
+	}
+	if created != 0 {
+		t.Fatalf("expected Jaccard duplicate to merge instead of insert, got created=%d", created)
+	}
+	if calls := provider.calls.Load(); calls != 0 {
+		t.Fatalf("expected zero embedding calls when Jaccard already found the duplicate, got %d", calls)
+	}
+
+	updated, err := repo.GetMemory(ctx, existing.ID)
+	if err != nil {
+		t.Fatalf("get merged memory: %v", err)
+	}
+	if len(updated.SourceEventIDs) != 2 || updated.SourceEventIDs[0] != "evt_jaccard_a" || updated.SourceEventIDs[1] != "evt_jaccard_b" {
+		t.Fatalf("expected source event ids to merge without embedding fallback, got %#v", updated.SourceEventIDs)
 	}
 }
 

@@ -164,6 +164,9 @@ func (s *AMMService) processMemoryCandidates(ctx context.Context, input candidat
 		}
 
 		duplicates := findDuplicateActiveMemories(activeMemories, candidateMemory)
+		if len(duplicates) == 0 {
+			duplicates = s.findDuplicatesByEmbedding(ctx, candidateMemory, activeMemories)
+		}
 		duplicates = mergeDuplicateMemories(duplicates, findRetryUpgradeDuplicates(activeMemories, candidateMemory, method))
 		if len(duplicates) > 0 {
 			if err := s.handleDuplicateCandidate(ctx, duplicates, candidateMemory, input, candidateEntities, candidateRelationships, sourceContent, method); err != nil {
