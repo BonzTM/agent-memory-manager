@@ -94,6 +94,8 @@ var toolRegistry = []toolEntry{
 				EntityIDs: req.Opts.EntityIDs,
 				Limit:     req.Opts.Limit,
 				Explain:   req.Opts.Explain,
+				After:     req.Opts.After,
+				Before:    req.Opts.Before,
 			}); err != nil {
 				return nil, invalidToolArgs(err)
 			}

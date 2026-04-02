@@ -239,6 +239,8 @@ func (s *Server) handleRecall(w nethttp.ResponseWriter, r *nethttp.Request) {
 		req.Opts.SessionID = r.URL.Query().Get("session_id")
 		req.Opts.AgentID = r.URL.Query().Get("agent_id")
 		req.Opts.EntityIDs = r.URL.Query()["entity_id"]
+		req.Opts.After = r.URL.Query().Get("after")
+		req.Opts.Before = r.URL.Query().Get("before")
 		parsedLimit, err := parseIntParam(r, "limit", req.Opts.Limit)
 		if err != nil {
 			slog.Warn("validation failed", "handler", "handleRecall", "error", err)
@@ -275,6 +277,8 @@ func (s *Server) handleRecall(w nethttp.ResponseWriter, r *nethttp.Request) {
 		EntityIDs: req.Opts.EntityIDs,
 		Limit:     req.Opts.Limit,
 		Explain:   req.Opts.Explain,
+		After:     req.Opts.After,
+		Before:    req.Opts.Before,
 	}); err != nil {
 		slog.Warn("validation failed", "handler", "handleRecall", "error", err)
 		writeError(w, nethttp.StatusBadRequest, "validation_error", err.Error())

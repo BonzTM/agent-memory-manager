@@ -77,6 +77,8 @@ func registerAllTools(s *mcpserver.MCPServer, svc core.Service) {
 			EntityIDs: opts.EntityIDs,
 			Limit:     opts.Limit,
 			Explain:   opts.Explain,
+			After:     opts.After,
+			Before:    opts.Before,
 		}); err != nil {
 			return nil, err
 		}
@@ -528,7 +530,7 @@ func toolRecall() mcp.Tool {
 	return mcp.NewTool(
 		"amm_recall",
 		mcp.WithDescription("Retrieve memories using various modes"),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
+		mcp.WithString("query", mcp.Description("Search query (optional for mode=sessions)")),
 		mcp.WithString("agent_id", mcp.Description("Agent identifier")),
 		mcp.WithBoolean("explain", mcp.Description("Include score signal breakdowns in each recall item")),
 		mcp.WithObject("opts", mcp.Description("Recall options")),

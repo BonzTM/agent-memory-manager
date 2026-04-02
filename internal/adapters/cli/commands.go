@@ -250,7 +250,7 @@ func runEnvelopeRecall(ctx context.Context, svc core.Service, payload json.RawMe
 		fail("run", "PARSE_ERROR", err.Error())
 		return err
 	}
-	if err := v1.ValidateRecall(&v1.RecallRequest{Query: req.Query, Mode: string(req.Opts.Mode), ProjectID: req.Opts.ProjectID, SessionID: req.Opts.SessionID, AgentID: req.Opts.AgentID, EntityIDs: req.Opts.EntityIDs, Limit: req.Opts.Limit, Explain: req.Opts.Explain}); err != nil {
+	if err := v1.ValidateRecall(&v1.RecallRequest{Query: req.Query, Mode: string(req.Opts.Mode), ProjectID: req.Opts.ProjectID, SessionID: req.Opts.SessionID, AgentID: req.Opts.AgentID, EntityIDs: req.Opts.EntityIDs, Limit: req.Opts.Limit, Explain: req.Opts.Explain, After: req.Opts.After, Before: req.Opts.Before}); err != nil {
 		fail("run", "VALIDATION_ERROR", err.Error())
 		return err
 	}

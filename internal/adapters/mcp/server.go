@@ -225,7 +225,7 @@ func recallSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
-			"query":    map[string]string{"type": "string", "description": "Search query"},
+			"query": map[string]string{"type": "string", "description": "Search query (required for all modes except sessions, which supports empty query for listing)"},
 			"agent_id": map[string]string{"type": "string", "description": "Agent identifier"},
 			"explain":  map[string]string{"type": "boolean", "description": "Include score signal breakdowns in each recall item"},
 			"opts": map[string]interface{}{
@@ -237,10 +237,11 @@ func recallSchema() map[string]interface{} {
 					"agent_id":   map[string]string{"type": "string"},
 					"limit":      map[string]string{"type": "integer"},
 					"explain":    map[string]string{"type": "boolean"},
+					"after":      map[string]string{"type": "string", "description": "RFC3339 — filter results to after this time"},
+					"before":     map[string]string{"type": "string", "description": "RFC3339 — filter results to before this time"},
 				},
 			},
 		},
-		"required": []string{"query"},
 	}
 }
 

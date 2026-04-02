@@ -444,6 +444,8 @@ func runRecall(args []string) error {
 		SessionID: flags["session"],
 		AgentID:   flags["agent-id"],
 		Explain:   flags["explain"] == "true",
+		After:     flags["after"],
+		Before:    flags["before"],
 	}); err != nil {
 		logCLIError("cli recall failed", err, "query", query, "mode", mode)
 		fail("recall", "VALIDATION_ERROR", err.Error())
@@ -456,6 +458,8 @@ func runRecall(args []string) error {
 		SessionID: flags["session"],
 		AgentID:   flags["agent-id"],
 		Explain:   flags["explain"] == "true",
+		After:     flags["after"],
+		Before:    flags["before"],
 	}
 
 	ctx := context.Background()
