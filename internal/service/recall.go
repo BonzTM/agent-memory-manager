@@ -35,7 +35,7 @@ type recallFilterOptions struct {
 // Recall retrieves items for query using the requested recall mode and the
 // package scoring pipeline.
 func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallOptions) (*core.RecallResult, error) {
-	slog.Debug("Recall called", "mode", opts.Mode, "limit", opts.Limit, "project_id", opts.ProjectID, "session_id", opts.SessionID, "query_len", len(query))
+	slog.Debug("Recall called", "mode", opts.Mode, "limit", opts.Limit, "project_id", opts.ProjectID, "session_id", opts.SessionID, "query_len", len(query), "after", opts.After, "before", opts.Before)
 	start := time.Now()
 
 	originalMode := opts.Mode
@@ -53,16 +53,78 @@ func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallO
 		}
 	}
 
+	// Temporal extraction: parse temporal references from query text
+	// unless explicit After/Before flags are already set.
+	ftsQuery := query
+	var temporalAfter, temporalBefore *time.Time
+	if opts.After != "" {
+		if t, err := time.Parse(time.RFC3339, opts.After); err == nil {
+			temporalAfter = &t
+		}
+	}
+	if opts.Before != "" {
+		if t, err := time.Parse(time.RFC3339, opts.Before); err == nil {
+			temporalBefore = &t
+		}
+	}
+	if temporalAfter == nil && temporalBefore == nil {
+		ext := ExtractTemporal(query, time.Now().UTC())
+		if ext.Range != nil {
+			temporalAfter = &ext.Range.After
+			temporalBefore = &ext.Range.Before
+			ftsQuery = ext.StrippedQuery
+			slog.Debug("temporal extraction", "after", ext.Range.After, "before", ext.Range.Before, "stripped_query", ftsQuery)
+		}
+	}
+	// Backfill opts.After/Before from extraction so modes that read opts
+	// directly (timeline, active) also get temporal bounds.
+	if temporalAfter != nil && opts.After == "" {
+		opts.After = temporalAfter.Format(time.RFC3339)
+	}
+	if temporalBefore != nil && opts.Before == "" {
+		opts.Before = temporalBefore.Format(time.RFC3339)
+	}
+
 	// Build scoring context.
 	sctx := s.buildScoringContext(ctx, query, opts)
+	sctx.TemporalAfter = temporalAfter
+	sctx.TemporalBefore = temporalBefore
+	sctx.TemporalAttenuation = s.getTemporalAttenuation()
+	if ftsQuery != query {
+		sctx.Query = ftsQuery
+	}
+
+	// Use the stripped query for all FTS/dispatch calls so temporal phrases
+	// like "yesterday" don't pollute text search.
+	searchQuery := ftsQuery
+
+	// When temporal extraction consumed the entire query (e.g., "yesterday",
+	// "last week"), FTS-based modes would short-circuit on blank input. Route
+	// to timeline mode which lists events by date without needing a text query.
+	// Sessions mode already handles empty queries natively; timeline and active
+	// don't use FTS so they're fine too.
+	ftsDependentModes := map[core.RecallMode]bool{
+		core.RecallModeHybrid:         true,
+		core.RecallModeHistory:        true,
+		core.RecallModeFacts:          true,
+		core.RecallModeAmbient:        true,
+		core.RecallModeEpisodes:       true,
+		core.RecallModeProject:        true,
+		core.RecallModeEntity:         true,
+		core.RecallModeContradictions: true,
+	}
+	if strings.TrimSpace(searchQuery) == "" && (temporalAfter != nil || temporalBefore != nil) && ftsDependentModes[opts.Mode] {
+		slog.Debug("temporal-only query, routing to timeline", "original_mode", opts.Mode, "after", temporalAfter, "before", temporalBefore)
+		opts.Mode = core.RecallModeTimeline
+	}
 
 	// Auto-route hybrid queries to specialized modes when intent is clear.
 	// The specialized mode runs first; if results are sparse, hybrid backfills
 	// so that summaries, episodes, and events are never lost.
 	var routedMode core.RecallMode
 	if opts.Mode == core.RecallModeHybrid {
-		if routed, ok := classifyRecallIntent(query, sctx.QueryEntities); ok {
-			slog.Debug("intent routing", "from", opts.Mode, "to", routed, "query", query)
+		if routed, ok := classifyRecallIntent(searchQuery, sctx.QueryEntities); ok {
+			slog.Debug("intent routing", "from", opts.Mode, "to", routed, "query", searchQuery)
 			routedMode = routed
 		}
 	}
@@ -74,20 +136,20 @@ func (s *AMMService) Recall(ctx context.Context, query string, opts core.RecallO
 		// Try the specialized mode first.
 		routedOpts := opts
 		routedOpts.Mode = routedMode
-		items, err = s.dispatchRecall(ctx, query, routedOpts, sctx)
+		items, err = s.dispatchRecall(ctx, searchQuery, routedOpts, sctx)
 		if err != nil {
 			return nil, err
 		}
 		// Backfill with hybrid if the specialized mode returned sparse results.
 		if len(items) < opts.Limit {
-			hybridItems, hybridErr := s.recallHybrid(ctx, query, opts, sctx)
+			hybridItems, hybridErr := s.recallHybrid(ctx, searchQuery, opts, sctx)
 			if hybridErr == nil {
 				items = mergeRecallItems(items, hybridItems, opts.Limit)
 			}
 		}
 		opts.Mode = routedMode
 	} else {
-		items, err = s.dispatchRecall(ctx, query, opts, sctx)
+		items, err = s.dispatchRecall(ctx, searchQuery, opts, sctx)
 		if err != nil {
 			return nil, err
 		}
@@ -707,9 +769,27 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 
 // recallHistory searches events with full scoring.
 func (s *AMMService) recallHistory(ctx context.Context, query string, opts core.RecallOptions, sctx ScoringContext) ([]core.RecallItem, error) {
-	events, err := s.repo.SearchEvents(ctx, query, opts.Limit*2)
+	fetchMult := 2
+	if sctx.TemporalAfter != nil || sctx.TemporalBefore != nil {
+		fetchMult = 20 // over-fetch aggressively when temporal hard-filter will discard
+	}
+	events, err := s.repo.SearchEvents(ctx, query, opts.Limit*fetchMult)
 	if err != nil {
 		return nil, fmt.Errorf("search events: %w", err)
+	}
+	// Hard-filter by temporal bounds when set.
+	if sctx.TemporalAfter != nil || sctx.TemporalBefore != nil {
+		filtered := events[:0]
+		for _, evt := range events {
+			if sctx.TemporalAfter != nil && evt.OccurredAt.Before(*sctx.TemporalAfter) {
+				continue
+			}
+			if sctx.TemporalBefore != nil && evt.OccurredAt.After(*sctx.TemporalBefore) {
+				continue
+			}
+			filtered = append(filtered, evt)
+		}
+		events = filtered
 	}
 	var candidates []ScoringCandidate
 	for i, evt := range events {
@@ -723,10 +803,17 @@ func (s *AMMService) recallHistory(ctx context.Context, query string, opts core.
 // recallHybrid searches all types with full scoring.
 func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.RecallOptions, sctx ScoringContext) ([]core.RecallItem, error) {
 	perType := opts.Limit
+	// When temporal bounds are active, the scoreAndConvert hard-filter will
+	// discard out-of-window candidates. Over-fetch to ensure enough in-window
+	// candidates survive past the per-source FTS limit.
+	fetchMult := 2
+	if sctx.TemporalAfter != nil || sctx.TemporalBefore != nil {
+		fetchMult = 10
+	}
 	var candidates []ScoringCandidate
 	candidateIDs := make(map[string]bool)
 
-	memories, err := s.repo.SearchMemories(ctx, query, core.ListMemoriesOptions{AgentID: opts.AgentID, Limit: perType * 2})
+	memories, err := s.repo.SearchMemories(ctx, query, core.ListMemoriesOptions{AgentID: opts.AgentID, Limit: perType * fetchMult})
 	if err != nil {
 		return nil, fmt.Errorf("search memories: %w", err)
 	}
@@ -738,7 +825,7 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 		candidateIDs[m.ID] = true
 	}
 	if len(sctx.QueryEmbedding) > 0 {
-		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "memory", perType*2)
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "memory", perType*fetchMult)
 		for _, id := range embIDs {
 			if candidateIDs[id] {
 				continue
@@ -753,7 +840,7 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 		}
 	}
 
-	summaries, err := s.repo.SearchSummaries(ctx, query, perType)
+	summaries, err := s.repo.SearchSummaries(ctx, query, perType*fetchMult)
 	if err != nil {
 		return nil, fmt.Errorf("search summaries: %w", err)
 	}
@@ -762,7 +849,7 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 		candidateIDs[sm.ID] = true
 	}
 	if len(sctx.QueryEmbedding) > 0 {
-		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "summary", perType)
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "summary", perType*fetchMult)
 		for _, id := range embIDs {
 			if candidateIDs[id] {
 				continue
@@ -777,7 +864,7 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 		}
 	}
 
-	episodes, err := s.repo.SearchEpisodes(ctx, query, perType)
+	episodes, err := s.repo.SearchEpisodes(ctx, query, perType*fetchMult)
 	if err != nil {
 		return nil, fmt.Errorf("search episodes: %w", err)
 	}
@@ -786,7 +873,7 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 		candidateIDs[ep.ID] = true
 	}
 	if len(sctx.QueryEmbedding) > 0 {
-		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "episode", perType)
+		embIDs := s.searchByEmbedding(ctx, sctx.QueryEmbedding, "episode", perType*fetchMult)
 		for _, id := range embIDs {
 			if candidateIDs[id] {
 				continue
@@ -801,7 +888,7 @@ func (s *AMMService) recallHybrid(ctx context.Context, query string, opts core.R
 		}
 	}
 
-	events, err := s.repo.SearchEvents(ctx, query, perType)
+	events, err := s.repo.SearchEvents(ctx, query, perType*fetchMult)
 	if err != nil {
 		return nil, fmt.Errorf("search events: %w", err)
 	}
@@ -975,6 +1062,28 @@ func embeddingObjectKind(candidateKind string) string {
 // scoreAndConvert scores candidates, deduplicates near-identical items, and
 // converts to RecallItems sorted by score.
 func scoreAndConvert(candidates []ScoringCandidate, sctx ScoringContext, opts recallFilterOptions, explain bool) []core.RecallItem {
+	// Hard-filter candidates outside the temporal window before scoring.
+	// Uses occurrenceTimestamp (ObservedAt/CreatedAt) not UpdatedAt, so
+	// reprocessed or updated items are filtered by when they originally happened.
+	if sctx.TemporalAfter != nil || sctx.TemporalBefore != nil {
+		filtered := candidates[:0]
+		for _, c := range candidates {
+			ts := occurrenceTimestamp(c)
+			if ts.IsZero() {
+				filtered = append(filtered, c) // no timestamp — keep
+				continue
+			}
+			if sctx.TemporalAfter != nil && ts.Before(*sctx.TemporalAfter) {
+				continue
+			}
+			if sctx.TemporalBefore != nil && ts.After(*sctx.TemporalBefore) {
+				continue
+			}
+			filtered = append(filtered, c)
+		}
+		candidates = filtered
+	}
+
 	type scored struct {
 		candidate ScoringCandidate
 		breakdown SignalBreakdown
@@ -1105,9 +1214,75 @@ func (s *AMMService) dispatchRecall(ctx context.Context, query string, opts core
 		return s.recallTimeline(ctx, query, opts)
 	case core.RecallModeActive:
 		return s.recallActive(ctx, query, opts)
+	case core.RecallModeSessions:
+		return s.recallSessions(ctx, query, opts, sctx)
 	default:
 		return nil, fmt.Errorf("%w: %q", core.ErrInvalidMode, opts.Mode)
 	}
+}
+
+// recallSessions lists and searches session summaries with optional date filtering.
+// When a query is provided, FTS search is used. When only date range is set,
+// summaries are listed chronologically. Results are always reverse-chronological.
+func (s *AMMService) recallSessions(ctx context.Context, query string, opts core.RecallOptions, sctx ScoringContext) ([]core.RecallItem, error) {
+	slog.Debug("recallSessions", "query", query, "after", opts.After, "before", opts.Before, "project_id", opts.ProjectID)
+
+	listOpts := core.ListSummariesOptions{
+		Kind:      "session",
+		ProjectID: opts.ProjectID,
+		SessionID: opts.SessionID,
+		Limit:     opts.Limit * 3, // over-fetch for scoring
+	}
+
+	// Apply temporal bounds from explicit flags or extraction.
+	if sctx.TemporalAfter != nil {
+		listOpts.After = sctx.TemporalAfter.Format(time.RFC3339)
+	}
+	if sctx.TemporalBefore != nil {
+		listOpts.Before = sctx.TemporalBefore.Format(time.RFC3339)
+	}
+
+	var summaries []core.Summary
+	var err error
+
+	strippedQuery := strings.TrimSpace(sctx.Query)
+	if strippedQuery != "" {
+		// Scoped FTS search: kind, project, session, and date filters are
+		// applied in SQL before the LIMIT, so valid sessions cannot be
+		// crowded out by non-session or out-of-scope summaries.
+		summaries, err = s.repo.SearchScopedSummaries(ctx, strippedQuery, listOpts)
+		if err != nil {
+			return nil, fmt.Errorf("search session summaries: %w", err)
+		}
+	} else {
+		// No query text — list session summaries in date range.
+		summaries, err = s.repo.ListSummaries(ctx, listOpts)
+		if err != nil {
+			return nil, fmt.Errorf("list session summaries: %w", err)
+		}
+	}
+
+	// Convert to RecallItems with position-based scoring (reverse-chronological).
+	items := make([]core.RecallItem, 0, len(summaries))
+	for i, sm := range summaries {
+		item := core.RecallItem{
+			ID:               sm.ID,
+			Kind:             "summary",
+			Type:             sm.Kind,
+			Scope:            sm.Scope,
+			Score:            positionScore(i),
+			TightDescription: sm.TightDescription,
+		}
+		if sm.Title != "" {
+			item.TightDescription = sm.Title + " — " + sm.TightDescription
+		}
+		items = append(items, item)
+	}
+
+	if len(items) > opts.Limit {
+		items = items[:opts.Limit]
+	}
+	return items, nil
 }
 
 // mergeRecallItems merges routed results with hybrid backfill, deduplicating
@@ -1283,6 +1458,8 @@ func (s *AMMService) recallTimeline(ctx context.Context, query string, opts core
 	events, err := s.repo.ListEvents(ctx, core.ListEventsOptions{
 		SessionID: opts.SessionID,
 		ProjectID: opts.ProjectID,
+		After:     opts.After,
+		Before:    opts.Before,
 		Limit:     opts.Limit,
 	})
 	if err != nil {
@@ -1293,16 +1470,43 @@ func (s *AMMService) recallTimeline(ctx context.Context, query string, opts core
 	return items, nil
 }
 
-// recallActive returns active-context memories.
+// recallActive returns active-context memories, filtered by after/before when set.
 func (s *AMMService) recallActive(ctx context.Context, query string, opts core.RecallOptions) ([]core.RecallItem, error) {
+	fetchLimit := opts.Limit
+	if opts.After != "" || opts.Before != "" {
+		fetchLimit = opts.Limit * 50 // over-fetch aggressively for temporal post-filter
+	}
 	memories, err := s.repo.ListMemories(ctx, core.ListMemoriesOptions{
 		Type:    core.MemoryTypeActiveContext,
 		AgentID: opts.AgentID,
 		Status:  core.MemoryStatusActive,
-		Limit:   opts.Limit,
+		Limit:   fetchLimit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list active memories: %w", err)
+	}
+	// Hard-filter by temporal bounds when set.
+	if opts.After != "" || opts.Before != "" {
+		afterT, _ := time.Parse(time.RFC3339, opts.After)
+		beforeT, _ := time.Parse(time.RFC3339, opts.Before)
+		filtered := memories[:0]
+		for _, m := range memories {
+			ts := m.CreatedAt
+			if m.ObservedAt != nil {
+				ts = *m.ObservedAt
+			}
+			if !afterT.IsZero() && ts.Before(afterT) {
+				continue
+			}
+			if !beforeT.IsZero() && ts.After(beforeT) {
+				continue
+			}
+			filtered = append(filtered, m)
+		}
+		memories = filtered
+	}
+	if len(memories) > opts.Limit {
+		memories = memories[:opts.Limit]
 	}
 	items := memoriesToRecallItems(memories)
 	rankByPosition(items)
