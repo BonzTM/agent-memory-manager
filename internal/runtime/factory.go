@@ -156,6 +156,7 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	svc.SetCompressChunkSize(cfg.Summarizer.CompressChunkSize)
 	svc.SetCompressMaxEvents(cfg.Summarizer.CompressMaxEvents)
 	svc.SetCompressBatchSize(cfg.Summarizer.CompressBatchSize)
+	svc.SetCompressMinEvents(cfg.Summarizer.CompressMinEvents)
 	svc.SetTopicBatchSize(cfg.Summarizer.TopicBatchSize)
 	svc.SetEmbeddingBatchSize(cfg.Summarizer.EmbeddingBatchSize)
 	svc.SetCrossProjectSimilarityThreshold(cfg.Summarizer.CrossProjectSimilarityThreshold)

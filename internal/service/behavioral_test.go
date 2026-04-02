@@ -34,6 +34,7 @@ func testServiceAndRepo(t *testing.T) (*AMMService, *sqlite.SQLiteRepository) {
 	svc := New(repo, dbPath, nil, nil)
 	svc.SetMinConfidenceForCreation(0) // Tests use heuristic extraction (confidence 0.45)
 	svc.SetSessionIdleTimeout(0)       // 0 = process immediately in tests
+	svc.SetCompressMinEvents(1)        // no minimum gate in tests
 	t.Cleanup(func() { db.Close() })
 	return svc, repo
 }
@@ -54,6 +55,7 @@ func testServiceAndRepoWithSummarizer(t *testing.T, summarizer core.Summarizer) 
 	svc := New(repo, dbPath, summarizer, nil)
 	svc.SetMinConfidenceForCreation(0) // Tests use heuristic extraction (confidence 0.45)
 	svc.SetSessionIdleTimeout(0)       // 0 = process immediately in tests
+	svc.SetCompressMinEvents(1)        // no minimum gate in tests
 	t.Cleanup(func() { db.Close() })
 	return svc, repo
 }
@@ -72,6 +74,7 @@ func testServiceAndRepoWithEmbeddingProvider(t *testing.T, provider core.Embeddi
 	}
 	repo := &sqlite.SQLiteRepository{DB: db}
 	svc := New(repo, dbPath, nil, provider)
+	svc.SetCompressMinEvents(1) // no minimum gate in tests
 	t.Cleanup(func() { db.Close() })
 	return svc, repo
 }
@@ -1466,6 +1469,58 @@ func TestCompressHistory_FallsBackWhenBatchCompressionFails(t *testing.T) {
 	}
 	if summaries[0].Body != "fallback leaf body" || summaries[0].TightDescription != "fallback leaf tight" {
 		t.Fatalf("expected fallback summary values, got body=%q tight=%q", summaries[0].Body, summaries[0].TightDescription)
+	}
+}
+
+func TestCompressHistory_SkipsBelowMinEvents(t *testing.T) {
+	svc, _ := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	// Override: require at least 20 events before compressing.
+	svc.SetCompressMinEvents(20)
+
+	// Ingest only 10 events — below the threshold.
+	for i := 0; i < 10; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("below-threshold event %d", i),
+			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err := svc.CompressHistory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 0 {
+		t.Fatalf("expected 0 summaries below min-events threshold, got %d", created)
+	}
+
+	// Ingest 10 more to reach the threshold.
+	for i := 10; i < 20; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("above-threshold event %d", i),
+			OccurredAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	created, err = svc.CompressHistory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created < 1 {
+		t.Fatalf("expected at least 1 summary at/above threshold, got %d", created)
 	}
 }
 

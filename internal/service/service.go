@@ -37,7 +37,7 @@ type AMMService struct {
 	maxExpandDepth                  int
 	sessionIdleTimeout              time.Duration
 	summarizerContextWindow         int
-	compressCooldown                time.Duration
+	compressMinEvents               int
 	temporalAttenuation             float64
 	scoringWeights                  ScoringWeights
 	scoringWeightsMu                sync.RWMutex
@@ -132,6 +132,10 @@ func (s *AMMService) SetCompressBatchSize(batchSize int) {
 		return
 	}
 	s.compressBatchSize = batchSize
+}
+
+func (s *AMMService) SetCompressMinEvents(n int) {
+	s.compressMinEvents = n // 0 → chunkSize * 5 at runtime
 }
 
 func (s *AMMService) SetTopicBatchSize(batchSize int) {

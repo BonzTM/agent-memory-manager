@@ -80,7 +80,7 @@ const (
 	defaultEscalationDeterministicMaxChars = 2048
 	defaultSessionIdleTimeout              = 15 * time.Minute
 	defaultSummarizerContextWindow         = 128000 // tokens
-	defaultCompressCooldown                = 24 * time.Hour
+	defaultCompressMinEvents               = 0 // 0 → chunkSize * 5
 )
 
 type compressEventChunkPlan struct {
@@ -112,18 +112,6 @@ type sessionDerivedArtifacts struct {
 func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 	slog.Debug("CompressHistory called")
 
-	// Cooldown: skip if ran within the configured period (default 24h).
-	cooldown := s.compressCooldown
-	if cooldown <= 0 {
-		cooldown = defaultCompressCooldown
-	}
-	if lastRun := s.lastCompletedJobTime(ctx, "compress"); !lastRun.IsZero() {
-		if time.Since(lastRun) < cooldown {
-			slog.Debug("CompressHistory skipped (cooldown)", "last_run", lastRun, "cooldown", cooldown)
-			return 0, nil
-		}
-	}
-
 	frontier := s.jobFrontierSequenceID(ctx, "compress")
 
 	maxEvents := s.compressMaxEvents
@@ -142,6 +130,19 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 	}
 
 	if len(events) == 0 {
+		return 0, nil
+	}
+
+	// Minimum-event gate: skip if too few events to form a meaningful batch.
+	minEvents := s.compressMinEvents
+	if minEvents <= 0 {
+		minEvents = s.compressChunkSize * 5
+		if minEvents <= 0 {
+			minEvents = defaultCompressChunkSize * 5
+		}
+	}
+	if len(events) < minEvents {
+		slog.Debug("CompressHistory skipped (below minimum)", "events", len(events), "min_events", minEvents)
 		return 0, nil
 	}
 

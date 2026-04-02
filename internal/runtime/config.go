@@ -96,6 +96,7 @@ type SummarizerConfig struct {
 	LifecycleReviewBatchSize        int     `json:"lifecycle_review_batch_size"`
 	CompressChunkSize               int     `json:"compress_chunk_size"`
 	CompressMaxEvents               int     `json:"compress_max_events"`
+	CompressMinEvents               int     `json:"compress_min_events"`
 	CompressBatchSize               int     `json:"compress_batch_size"`
 	TopicBatchSize                  int     `json:"topic_batch_size"`
 	EmbeddingBatchSize              int     `json:"embedding_batch_size"`
@@ -380,6 +381,10 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			if n, err := strconv.Atoi(val); err == nil && n > 0 {
 				cfg.Summarizer.CompressMaxEvents = n
 			}
+		case "summarizer.compress_min_events":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.Summarizer.CompressMinEvents = n
+			}
 		case "summarizer.compress_batch_size":
 			if n, err := strconv.Atoi(val); err == nil && n > 0 {
 				cfg.Summarizer.CompressBatchSize = n
@@ -505,6 +510,7 @@ func LoadConfigWithEnv() Config {
 //	AMM_REPROCESS_BATCH_SIZE -> Summarizer.ReprocessBatchSize
 //	AMM_COMPRESS_CHUNK_SIZE -> Summarizer.CompressChunkSize
 //	AMM_COMPRESS_MAX_EVENTS -> Summarizer.CompressMaxEvents
+//	AMM_COMPRESS_MIN_EVENTS -> Summarizer.CompressMinEvents
 //	AMM_COMPRESS_BATCH_SIZE -> Summarizer.CompressBatchSize
 //	AMM_TOPIC_BATCH_SIZE -> Summarizer.TopicBatchSize
 //	AMM_SESSION_IDLE_TIMEOUT_MINUTES -> Summarizer.SessionIdleTimeoutMinutes
@@ -647,6 +653,11 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_COMPRESS_MAX_EVENTS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			base.Summarizer.CompressMaxEvents = n
+		}
+	}
+	if v := os.Getenv("AMM_COMPRESS_MIN_EVENTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Summarizer.CompressMinEvents = n
 		}
 	}
 	if v := os.Getenv("AMM_COMPRESS_BATCH_SIZE"); v != "" {
