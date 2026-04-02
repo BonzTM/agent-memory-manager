@@ -406,7 +406,7 @@ func (r *Repository) ClaimUnreflectedEvents(ctx context.Context, limit int) ([]c
 		RETURNING e.sequence_id, e.id, e.kind, e.source_system,
 			COALESCE(e.surface,''), COALESCE(e.session_id,''), COALESCE(e.project_id,''),
 			COALESCE(e.agent_id,''), COALESCE(e.actor_type,''), COALESCE(e.actor_id,''),
-			e.privacy_level, e.content, e.metadata_json, COALESCE(e.hash,''), e.occurred_at, e.ingested_at`, defaultLimit(limit))
+			e.privacy_level, e.content, e.metadata_json, COALESCE(e.hash,''), e.occurred_at, e.ingested_at, e.reflected_at`, defaultLimit(limit))
 	if err != nil {
 		return nil, wrapErr("claim unreflected events", err)
 	}
@@ -415,12 +415,15 @@ func (r *Repository) ClaimUnreflectedEvents(ctx context.Context, limit int) ([]c
 	for rows.Next() {
 		var e core.Event
 		var metadata []byte
+		var reflectedAt time.Time
 		if err := rows.Scan(&e.SequenceID, &e.ID, &e.Kind, &e.SourceSystem,
 			&e.Surface, &e.SessionID, &e.ProjectID, &e.AgentID, &e.ActorType, &e.ActorID,
-			&e.PrivacyLevel, &e.Content, &metadata, &e.Hash, &e.OccurredAt, &e.IngestedAt); err != nil {
+			&e.PrivacyLevel, &e.Content, &metadata, &e.Hash, &e.OccurredAt, &e.IngestedAt, &reflectedAt); err != nil {
 			return nil, wrapErr("claim unreflected events", err)
 		}
 		e.Metadata = parseMapJSON(metadata)
+		t := reflectedAt.UTC()
+		e.ReflectedAt = &t
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -2681,6 +2684,20 @@ func (r *Repository) ResetDerived(ctx context.Context) (*core.ResetDerivedResult
 	}
 	out.MemoriesDeleted, _ = memRes.RowsAffected()
 	out.MemoriesDeleted = normalizeRowsAffected(out.MemoriesDeleted)
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE memories
+		SET metadata_json = COALESCE(metadata_json, '{}'::jsonb)
+			- 'entities_extracted'
+			- 'entities_extracted_method'
+			- 'claims_extracted'
+			- 'embedded_at'
+			- 'embedded_model'
+			- 'lifecycle_reviewed_at'
+			- 'lifecycle_reviewed_model'
+			- 'narrative_included'
+		WHERE COALESCE(metadata_json->>'source_system', '') = 'remember'`); err != nil {
+		return nil, wrapErr("reset derived", err)
+	}
 	if out.EntitiesDeleted, err = execDeleteCount(ctx, tx, "entities"); err != nil {
 		return nil, wrapErr("reset derived", err)
 	}

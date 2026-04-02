@@ -1125,3 +1125,67 @@ func TestResetDerivedPreservesEvents(t *testing.T) {
 		t.Fatal("expected memory deleted by reset-derived")
 	}
 }
+
+func TestResetDerived_ClearsStaleMetadataOnPreservedRememberMemories(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	mem := &core.Memory{
+		ID:               "mem_reset_preserve",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "keep this remembered memory",
+		TightDescription: "remembered memory",
+		Confidence:       0.9,
+		Importance:       0.7,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		Metadata: map[string]string{
+			"source_system":             "remember",
+			"extraction_quality":        "verified",
+			"entities_extracted":        "true",
+			"entities_extracted_method": "llm",
+			"claims_extracted":          "true",
+			"embedded_at":               now.Format(time.RFC3339),
+			"embedded_model":            "test-embed",
+			"lifecycle_reviewed_at":     now.Format(time.RFC3339),
+			"lifecycle_reviewed_model":  "test-review",
+			"narrative_included":        "true",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := repo.InsertMemory(ctx, mem); err != nil {
+		t.Fatalf("insert preserved memory: %v", err)
+	}
+
+	if _, err := repo.ResetDerived(ctx); err != nil {
+		t.Fatalf("reset derived: %v", err)
+	}
+
+	updated, err := repo.GetMemory(ctx, mem.ID)
+	if err != nil {
+		t.Fatalf("get preserved memory after reset-derived: %v", err)
+	}
+	if updated.Metadata["source_system"] != "remember" {
+		t.Fatalf("expected source_system to remain remember, got %q", updated.Metadata["source_system"])
+	}
+	if updated.Metadata["extraction_quality"] != "verified" {
+		t.Fatalf("expected extraction_quality to remain verified, got %q", updated.Metadata["extraction_quality"])
+	}
+	for _, key := range []string{
+		"entities_extracted",
+		"entities_extracted_method",
+		"claims_extracted",
+		"embedded_at",
+		"embedded_model",
+		"lifecycle_reviewed_at",
+		"lifecycle_reviewed_model",
+		"narrative_included",
+	} {
+		if got := updated.Metadata[key]; got != "" {
+			t.Fatalf("expected metadata key %s to be cleared, got %q", key, got)
+		}
+	}
+}

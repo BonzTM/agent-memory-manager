@@ -85,6 +85,9 @@ func TestEventUpdateClaimAndListFilters(t *testing.T) {
 	if len(claimed) != 1 || claimed[0].ID != events[1].ID {
 		t.Fatalf("unexpected claimed events: %+v", claimed)
 	}
+	if claimed[0].ReflectedAt == nil {
+		t.Fatal("expected claimed event payload to include reflected_at")
+	}
 
 	count, err = repo.CountUnreflectedEvents(ctx)
 	if err != nil {

@@ -442,7 +442,7 @@ func (r *SQLiteRepository) ClaimUnreflectedEvents(ctx context.Context, limit int
 		RETURNING COALESCE(sequence_id, rowid), id, kind, source_system, COALESCE(surface,''), COALESCE(session_id,''),
 			COALESCE(project_id,''), COALESCE(agent_id,''), COALESCE(actor_type,''),
 			COALESCE(actor_id,''), privacy_level, content, metadata_json,
-			COALESCE(hash,''), occurred_at, ingested_at`, now, limit)
+			COALESCE(hash,''), occurred_at, ingested_at, COALESCE(reflected_at,'')`, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("claim unreflected events: %w", err)
 	}
@@ -451,15 +451,19 @@ func (r *SQLiteRepository) ClaimUnreflectedEvents(ctx context.Context, limit int
 	var events []core.Event
 	for rows.Next() {
 		var e core.Event
-		var metaJSON, occurredAt, ingestedAt string
+		var metaJSON, occurredAt, ingestedAt, reflectedAt string
 		if err := rows.Scan(&e.SequenceID, &e.ID, &e.Kind, &e.SourceSystem, &e.Surface, &e.SessionID,
 			&e.ProjectID, &e.AgentID, &e.ActorType, &e.ActorID, &e.PrivacyLevel,
-			&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt); err != nil {
+			&e.Content, &metaJSON, &e.Hash, &occurredAt, &ingestedAt, &reflectedAt); err != nil {
 			return nil, err
 		}
 		e.Metadata = unmarshalMap(metaJSON)
 		e.OccurredAt = strToTime(occurredAt)
 		e.IngestedAt = strToTime(ingestedAt)
+		if reflectedAt != "" {
+			t := strToTime(reflectedAt)
+			e.ReflectedAt = &t
+		}
 		events = append(events, e)
 	}
 	return events, rows.Err()
@@ -2991,6 +2995,22 @@ func (r *SQLiteRepository) ResetDerived(ctx context.Context) (*core.ResetDerived
 		return nil, fmt.Errorf("delete memories: %w", err)
 	}
 	result.MemoriesDeleted, _ = memDelResult.RowsAffected()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE memories
+		SET metadata_json = json_remove(
+			COALESCE(NULLIF(metadata_json, ''), '{}'),
+			'$.entities_extracted',
+			'$.entities_extracted_method',
+			'$.claims_extracted',
+			'$.embedded_at',
+			'$.embedded_model',
+			'$.lifecycle_reviewed_at',
+			'$.lifecycle_reviewed_model',
+			'$.narrative_included'
+		)
+		WHERE COALESCE(json_extract(metadata_json, '$.source_system'), '') = 'remember'`); err != nil {
+		return nil, fmt.Errorf("clear stale metadata on preserved memories: %w", err)
+	}
 	if result.EntitiesDeleted, err = execDeleteCount(ctx, tx, "entities"); err != nil {
 		return nil, fmt.Errorf("delete entities: %w", err)
 	}
