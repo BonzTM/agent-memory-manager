@@ -38,6 +38,7 @@ type AMMService struct {
 	sessionIdleTimeout              time.Duration
 	summarizerContextWindow         int
 	compressCooldown                time.Duration
+	temporalAttenuation             float64
 	scoringWeights                  ScoringWeights
 	scoringWeightsMu                sync.RWMutex
 }
@@ -70,6 +71,7 @@ func New(repo core.Repository, dbPath string, summarizer core.Summarizer, embedd
 		maxExpandDepth:                  1,
 		sessionIdleTimeout:              defaultSessionIdleTimeout,
 		summarizerContextWindow:         defaultSummarizerContextWindow,
+		temporalAttenuation:             -1, // unset; SetTemporalAttenuation or factory wires the real value
 		scoringWeights:                  DefaultScoringWeights(),
 	}
 	if repo != nil && dbPath != "" {
@@ -197,6 +199,25 @@ func (s *AMMService) SetMaxExpandDepth(depth int) {
 		return
 	}
 	s.maxExpandDepth = depth
+}
+
+// SetTemporalAttenuation configures the score multiplier for items outside
+// the active temporal window during recall. Must be 0.0-1.0.
+func (s *AMMService) SetTemporalAttenuation(v float64) {
+	if v < 0 || v > 1 {
+		s.temporalAttenuation = defaultTemporalAttenuation
+		return
+	}
+	s.temporalAttenuation = v
+}
+
+func (s *AMMService) getTemporalAttenuation() float64 {
+	// temporalAttenuation < 0 means unset (use default). 0.0 is a valid
+	// value meaning "fully suppress out-of-window items in scoring."
+	if s.temporalAttenuation < 0 {
+		return defaultTemporalAttenuation
+	}
+	return s.temporalAttenuation
 }
 
 // SetSessionIdleTimeout configures how long a session must be idle before
