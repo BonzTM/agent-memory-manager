@@ -698,7 +698,18 @@ func TestRecallHistory_StillReturnsToolResult(t *testing.T) {
 	svc := testService(t)
 	ctx := context.Background()
 
-	_, err := svc.IngestEvent(ctx, &core.Event{
+	_, err := svc.AddPolicy(ctx, &core.IngestionPolicy{
+		PatternType: "source",
+		Pattern:     "test",
+		Mode:        "full",
+		Priority:    200,
+		MatchMode:   "exact",
+	})
+	if err != nil {
+		t.Fatalf("AddPolicy override: %v", err)
+	}
+
+	_, err = svc.IngestEvent(ctx, &core.Event{
 		Kind:         "tool_result",
 		SourceSystem: "test",
 		PrivacyLevel: core.PrivacyPrivate,
@@ -1131,8 +1142,8 @@ func TestListPolicies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPolicies: %v", err)
 	}
-	if len(policies) != 2 {
-		t.Fatalf("expected 2 policies, got %d", len(policies))
+	if len(policies) != 3 {
+		t.Fatalf("expected seeded default plus 2 added policies, got %d", len(policies))
 	}
 }
 
@@ -1153,8 +1164,8 @@ func TestRemovePolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPolicies: %v", err)
 	}
-	if len(policies) != 0 {
-		t.Fatalf("expected 0 policies after remove, got %d", len(policies))
+	if len(policies) != 1 {
+		t.Fatalf("expected seeded default policy to remain after remove, got %d", len(policies))
 	}
 
 	if err := svc.RemovePolicy(ctx, "pol_missing"); err == nil {

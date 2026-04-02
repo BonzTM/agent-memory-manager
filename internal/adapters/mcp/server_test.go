@@ -131,8 +131,18 @@ func TestHandleToolCallPolicyLifecycle(t *testing.T) {
 	if err := json.Unmarshal([]byte(listText), &policies); err != nil {
 		t.Fatalf("decode list result: %v", err)
 	}
-	if len(policies) != 1 {
-		t.Fatalf("expected 1 policy in list result, got %d", len(policies))
+	if len(policies) != 2 {
+		t.Fatalf("expected seeded default plus created policy in list result, got %d", len(policies))
+	}
+	foundCreated := false
+	for _, policy := range policies {
+		if policy["id"] == id {
+			foundCreated = true
+			break
+		}
+	}
+	if !foundCreated {
+		t.Fatalf("expected created policy %s in list result, got %#v", id, policies)
 	}
 
 	removeResp := handleToolCall(svc, toolReq(t, "amm_policy_remove", map[string]interface{}{"id": id}))

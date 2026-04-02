@@ -25,6 +25,40 @@ func testRepo(t *testing.T) *SQLiteRepository {
 	return &SQLiteRepository{DB: db}
 }
 
+func migrateThroughVersion(t *testing.T, db *DB, targetVersion int) {
+	t.Helper()
+
+	ctx := context.Background()
+	conn := db.Conn()
+	if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_version (
+		version INTEGER NOT NULL,
+		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`); err != nil {
+		t.Fatalf("create schema_version table: %v", err)
+	}
+
+	for _, m := range migrations {
+		if m.Version > targetVersion {
+			break
+		}
+		tx, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin migration %d: %v", m.Version, err)
+		}
+		if err := execMigration(ctx, tx, m); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("exec migration %d: %v", m.Version, err)
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO schema_version (version) VALUES (?)", m.Version); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("record migration %d: %v", m.Version, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit migration %d: %v", m.Version, err)
+		}
+	}
+}
+
 func TestMigrateIdempotent(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
@@ -78,6 +112,67 @@ func TestMigrateCreatesProjectsAndRelationshipsTables(t *testing.T) {
 	}
 	if version < 5 {
 		t.Fatalf("expected schema version >= 5, got %d", version)
+	}
+}
+
+func TestMigrateSeedsDefaultToolIgnorePolicy(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+
+	policies, err := repo.ListIngestionPolicies(ctx)
+	if err != nil {
+		t.Fatalf("ListIngestionPolicies: %v", err)
+	}
+	if len(policies) != 1 {
+		t.Fatalf("expected exactly one seeded policy on fresh migrate, got %d", len(policies))
+	}
+	policy := policies[0]
+	if policy.ID != "pol_default_tool_events_ignore" || policy.PatternType != "kind" || policy.Pattern != "tool_*" || policy.Mode != "ignore" || policy.MatchMode != "glob" || policy.Priority != 100 {
+		t.Fatalf("unexpected seeded policy: %+v", policy)
+	}
+}
+
+func TestMigrateDoesNotSeedDefaultToolIgnorePolicyWhenPoliciesExist(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "upgrade.db")
+	ctx := context.Background()
+
+	db, err := Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	migrateThroughVersion(t, db, 9)
+	repo := &SQLiteRepository{DB: db}
+	now := time.Now().UTC().Truncate(time.Second)
+	custom := &core.IngestionPolicy{
+		ID:          "pol_custom_existing",
+		PatternType: "source",
+		Pattern:     "ci-bot",
+		Mode:        "ignore",
+		Priority:    5,
+		MatchMode:   "glob",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := repo.InsertIngestionPolicy(ctx, custom); err != nil {
+		t.Fatalf("InsertIngestionPolicy: %v", err)
+	}
+
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate upgrade: %v", err)
+	}
+
+	policies, err := repo.ListIngestionPolicies(ctx)
+	if err != nil {
+		t.Fatalf("ListIngestionPolicies: %v", err)
+	}
+	if len(policies) != 1 {
+		t.Fatalf("expected existing custom policy set to remain untouched, got %d policies", len(policies))
+	}
+	if policies[0].ID != custom.ID {
+		t.Fatalf("expected custom policy to remain the only policy, got %+v", policies[0])
 	}
 }
 
@@ -858,15 +953,15 @@ func TestListIngestionPolicies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list ingestion policies: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 policies, got %d", len(got))
+	if len(got) != 3 {
+		t.Fatalf("expected 3 policies including the seeded default, got %d", len(got))
 	}
 
 	idSet := map[string]bool{}
 	for _, p := range got {
 		idSet[p.ID] = true
 	}
-	if !idSet["pol_list1"] || !idSet["pol_list2"] {
+	if !idSet["pol_default_tool_events_ignore"] || !idSet["pol_list1"] || !idSet["pol_list2"] {
 		t.Fatalf("expected both policies returned, got ids=%v", idSet)
 	}
 }

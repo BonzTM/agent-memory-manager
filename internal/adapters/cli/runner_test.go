@@ -145,8 +145,8 @@ func TestPolicyCommands(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected list result array, got %#v", env["result"])
 	}
-	if len(list) != 2 {
-		t.Fatalf("expected 2 policies, got %d", len(list))
+	if len(list) != 3 {
+		t.Fatalf("expected seeded default plus 2 created policies, got %d", len(list))
 	}
 
 	_, stderr, err = captureRun(t, []string{"policy", "remove", firstID})
@@ -165,8 +165,8 @@ func TestPolicyCommands(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected list result array after remove, got %#v", env["result"])
 	}
-	if len(list) != 1 {
-		t.Fatalf("expected 1 policy after remove, got %d", len(list))
+	if len(list) != 2 {
+		t.Fatalf("expected seeded default plus remaining policy after remove, got %d", len(list))
 	}
 }
 

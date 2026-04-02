@@ -565,6 +565,36 @@ ALTER TABLE summaries ADD COLUMN depth INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE summaries ADD COLUMN condensed_kind TEXT NOT NULL DEFAULT '';
 `,
 	},
+	{
+		Version:     10,
+		Description: "seed default tool event ignore ingestion policy for fresh installs",
+		SQL: `
+INSERT INTO ingestion_policies (
+	id,
+	pattern_type,
+	pattern,
+	mode,
+	priority,
+	match_mode,
+	metadata_json,
+	created_at,
+	updated_at
+)
+SELECT
+	'pol_default_tool_events_ignore',
+	'kind',
+	'tool_*',
+	'ignore',
+	100,
+	'glob',
+	'{}',
+	datetime('now'),
+	datetime('now')
+WHERE NOT EXISTS (
+	SELECT 1 FROM ingestion_policies LIMIT 1
+);
+`,
+	},
 }
 
 // Migrate runs all pending migrations.

@@ -45,6 +45,40 @@ func testRepo(t *testing.T) (*Repository, func()) {
 	return repo, cleanup
 }
 
+func migrateThroughVersion(t *testing.T, repo *Repository, targetVersion int) {
+	t.Helper()
+
+	ctx := context.Background()
+	if _, err := repo.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS schema_version (
+			version INTEGER PRIMARY KEY,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`); err != nil {
+		t.Fatalf("create schema_version table: %v", err)
+	}
+
+	for _, m := range migrations {
+		if m.Version > targetVersion {
+			break
+		}
+		tx, err := repo.db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin migration %d: %v", m.Version, err)
+		}
+		if _, err := tx.ExecContext(ctx, m.SQL); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("exec migration %d: %v", m.Version, err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_version (version) VALUES ($1)`, m.Version); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("record migration %d: %v", m.Version, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit migration %d: %v", m.Version, err)
+		}
+	}
+}
+
 type stubScanner struct {
 	values []any
 }
@@ -147,6 +181,62 @@ func TestMigrateCreatesTables(t *testing.T) {
 	}
 }
 
+func TestMigrateSeedsDefaultToolIgnorePolicy(t *testing.T) {
+	repo, _ := testRepo(t)
+	ctx := context.Background()
+
+	policies, err := repo.ListIngestionPolicies(ctx)
+	if err != nil {
+		t.Fatalf("ListIngestionPolicies: %v", err)
+	}
+	if len(policies) != 1 {
+		t.Fatalf("expected exactly one seeded policy on fresh migrate, got %d", len(policies))
+	}
+	policy := policies[0]
+	if policy.ID != "pol_default_tool_events_ignore" || policy.PatternType != "kind" || policy.Pattern != "tool_*" || policy.Mode != "ignore" || policy.MatchMode != "glob" || policy.Priority != 100 {
+		t.Fatalf("unexpected seeded policy: %+v", policy)
+	}
+}
+
+func TestMigrateDoesNotSeedDefaultToolIgnorePolicyWhenPoliciesExist(t *testing.T) {
+	repo, _ := testRepo(t)
+	ctx := context.Background()
+	if err := resetPublicSchema(ctx, repo); err != nil {
+		t.Fatalf("reset schema: %v", err)
+	}
+	migrateThroughVersion(t, repo, 3)
+
+	now := nowUTC()
+	custom := &core.IngestionPolicy{
+		ID:          "pol_custom_existing",
+		PatternType: "source",
+		Pattern:     "ci-bot",
+		Mode:        "ignore",
+		Priority:    5,
+		MatchMode:   "glob",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := repo.InsertIngestionPolicy(ctx, custom); err != nil {
+		t.Fatalf("InsertIngestionPolicy: %v", err)
+	}
+
+	if err := repo.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate upgrade: %v", err)
+	}
+
+	policies, err := repo.ListIngestionPolicies(ctx)
+	if err != nil {
+		t.Fatalf("ListIngestionPolicies: %v", err)
+	}
+	if len(policies) != 1 {
+		t.Fatalf("expected existing custom policy set to remain untouched, got %d policies", len(policies))
+	}
+	if policies[0].ID != custom.ID {
+		t.Fatalf("expected custom policy to remain the only policy, got %+v", policies[0])
+	}
+}
+
 func TestRepositoryEvents(t *testing.T) {
 	repo, _ := testRepo(t)
 	ctx := context.Background()
@@ -212,6 +302,9 @@ func TestRepositoryEvents(t *testing.T) {
 	}
 	if len(claimed) != 1 {
 		t.Fatalf("expected 1 claimed event, got %d", len(claimed))
+	}
+	if claimed[0].ReflectedAt == nil {
+		t.Fatal("expected claimed event payload to include reflected_at")
 	}
 
 	postClaimCount, err := repo.CountUnreflectedEvents(ctx)
@@ -973,8 +1066,15 @@ func TestRepositoryPoliciesAndJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListIngestionPolicies: %v", err)
 	}
-	if len(pl) != 2 {
-		t.Fatalf("expected 2 policies, got %d", len(pl))
+	if len(pl) != 3 {
+		t.Fatalf("expected 3 policies including the seeded default, got %d", len(pl))
+	}
+	idSet := map[string]bool{}
+	for _, policy := range pl {
+		idSet[policy.ID] = true
+	}
+	if !idSet["pol_default_tool_events_ignore"] || !idSet["pol_1"] || !idSet["pol_2"] {
+		t.Fatalf("expected default and inserted policies, got ids=%v", idSet)
 	}
 
 	matched, err := repo.MatchIngestionPolicy(ctx, "source", "svc-prod-api")
@@ -1254,6 +1354,71 @@ func TestRepositoryCountsAndMaintenance(t *testing.T) {
 	}
 	if unreflected != 1 {
 		t.Fatalf("expected events reflected_at reset to NULL, got unreflected=%d", unreflected)
+	}
+}
+
+func TestResetDerived_ClearsStaleMetadataOnPreservedRememberMemories(t *testing.T) {
+	repo, closeRepo := testRepo(t)
+	defer closeRepo()
+	ctx := context.Background()
+	now := nowUTC()
+
+	mem := &core.Memory{
+		ID:               "mem_reset_preserve",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeGlobal,
+		Body:             "keep this remembered memory",
+		TightDescription: "remembered memory",
+		Confidence:       0.9,
+		Importance:       0.7,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		Metadata: map[string]string{
+			"source_system":             "remember",
+			"extraction_quality":        "verified",
+			"entities_extracted":        "true",
+			"entities_extracted_method": "llm",
+			"claims_extracted":          "true",
+			"embedded_at":               now.Format(time.RFC3339),
+			"embedded_model":            "test-embed",
+			"lifecycle_reviewed_at":     now.Format(time.RFC3339),
+			"lifecycle_reviewed_model":  "test-review",
+			"narrative_included":        "true",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := repo.InsertMemory(ctx, mem); err != nil {
+		t.Fatalf("insert preserved memory: %v", err)
+	}
+
+	if _, err := repo.ResetDerived(ctx); err != nil {
+		t.Fatalf("ResetDerived: %v", err)
+	}
+
+	updated, err := repo.GetMemory(ctx, mem.ID)
+	if err != nil {
+		t.Fatalf("get preserved memory after reset-derived: %v", err)
+	}
+	if updated.Metadata["source_system"] != "remember" {
+		t.Fatalf("expected source_system to remain remember, got %q", updated.Metadata["source_system"])
+	}
+	if updated.Metadata["extraction_quality"] != "verified" {
+		t.Fatalf("expected extraction_quality to remain verified, got %q", updated.Metadata["extraction_quality"])
+	}
+	for _, key := range []string{
+		"entities_extracted",
+		"entities_extracted_method",
+		"claims_extracted",
+		"embedded_at",
+		"embedded_model",
+		"lifecycle_reviewed_at",
+		"lifecycle_reviewed_model",
+		"narrative_included",
+	} {
+		if got := updated.Metadata[key]; got != "" {
+			t.Fatalf("expected metadata key %s to be cleared, got %q", key, got)
+		}
 	}
 }
 

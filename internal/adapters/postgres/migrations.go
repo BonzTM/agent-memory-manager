@@ -341,6 +341,36 @@ END
 $$;
 `,
 	},
+	{
+		Version:     4,
+		Description: "seed default tool event ignore ingestion policy for fresh installs",
+		SQL: `
+INSERT INTO ingestion_policies (
+	id,
+	pattern_type,
+	pattern,
+	mode,
+	priority,
+	match_mode,
+	metadata_json,
+	created_at,
+	updated_at
+)
+SELECT
+	'pol_default_tool_events_ignore',
+	'kind',
+	'tool_*',
+	'ignore',
+	100,
+	'glob',
+	'{}'::jsonb,
+	NOW(),
+	NOW()
+WHERE NOT EXISTS (
+	SELECT 1 FROM ingestion_policies
+);
+`,
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
