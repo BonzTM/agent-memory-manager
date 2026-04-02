@@ -21,7 +21,11 @@ func buildSummarizer(cfg Config) core.Summarizer {
 		if model == "" {
 			model = "gpt-4o-mini"
 		}
-		return service.NewLLMSummarizer(cfg.Summarizer.Endpoint, cfg.Summarizer.APIKey, model)
+		s := service.NewLLMSummarizer(cfg.Summarizer.Endpoint, cfg.Summarizer.APIKey, model)
+		if cfg.Summarizer.ReasoningEffort != "" {
+			s.SetReasoningEffort(cfg.Summarizer.ReasoningEffort)
+		}
+		return s
 	}
 	return nil
 }
@@ -33,6 +37,7 @@ func buildIntelligenceProvider(cfg Config, summarizer core.Summarizer) core.Inte
 			cfg.Summarizer.ReviewEndpoint,
 			cfg.Summarizer.ReviewAPIKey,
 			cfg.Summarizer.ReviewModel,
+			cfg.Summarizer.ReviewReasoningEffort,
 		)
 	}
 	return service.NewSummarizerIntelligenceAdapter(summarizer)
@@ -141,6 +146,7 @@ func NewService(cfg Config) (core.Service, func(), error) {
 	svc.SetMinConfidenceForCreation(cfg.IntakeQuality.MinConfidenceForCreation)
 	svc.SetMinImportanceForCreation(cfg.IntakeQuality.MinImportanceForCreation)
 	svc.SetEntityHubThreshold(cfg.Retrieval.EntityHubThreshold)
+	svc.SetTemporalAttenuation(cfg.Retrieval.TemporalAttenuation)
 	svc.SetMaxExpandDepth(cfg.MaxExpandDepth)
 
 	return svc, cleanup, nil

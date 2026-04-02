@@ -29,6 +29,7 @@ const (
 	defaultSessionIdleTimeoutMinutes      = 15
 	defaultSummarizerContextWindow        = 128000
 	defaultEntityHubThreshold              = 10
+	defaultTemporalAttenuation            = 0.3
 )
 
 // Config holds all runtime configuration for amm.
@@ -74,9 +75,11 @@ type SummarizerConfig struct {
 	Endpoint                        string  `json:"endpoint"`
 	APIKey                          string  `json:"api_key"`
 	Model                           string  `json:"model"`
+	ReasoningEffort                 string  `json:"reasoning_effort"`       // low, medium, high — empty disables
 	ReviewEndpoint                  string  `json:"review_endpoint"`
 	ReviewAPIKey                    string  `json:"review_api_key"`
 	ReviewModel                     string  `json:"review_model"`
+	ReviewReasoningEffort           string  `json:"review_reasoning_effort"` // low, medium, high — empty disables
 	ReprocessBatchSize              int     `json:"reprocess_batch_size"`
 	ReflectBatchSize                int     `json:"reflect_batch_size"`
 	ReflectLLMBatchSize             int     `json:"reflect_llm_batch_size"`
@@ -109,11 +112,12 @@ type StorageConfig struct {
 
 // RetrievalConfig tunes recall behavior.
 type RetrievalConfig struct {
-	DefaultLimit       int   `json:"default_limit"`
-	AmbientLimit       int   `json:"ambient_limit"`
-	EnableSemantic     bool  `json:"enable_semantic"`
-	EnableExplain      bool  `json:"enable_explain"`
-	EntityHubThreshold int64 `json:"entity_hub_threshold"` // link count before hub dampening kicks in (default 10)
+	DefaultLimit        int     `json:"default_limit"`
+	AmbientLimit        int     `json:"ambient_limit"`
+	EnableSemantic      bool    `json:"enable_semantic"`
+	EnableExplain       bool    `json:"enable_explain"`
+	EntityHubThreshold  int64   `json:"entity_hub_threshold"`  // link count before hub dampening kicks in (default 10)
+	TemporalAttenuation float64 `json:"temporal_attenuation"`  // score multiplier for items outside temporal window (0.0-1.0, default 0.3)
 }
 
 // PrivacyConfig sets default privacy behavior.
@@ -142,11 +146,12 @@ func DefaultConfig() Config {
 			PostgresDSN: "",
 		},
 		Retrieval: RetrievalConfig{
-			DefaultLimit:       10,
-			AmbientLimit:       5,
-			EnableSemantic:     false,
-			EnableExplain:      true,
-			EntityHubThreshold: defaultEntityHubThreshold,
+			DefaultLimit:        10,
+			AmbientLimit:        5,
+			EnableSemantic:      false,
+			EnableExplain:       true,
+			EntityHubThreshold:  defaultEntityHubThreshold,
+			TemporalAttenuation: defaultTemporalAttenuation,
 		},
 		Privacy: PrivacyConfig{
 			DefaultPrivacy: "private",
@@ -288,6 +293,10 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			if n, err := strconv.ParseInt(val, 10, 64); err == nil && n > 0 {
 				cfg.Retrieval.EntityHubThreshold = n
 			}
+		case "retrieval.temporal_attenuation":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				cfg.Retrieval.TemporalAttenuation = f
+			}
 		case "privacy.default_privacy":
 			cfg.Privacy.DefaultPrivacy = val
 		case "maintenance.auto_reflect":
@@ -316,6 +325,10 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			cfg.Summarizer.APIKey = val
 		case "summarizer.model":
 			cfg.Summarizer.Model = val
+		case "summarizer.reasoning_effort":
+			cfg.Summarizer.ReasoningEffort = val
+		case "summarizer.review_reasoning_effort":
+			cfg.Summarizer.ReviewReasoningEffort = val
 		case "summarizer.reprocess_batch_size":
 			if n, err := strconv.Atoi(val); err == nil && n > 0 {
 				cfg.Summarizer.ReprocessBatchSize = n
@@ -444,6 +457,8 @@ func LoadConfigWithEnv() Config {
 //	AMM_SUMMARIZER_ENDPOINT -> Summarizer.Endpoint
 //	AMM_SUMMARIZER_API_KEY -> Summarizer.APIKey
 //	AMM_SUMMARIZER_MODEL -> Summarizer.Model
+//	AMM_SUMMARIZER_REASONING_EFFORT -> Summarizer.ReasoningEffort (low/medium/high)
+//	AMM_REVIEW_REASONING_EFFORT -> Summarizer.ReviewReasoningEffort (low/medium/high)
 //	AMM_REPROCESS_BATCH_SIZE -> Summarizer.ReprocessBatchSize
 //	AMM_COMPRESS_CHUNK_SIZE -> Summarizer.CompressChunkSize
 //	AMM_COMPRESS_MAX_EVENTS -> Summarizer.CompressMaxEvents
@@ -462,6 +477,7 @@ func LoadConfigWithEnv() Config {
 //	AMM_MIN_IMPORTANCE_FOR_CREATION -> IntakeQuality.MinImportanceForCreation (0.0-1.0)
 //	AMM_HTTP_ADDR -> HTTP.Addr
 //	AMM_HTTP_CORS_ORIGINS -> HTTP.CORSOrigins
+//	AMM_TEMPORAL_ATTENUATION -> Retrieval.TemporalAttenuation (0.0-1.0)
 //	AMM_API_URL -> API.URL
 //	AMM_API_KEY -> API.Key
 func ConfigFromEnv(base Config) Config {
@@ -534,6 +550,9 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_SUMMARIZER_MODEL"); v != "" {
 		base.Summarizer.Model = v
 	}
+	if v := os.Getenv("AMM_SUMMARIZER_REASONING_EFFORT"); v != "" {
+		base.Summarizer.ReasoningEffort = v
+	}
 	if v := os.Getenv("AMM_REPROCESS_BATCH_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			base.Summarizer.ReprocessBatchSize = n
@@ -547,6 +566,9 @@ func ConfigFromEnv(base Config) Config {
 	}
 	if v := os.Getenv("AMM_REVIEW_MODEL"); v != "" {
 		base.Summarizer.ReviewModel = v
+	}
+	if v := os.Getenv("AMM_REVIEW_REASONING_EFFORT"); v != "" {
+		base.Summarizer.ReviewReasoningEffort = v
 	}
 	if v := os.Getenv("AMM_REFLECT_BATCH_SIZE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -622,6 +644,11 @@ func ConfigFromEnv(base Config) Config {
 	}
 	if v := os.Getenv("AMM_EMBEDDINGS_MODEL"); v != "" {
 		base.Embeddings.Model = v
+	}
+	if v := os.Getenv("AMM_TEMPORAL_ATTENUATION"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
+			base.Retrieval.TemporalAttenuation = f
+		}
 	}
 	if v := os.Getenv("AMM_ENTITY_HUB_THRESHOLD"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
