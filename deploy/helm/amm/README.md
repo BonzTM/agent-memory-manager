@@ -65,6 +65,7 @@ helm upgrade --install amm amm/amm \
 - `review.endpoint`, `review.model`, `secrets.reviewApiKey` — separate model for extraction/reasoning
 - `embeddings.enabled=true`, `embeddings.endpoint`, `embeddings.model`, `secrets.embeddingsApiKey`
 - `retrieval.entityHubThreshold` (default: 10) — entity link count before hub dampening
+- `retrieval.temporalAttenuation` (default: 0.3) — score multiplier for items outside temporal window (0.0-1.0)
 - `service.type=ClusterIP|LoadBalancer`
 - `ingress.enabled=true`
 
@@ -87,7 +88,7 @@ Expected health response:
 
 ## Notes
 
-- The chart uses `appVersion: 1.2.1` by default.
+- The chart uses `appVersion: 1.3.0` by default.
 - SQLite only supports a single writer at a time; use PostgreSQL for shared high-concurrency deployments.
 - AMM maintenance jobs still need an external scheduler or runtime-triggered execution model.
 

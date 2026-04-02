@@ -112,6 +112,10 @@ retrieval:
   defaultPrivacy: "private"
   # -- Entity link count before hub dampening activates (default: 10)
   entityHubThreshold: 10
+  # -- Score multiplier for items outside the active temporal window during
+  # recall (0.0-1.0). Lower values more aggressively suppress out-of-window
+  # results. Default: 0.3
+  temporalAttenuation: 0.3
 
 # =============================================================================
 # Maintenance Toggles
@@ -160,6 +164,10 @@ summarizer:
   # -- Model name (defaults to gpt-4o-mini when endpoint is set).
   # Use a model with 128k+ context for session narrative summarization.
   model: ""
+  # -- Reasoning effort for summarizer LLM calls (low, medium, high).
+  # Empty disables reasoning parameters. Use with reasoning-capable models
+  # (e.g., o1, o3, o4-mini) for improved extraction quality at higher cost.
+  reasoningEffort: ""
   # -- Minutes of session inactivity before consolidation triggers (default: 15)
   sessionIdleTimeoutMinutes: 15
   # -- Token budget for the summarizer context window (default: 128000).
@@ -175,6 +183,9 @@ review:
   endpoint: ""
   # -- Review model name (falls back to summarizer model)
   model: ""
+  # -- Reasoning effort for review model LLM calls (low, medium, high).
+  # Empty disables reasoning parameters.
+  reasoningEffort: ""
 
 # =============================================================================
 # Embeddings

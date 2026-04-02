@@ -22,6 +22,7 @@ data:
   AMM_MAX_EXPAND_DEPTH: {{ .Values.config.maxExpandDepth | default "1" | quote }}
   AMM_DEFAULT_PRIVACY: {{ .Values.retrieval.defaultPrivacy | quote }}
   AMM_ENTITY_HUB_THRESHOLD: {{ .Values.retrieval.entityHubThreshold | default "10" | quote }}
+  AMM_TEMPORAL_ATTENUATION: {{ .Values.retrieval.temporalAttenuation | default "0.3" | quote }}
   AMM_AUTO_REFLECT: {{ .Values.maintenance.autoReflect | quote }}
   AMM_AUTO_COMPRESS: {{ .Values.maintenance.autoCompress | quote }}
   AMM_AUTO_CONSOLIDATE: {{ .Values.maintenance.autoConsolidate | quote }}
@@ -32,6 +33,9 @@ data:
   {{- if .Values.summarizer.model }}
   AMM_SUMMARIZER_MODEL: {{ .Values.summarizer.model | quote }}
   {{- end }}
+  {{- if .Values.summarizer.reasoningEffort }}
+  AMM_SUMMARIZER_REASONING_EFFORT: {{ .Values.summarizer.reasoningEffort | quote }}
+  {{- end }}
   AMM_SESSION_IDLE_TIMEOUT_MINUTES: {{ .Values.summarizer.sessionIdleTimeoutMinutes | default "15" | quote }}
   AMM_SUMMARIZER_CONTEXT_WINDOW: {{ .Values.summarizer.summarizerContextWindow | default "128000" | quote }}
   {{- if .Values.review.endpoint }}
@@ -39,6 +43,9 @@ data:
   {{- end }}
   {{- if .Values.review.model }}
   AMM_REVIEW_MODEL: {{ .Values.review.model | quote }}
+  {{- end }}
+  {{- if .Values.review.reasoningEffort }}
+  AMM_REVIEW_REASONING_EFFORT: {{ .Values.review.reasoningEffort | quote }}
   {{- end }}
   {{- if .Values.embeddings.enabled }}
   AMM_EMBEDDINGS_ENABLED: "true"
