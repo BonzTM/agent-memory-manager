@@ -74,18 +74,24 @@ Hooks now only: ingest events (user messages, assistant messages, session marker
 New configuration for reasoning-capable models (OpenAI o1, o3, o4-mini, etc.):
 
 ```bash
-# Environment variables
+# Environment variables — effort level (sends reasoning: {"effort": "..."})
 AMM_SUMMARIZER_REASONING_EFFORT=medium    # for narrative compression
 AMM_REVIEW_REASONING_EFFORT=high          # for extraction/reasoning
 
+# Or simple toggle (sends reasoning: {"enabled": true})
+AMM_SUMMARIZER_REASONING=enabled
+AMM_REVIEW_REASONING=enabled
+
 # Or in config.json
 "summarizer": {
+  "reasoning": "enabled",
   "reasoning_effort": "medium",
+  "review_reasoning": "enabled",
   "review_reasoning_effort": "high"
 }
 ```
 
-When set, API requests include `"reasoning": true` and `"reasoning_effort": "<level>"`. Models that don't support reasoning silently ignore the extra fields. Valid values: `low`, `medium`, `high`.
+The `reasoning` and `reasoning_effort` tunables are independent — set one, both, or neither depending on what the model supports. When both are set, `reasoning_effort` takes precedence. API requests send the standard `reasoning` object format (e.g., `"reasoning": {"effort": "medium"}`). Valid effort values: `low`, `medium`, `high`.
 
 ### Better session summaries
 
@@ -105,13 +111,20 @@ Run `amm reset-derived` followed by `amm jobs run consolidate_sessions` to regen
 - `ListEvents` SQL uses inclusive `>=`/`<=` for boundary events
 - OpenCode plugin idle-event handler no longer throws after maintenance removal
 - Hermes session-end hook exports shell variables for Python subprocess
-- TOML config parser handles reasoning effort keys
+- TOML config parser handles reasoning effort and reasoning toggle keys
 
 ## Admin/Operations
 
 - `AMM_TEMPORAL_ATTENUATION` (float64, 0.0-1.0, default 0.3): score multiplier for items outside the temporal window in scored recall modes
-- `AMM_SUMMARIZER_REASONING_EFFORT` (string, low/medium/high): reasoning effort for summarizer model
+- `AMM_SUMMARIZER_REASONING` (string, "enabled" or empty): simple reasoning toggle — sends `reasoning: {"enabled": true}`
+- `AMM_SUMMARIZER_REASONING_EFFORT` (string, low/medium/high): reasoning effort — sends `reasoning: {"effort": "..."}`
+- `AMM_REVIEW_REASONING` (string, "enabled" or empty): reasoning toggle for review model
 - `AMM_REVIEW_REASONING_EFFORT` (string, low/medium/high): reasoning effort for review model
+- `AMM_SUMMARIZER_TIMEOUT_SECONDS` (int, default 300): HTTP client timeout for LLM calls (was hardcoded at 30s)
+- `AMM_EMBEDDING_TIMEOUT_SECONDS` (int, default 30): HTTP client timeout for embedding calls
+- `AMM_HTTP_READ_TIMEOUT_SECONDS` (int, default 30): HTTP server read timeout
+- `AMM_HTTP_WRITE_TIMEOUT_SECONDS` (int, default 60): HTTP server write timeout
+- `AMM_HTTP_IDLE_TIMEOUT_SECONDS` (int, default 120): HTTP server idle timeout
 - Helm chart: `retrieval.temporalAttenuation`, `summarizer.reasoningEffort`, `review.reasoningEffort` added to values.yaml and configmap
 
 ## Deployment and Distribution

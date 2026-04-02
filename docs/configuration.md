@@ -24,6 +24,9 @@ AMM loads configuration in the following order:
 |----------|-------------|---------|
 | `AMM_HTTP_ADDR` | HTTP server listen address | `:8080` |
 | `AMM_HTTP_CORS_ORIGINS` | Comma-separated list of allowed CORS origins | _(unset)_ |
+| `AMM_HTTP_READ_TIMEOUT_SECONDS` | HTTP server read timeout | `30` |
+| `AMM_HTTP_WRITE_TIMEOUT_SECONDS` | HTTP server write timeout | `60` |
+| `AMM_HTTP_IDLE_TIMEOUT_SECONDS` | HTTP server idle timeout | `120` |
 | `AMM_API_KEY` | Static API key for HTTP server authentication. When set, all HTTP API requests (except `/healthz`, `/v1/status`, `/openapi.json`, `/swagger/`) must include the key via `Authorization: Bearer <key>` or `X-API-Key: <key>` header. | _(unset)_ |
 | `AMM_API_URL` | Base URL for API-mode example integrations (for example the Hermes plugin example and other shipped HTTP hooks). Not consumed directly by the AMM binaries themselves. | _(unset)_ |
 
@@ -80,7 +83,9 @@ Set `AMM_SUMMARIZER_ENDPOINT` and `AMM_SUMMARIZER_API_KEY` to enable LLM-backed 
 | `AMM_SUMMARIZER_ENDPOINT` | Base URL for OpenAI-compatible API (e.g. `https://api.openai.com/v1`) | _(unset)_ |
 | `AMM_SUMMARIZER_API_KEY` | API key for the extraction/summarization model | _(unset)_ |
 | `AMM_SUMMARIZER_MODEL` | Model name for extraction and summarization | `gpt-4o-mini` |
-| `AMM_SUMMARIZER_REASONING_EFFORT` | Reasoning effort for summarizer LLM calls (`low`, `medium`, `high`). Empty disables. | _(empty)_ |
+| `AMM_SUMMARIZER_TIMEOUT_SECONDS` | HTTP client timeout for LLM summarizer/review calls | `300` (5 min) |
+| `AMM_SUMMARIZER_REASONING` | Send `reasoning: {"enabled": true}` to the LLM. Set to `enabled` to activate; any other value (or empty) omits the field. Use for models that only support the simple toggle. | _(empty)_ |
+| `AMM_SUMMARIZER_REASONING_EFFORT` | Send `reasoning: {"effort": "..."}` to the LLM (`low`, `medium`, `high`). Empty omits. Takes precedence over `AMM_SUMMARIZER_REASONING` when both are set. | _(empty)_ |
 | `AMM_REPROCESS_BATCH_SIZE` | Number of events per reprocess/summarization batch | `20` |
 | `AMM_REFLECT_BATCH_SIZE` | Number of events claimed per reflect iteration | `100` |
 | `AMM_REFLECT_LLM_BATCH_SIZE` | Number of claimed reflect events sent to each LLM analysis call | `20` |
@@ -91,6 +96,21 @@ Set `AMM_SUMMARIZER_ENDPOINT` and `AMM_SUMMARIZER_API_KEY` to enable LLM-backed 
 | `AMM_LIFECYCLE_REVIEW_BATCH_SIZE` | Number of memories per lifecycle review batch | `50` |
 | `AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD` | Minimum similarity score for cross-project memory transfer | `0.7` |
 
+### Reasoning Configuration
+
+The `reasoning` and `reasoning_effort` parameters are **independent tunables** that control the `reasoning` object sent to the LLM API. Different models/providers support different subsets of this object:
+
+| Model behavior | Set `reasoning` | Set `reasoning_effort` | API sends |
+|---|---|---|---|
+| Supports only the simple toggle (some OpenRouter models) | `enabled` | _(leave empty)_ | `"reasoning": {"enabled": true}` |
+| Supports only effort levels (OpenAI o-series) | _(leave empty)_ | `low` / `medium` / `high` | `"reasoning": {"effort": "high"}` |
+| Supports both | `enabled` | `low` / `medium` / `high` | `"reasoning": {"effort": "high"}` (effort wins) |
+| Neither / unknown | _(leave empty)_ | _(leave empty)_ | _(field omitted)_ |
+
+When both are set, `reasoning_effort` takes precedence since it's more specific. Setting an unsupported parameter may cause API errors. When in doubt, leave both empty — AMM will omit the `reasoning` field entirely.
+
+The same split applies to the review model via `AMM_REVIEW_REASONING` and `AMM_REVIEW_REASONING_EFFORT`.
+
 ### Review Model (Optional Separate LLM for Review/Lifecycle)
 A separate model can be used for lifecycle review, consolidation, and contradiction detection. Defaults to the summarizer model if unset.
 
@@ -99,7 +119,8 @@ A separate model can be used for lifecycle review, consolidation, and contradict
 | `AMM_REVIEW_ENDPOINT` | Base URL for the review model API | _(falls back to `AMM_SUMMARIZER_ENDPOINT`)_ |
 | `AMM_REVIEW_API_KEY` | API key for the review model | _(falls back to `AMM_SUMMARIZER_API_KEY`)_ |
 | `AMM_REVIEW_MODEL` | Model name for review/consolidation tasks | _(falls back to `AMM_SUMMARIZER_MODEL`)_ |
-| `AMM_REVIEW_REASONING_EFFORT` | Reasoning effort for review model LLM calls (`low`, `medium`, `high`). Empty disables. | _(empty)_ |
+| `AMM_REVIEW_REASONING` | Send `reasoning: {"enabled": true}` to the review model. Set to `enabled` to activate; any other value omits. | _(empty)_ |
+| `AMM_REVIEW_REASONING_EFFORT` | Send `reasoning: {"effort": "..."}` to the review model (`low`, `medium`, `high`). Empty omits. Takes precedence over `AMM_REVIEW_REASONING` when both are set. | _(empty)_ |
 
 ### Embeddings (Semantic Search)
 Set `AMM_EMBEDDINGS_ENABLED=true` to generate/store embeddings. Semantic scoring at recall time is separately controlled by `AMM_ENABLE_SEMANTIC`. Supports any OpenAI-compatible embeddings API (OpenAI, Ollama, OpenRouter, etc.).
@@ -107,6 +128,7 @@ Set `AMM_EMBEDDINGS_ENABLED=true` to generate/store embeddings. Semantic scoring
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `AMM_EMBEDDINGS_ENABLED` | Enable vector embedding generation/storage | `false` |
+| `AMM_EMBEDDING_TIMEOUT_SECONDS` | HTTP client timeout for embedding API calls | `30` |
 | `AMM_EMBEDDINGS_ENDPOINT` | Base URL for OpenAI-compatible embeddings API | _(unset)_ |
 | `AMM_EMBEDDINGS_API_KEY` | API key for the embeddings provider | _(unset)_ |
 | `AMM_EMBEDDINGS_MODEL` | Embedding model name | `text-embedding-3-small` |
@@ -128,7 +150,10 @@ Full reference — all supported keys shown with their defaults:
   },
   "http": {
     "addr": ":8080",
-    "cors_origins": ""
+    "cors_origins": "",
+    "read_timeout_seconds": 30,
+    "write_timeout_seconds": 60,
+    "idle_timeout_seconds": 120
   },
   "api": {
     "url": "",
@@ -158,9 +183,14 @@ Full reference — all supported keys shown with their defaults:
     "endpoint": "https://api.openai.com/v1",
     "api_key": "sk-...",
     "model": "gpt-4o-mini",
+    "timeout_seconds": 300,
+    "reasoning": "",
+    "reasoning_effort": "",
     "review_endpoint": "https://api.openai.com/v1",
     "review_api_key": "sk-...",
     "review_model": "gpt-4o",
+    "review_reasoning": "",
+    "review_reasoning_effort": "",
     "reprocess_batch_size": 20,
     "reflect_batch_size": 100,
     "reflect_llm_batch_size": 20,
@@ -170,7 +200,8 @@ Full reference — all supported keys shown with their defaults:
     "compress_batch_size": 15,
     "topic_batch_size": 15,
     "embedding_batch_size": 64,
-    "cross_project_similarity_threshold": 0.7
+    "cross_project_similarity_threshold": 0.7,
+    "embedding_timeout_seconds": 30
   },
   "intake_quality": {
     "min_confidence_for_creation": 0.50,
@@ -201,6 +232,9 @@ db_path = "~/.amm/amm.db"
 [http]
 addr = ":8080"
 # cors_origins = "*"
+# read_timeout_seconds = 30
+# write_timeout_seconds = 60
+# idle_timeout_seconds = 120
 
 [api]
 # key = "your-static-api-key"
@@ -232,9 +266,14 @@ escalation_deterministic_max_chars = 2048
 endpoint = "https://api.openai.com/v1"
 api_key = "sk-..."
 model = "gpt-4o-mini"
+# timeout_seconds = 300
+# reasoning = ""
+# reasoning_effort = ""
 # review_endpoint = "https://api.openai.com/v1"
 # review_api_key = "sk-..."
 # review_model = "gpt-4o"
+# review_reasoning = ""
+# review_reasoning_effort = ""
 reprocess_batch_size = 20
 reflect_batch_size = 100
 reflect_llm_batch_size = 20
@@ -245,6 +284,7 @@ compress_batch_size = 15
 topic_batch_size = 15
 embedding_batch_size = 64
 cross_project_similarity_threshold = 0.7
+# embedding_timeout_seconds = 30
 
 [intake_quality]
 min_confidence_for_creation = 0.50
