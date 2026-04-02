@@ -101,6 +101,8 @@ const (
 	RecallModeHistory RecallMode = "history"
 	// RecallModeHybrid combines multiple retrieval strategies.
 	RecallModeHybrid RecallMode = "hybrid"
+	// RecallModeSessions lists and searches session summaries.
+	RecallModeSessions RecallMode = "sessions"
 )
 
 // Event is an append-only raw interaction record.

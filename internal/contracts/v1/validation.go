@@ -3,6 +3,7 @@ package v1
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
@@ -45,6 +46,7 @@ var (
 		"active":         true,
 		"history":        true,
 		"hybrid":         true,
+		"sessions":       true,
 	}
 
 	validPrivacyLevels = map[string]bool{
@@ -181,7 +183,8 @@ func ValidateRecall(req *RecallRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
 	}
-	if strings.TrimSpace(req.Query) == "" {
+	// Sessions mode supports empty queries (list all sessions).
+	if strings.TrimSpace(req.Query) == "" && req.Mode != "sessions" {
 		return fmt.Errorf("query is required")
 	}
 	if req.Mode != "" && !validRecallModes[req.Mode] {
@@ -189,6 +192,16 @@ func ValidateRecall(req *RecallRequest) error {
 	}
 	if req.Limit < 0 {
 		return fmt.Errorf("limit must be non-negative")
+	}
+	if req.After != "" {
+		if _, err := time.Parse(time.RFC3339, req.After); err != nil {
+			return fmt.Errorf("after must be valid RFC3339: %w", err)
+		}
+	}
+	if req.Before != "" {
+		if _, err := time.Parse(time.RFC3339, req.Before); err != nil {
+			return fmt.Errorf("before must be valid RFC3339: %w", err)
+		}
 	}
 	return nil
 }

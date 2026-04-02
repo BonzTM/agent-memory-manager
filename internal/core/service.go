@@ -108,6 +108,8 @@ type RecallOptions struct {
 	EntityIDs []string   `json:"entity_ids,omitempty"`
 	Limit     int        `json:"limit,omitempty"`
 	Explain   bool       `json:"explain,omitempty"`
+	After     string     `json:"after,omitempty"`  // RFC3339 — hard-filter: exclude results before this time
+	Before    string     `json:"before,omitempty"` // RFC3339 — hard-filter: exclude results after this time
 }
 
 // HistoryOptions configures a history retrieval.

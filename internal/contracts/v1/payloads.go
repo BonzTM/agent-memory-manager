@@ -85,6 +85,8 @@ type RecallRequest struct {
 	EntityIDs []string `json:"entity_ids,omitempty"`
 	Limit     int      `json:"limit,omitempty"`
 	Explain   bool     `json:"explain,omitempty"`
+	After     string   `json:"after,omitempty"`  // RFC3339
+	Before    string   `json:"before,omitempty"` // RFC3339
 }
 
 // RecallResponse is the response payload returned by recall.

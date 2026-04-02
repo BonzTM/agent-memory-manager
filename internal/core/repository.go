@@ -43,6 +43,10 @@ type Repository interface {
 	ListSummaries(ctx context.Context, opts ListSummariesOptions) ([]Summary, error)
 	// SearchSummaries searches summaries by text query.
 	SearchSummaries(ctx context.Context, query string, limit int) ([]Summary, error)
+	// SearchScopedSummaries searches summaries by text query with additional
+	// filters (kind, project, session, date range) applied in SQL before the
+	// LIMIT, avoiding post-filter truncation.
+	SearchScopedSummaries(ctx context.Context, query string, opts ListSummariesOptions) ([]Summary, error)
 	// GetSummaryChildren returns the children of a summary node.
 	GetSummaryChildren(ctx context.Context, parentID string) ([]SummaryEdge, error)
 	// GetSummaryParents returns the parent edges for a given child (inverse of GetSummaryChildren).
@@ -280,6 +284,8 @@ type ListSummariesOptions struct {
 	Scope     Scope
 	ProjectID string
 	SessionID string
+	After     string // RFC3339 — filter to summaries created after this time
+	Before    string // RFC3339 — filter to summaries created before this time
 	Limit     int
 }
 
