@@ -13,6 +13,7 @@ import (
 const (
 	defaultLifecycleReviewBatchSize = 50
 	lifecycleReviewInterval         = 7 * 24 * time.Hour
+	openLoopArchiveWithoutAccessAge = 30 * 24 * time.Hour
 
 	lifecyclePromoteDelta = 0.15
 	lifecyclePromoteCap   = 1.0
@@ -81,6 +82,22 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 	for i := range accessStats {
 		accessByMemory[accessStats[i].MemoryID] = accessStats[i]
 	}
+	decisionSubjects := make(map[string]time.Time)
+	for i := range memories {
+		mem := &memories[i]
+		if mem.Status != core.MemoryStatusActive || mem.Type != core.MemoryTypeDecision {
+			continue
+		}
+		resolvedAt := mem.CreatedAt
+		if mem.UpdatedAt.After(resolvedAt) {
+			resolvedAt = mem.UpdatedAt
+		}
+		for _, key := range openLoopResolutionKeys(mem.Subject, mem.TightDescription) {
+			if existing, ok := decisionSubjects[key]; !ok || resolvedAt.After(existing) {
+				decisionSubjects[key] = resolvedAt
+			}
+		}
+	}
 
 	modelName := s.lifecycleReviewModelName()
 	affected := 0
@@ -124,6 +141,7 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 
 		resolvedActions := make(map[string]lifecycleMutationAction, len(batchByID))
 		mutatedMemoryIDs := make(map[string]bool, len(batchByID))
+		deterministicArchives := make([]string, 0, len(batch))
 		resolveAction := func(memoryID string, action lifecycleMutationAction) {
 			if memoryID == "" {
 				return
@@ -136,6 +154,14 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 			}
 			resolvedActions[memoryID] = action
 		}
+		for _, mem := range batch {
+			stat := accessByMemory[mem.ID]
+			if shouldArchiveStaleOpenLoop(mem, stat, now) || shouldArchiveResolvedOpenLoop(mem, decisionSubjects) {
+				resolveAction(mem.ID, lifecycleActionArchive)
+				deterministicArchives = append(deterministicArchives, mem.ID)
+			}
+		}
+		result.Archive = mergeUniqueStrings(result.Archive, deterministicArchives)
 
 		for _, id := range result.Promote {
 			resolveAction(id, lifecycleActionPromote)
@@ -257,6 +283,58 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 	}
 
 	return affected, nil
+}
+
+func shouldArchiveStaleOpenLoop(mem *core.Memory, stat core.MemoryAccessStat, now time.Time) bool {
+	if mem == nil || mem.Type != core.MemoryTypeOpenLoop || mem.Status != core.MemoryStatusActive {
+		return false
+	}
+	if stat.AccessCount > 0 || mem.CreatedAt.IsZero() {
+		return false
+	}
+	return now.Sub(mem.CreatedAt) >= openLoopArchiveWithoutAccessAge
+}
+
+func shouldArchiveResolvedOpenLoop(mem *core.Memory, decisionSubjects map[string]time.Time) bool {
+	if mem == nil || mem.Type != core.MemoryTypeOpenLoop || mem.Status != core.MemoryStatusActive {
+		return false
+	}
+	recordedAt := mem.CreatedAt
+	if recordedAt.IsZero() {
+		recordedAt = mem.UpdatedAt
+	}
+	for _, key := range openLoopResolutionKeys(mem.Subject, mem.TightDescription) {
+		resolvedAt, ok := decisionSubjects[key]
+		if !ok {
+			continue
+		}
+		if recordedAt.IsZero() || !resolvedAt.Before(recordedAt) {
+			return true
+		}
+	}
+	return false
+}
+
+func openLoopResolutionKeys(subject, tightDescription string) []string {
+	keys := make([]string, 0, 2)
+	for _, value := range []string{subject, tightDescription} {
+		normalized := normalizeMemoryText(value)
+		if normalized == "" {
+			continue
+		}
+		alreadyIncluded := false
+		for _, existing := range keys {
+			if existing == normalized {
+				alreadyIncluded = true
+				break
+			}
+		}
+		if alreadyIncluded {
+			continue
+		}
+		keys = append(keys, normalized)
+	}
+	return keys
 }
 
 func (s *AMMService) lifecycleReviewModelName() string {

@@ -159,6 +159,115 @@ func TestLifecycleReview_ArchivesMemory(t *testing.T) {
 	}
 }
 
+func TestLifecycleReview_ArchivesStaleOpenLoopsWithoutAccess(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Add(-31 * 24 * time.Hour)
+
+	openLoop := &core.Memory{
+		ID:               "mem_open_loop_stale",
+		Type:             core.MemoryTypeOpenLoop,
+		Scope:            core.ScopeGlobal,
+		Subject:          "tool event policy",
+		Body:             "Need to decide how tool events should be filtered during ingestion.",
+		TightDescription: "tool event policy unresolved",
+		Confidence:       0.8,
+		Importance:       0.6,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := repo.InsertMemory(ctx, openLoop); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.SetIntelligenceProvider(&lifecycleReviewIntelligenceStub{})
+
+	affected, err := svc.LifecycleReview(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected != 1 {
+		t.Fatalf("expected 1 affected stale open_loop, got %d", affected)
+	}
+
+	updated, err := repo.GetMemory(ctx, openLoop.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != core.MemoryStatusArchived {
+		t.Fatalf("expected stale open_loop to be archived, got %s", updated.Status)
+	}
+}
+
+func TestLifecycleReview_ArchivesResolvedOpenLoopsWhenDecisionExists(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	openLoopCreatedAt := time.Now().UTC().Add(-48 * time.Hour)
+	decisionCreatedAt := time.Now().UTC().Add(-24 * time.Hour)
+
+	openLoop := &core.Memory{
+		ID:               "mem_open_loop_resolved",
+		Type:             core.MemoryTypeOpenLoop,
+		Scope:            core.ScopeGlobal,
+		Subject:          "tool event policy",
+		Body:             "Need to decide how tool events should be filtered during ingestion.",
+		TightDescription: "tool event policy unresolved",
+		Confidence:       0.8,
+		Importance:       0.6,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        openLoopCreatedAt,
+		UpdatedAt:        openLoopCreatedAt,
+	}
+	decision := &core.Memory{
+		ID:               "mem_decision_resolves_open_loop",
+		Type:             core.MemoryTypeDecision,
+		Scope:            core.ScopeGlobal,
+		Subject:          "tool event policy",
+		Body:             "Tool events should be ignored by default during ingestion.",
+		TightDescription: "default tool event ignore policy",
+		Confidence:       0.9,
+		Importance:       0.8,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        decisionCreatedAt,
+		UpdatedAt:        decisionCreatedAt,
+	}
+	for _, mem := range []*core.Memory{openLoop, decision} {
+		if err := repo.InsertMemory(ctx, mem); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	svc.SetIntelligenceProvider(&lifecycleReviewIntelligenceStub{})
+
+	affected, err := svc.LifecycleReview(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected != 1 {
+		t.Fatalf("expected 1 affected resolved open_loop, got %d", affected)
+	}
+
+	updatedOpenLoop, err := repo.GetMemory(ctx, openLoop.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedOpenLoop.Status != core.MemoryStatusArchived {
+		t.Fatalf("expected resolved open_loop to be archived, got %s", updatedOpenLoop.Status)
+	}
+
+	updatedDecision, err := repo.GetMemory(ctx, decision.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedDecision.Status != core.MemoryStatusActive {
+		t.Fatalf("expected decision to remain active, got %s", updatedDecision.Status)
+	}
+}
+
 func TestLifecycleReview_TagsReviewedMemories(t *testing.T) {
 	svc, repo := testServiceAndRepo(t)
 	ctx := context.Background()

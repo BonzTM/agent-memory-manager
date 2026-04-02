@@ -143,11 +143,12 @@ func (s *summarizerIntelligenceAdapter) ConsolidateNarrative(ctx context.Context
 	}
 
 	return &core.NarrativeResult{
-		Summary:      body,
-		TightDesc:    tight,
-		Episode:      nil,
-		KeyDecisions: []string{},
-		Unresolved:   []string{},
+		Summary:       body,
+		TightDesc:     tight,
+		Episode:       nil,
+		KeyDecisions:  []string{},
+		Unresolved:    []string{},
+		ResolvedLoops: []string{},
 	}, nil
 }
 
@@ -266,11 +267,12 @@ func (h *HeuristicIntelligenceProvider) ConsolidateNarrative(ctx context.Context
 	}
 
 	return &core.NarrativeResult{
-		Summary:      body,
-		TightDesc:    tight,
-		Episode:      nil,
-		KeyDecisions: []string{},
-		Unresolved:   []string{},
+		Summary:       body,
+		TightDesc:     tight,
+		Episode:       nil,
+		KeyDecisions:  []string{},
+		Unresolved:    []string{},
+		ResolvedLoops: []string{},
 	}, nil
 }
 
