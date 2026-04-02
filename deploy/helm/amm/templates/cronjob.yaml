@@ -71,7 +71,7 @@ spec:
                   run_job rebuild_indexes
 
                   log "── Phase 3: Compress and structure ──"
-                  for JOB in compress_history consolidate_sessions build_topic_summaries; do
+                  for JOB in compress_history consolidate_sessions build_topic_summaries rebuild_indexes; do
                     run_job $JOB
                   done
 

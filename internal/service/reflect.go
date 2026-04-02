@@ -124,9 +124,19 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 			}
 
 			if len(candidates) == 0 {
+				if retryableHeuristic {
+					retryBatch, err := s.recordReflectFallbackAttempt(ctx, batch)
+					if err != nil {
+						return created, fmt.Errorf("record empty reflect fallback attempt: %w", err)
+					}
+					retryEvents = append(retryEvents, retryBatch...)
+				} else if err := s.clearReflectFallbackAttempts(ctx, batch); err != nil {
+					return created, fmt.Errorf("clear reflect fallback state: %w", err)
+				}
 				continue
 			}
 
+			sourceEventIDs := eventIDsFromEvents(batch)
 			batchCreated, err := s.processMemoryCandidates(ctx, candidateProcessingInput{
 				candidates:            candidates,
 				sourceEvents:          batch,
@@ -144,13 +154,27 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 			created += batchCreated
 
 			if retryableHeuristic {
-				shouldRetry, err := s.shouldRetrySourceEvents(ctx, eventIDsFromEvents(batch))
+				retryState, err := s.sourceEventRetryState(ctx, sourceEventIDs)
 				if err != nil {
 					return created, fmt.Errorf("check retryable reflected events: %w", err)
 				}
-				if shouldRetry {
+				if retryState.shouldRetry {
 					retryEvents = append(retryEvents, batch...)
+					continue
 				}
+				if !retryState.hasActiveMemory {
+					retryBatch, err := s.recordReflectFallbackAttempt(ctx, batch)
+					if err != nil {
+						return created, fmt.Errorf("record reflect fallback attempt: %w", err)
+					}
+					retryEvents = append(retryEvents, retryBatch...)
+					if len(retryBatch) > 0 {
+						continue
+					}
+				}
+			}
+			if err := s.clearReflectFallbackAttempts(ctx, batch); err != nil {
+				return created, fmt.Errorf("clear reflect fallback state: %w", err)
 			}
 		}
 	}

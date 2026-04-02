@@ -23,6 +23,13 @@ const (
 
 type lifecycleMutationAction int
 
+type scopedOpenLoopResolutionKey struct {
+	scope     core.Scope
+	projectID string
+	sessionID string
+	key       string
+}
+
 const (
 	lifecycleActionPromote lifecycleMutationAction = iota + 1
 	lifecycleActionDecay
@@ -82,7 +89,7 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 	for i := range accessStats {
 		accessByMemory[accessStats[i].MemoryID] = accessStats[i]
 	}
-	decisionSubjects := make(map[string]time.Time)
+	decisionSubjects := make(map[scopedOpenLoopResolutionKey]time.Time)
 	for i := range memories {
 		mem := &memories[i]
 		if mem.Status != core.MemoryStatusActive || mem.Type != core.MemoryTypeDecision {
@@ -93,8 +100,9 @@ func (s *AMMService) LifecycleReview(ctx context.Context) (int, error) {
 			resolvedAt = mem.UpdatedAt
 		}
 		for _, key := range openLoopResolutionKeys(mem.Subject, mem.TightDescription) {
-			if existing, ok := decisionSubjects[key]; !ok || resolvedAt.After(existing) {
-				decisionSubjects[key] = resolvedAt
+			scopedKey := makeScopedOpenLoopResolutionKey(mem, key)
+			if existing, ok := decisionSubjects[scopedKey]; !ok || resolvedAt.After(existing) {
+				decisionSubjects[scopedKey] = resolvedAt
 			}
 		}
 	}
@@ -295,7 +303,7 @@ func shouldArchiveStaleOpenLoop(mem *core.Memory, stat core.MemoryAccessStat, no
 	return now.Sub(mem.CreatedAt) >= openLoopArchiveWithoutAccessAge
 }
 
-func shouldArchiveResolvedOpenLoop(mem *core.Memory, decisionSubjects map[string]time.Time) bool {
+func shouldArchiveResolvedOpenLoop(mem *core.Memory, decisionSubjects map[scopedOpenLoopResolutionKey]time.Time) bool {
 	if mem == nil || mem.Type != core.MemoryTypeOpenLoop || mem.Status != core.MemoryStatusActive {
 		return false
 	}
@@ -304,7 +312,7 @@ func shouldArchiveResolvedOpenLoop(mem *core.Memory, decisionSubjects map[string
 		recordedAt = mem.UpdatedAt
 	}
 	for _, key := range openLoopResolutionKeys(mem.Subject, mem.TightDescription) {
-		resolvedAt, ok := decisionSubjects[key]
+		resolvedAt, ok := decisionSubjects[makeScopedOpenLoopResolutionKey(mem, key)]
 		if !ok {
 			continue
 		}
@@ -313,6 +321,18 @@ func shouldArchiveResolvedOpenLoop(mem *core.Memory, decisionSubjects map[string
 		}
 	}
 	return false
+}
+
+func makeScopedOpenLoopResolutionKey(mem *core.Memory, key string) scopedOpenLoopResolutionKey {
+	if mem == nil {
+		return scopedOpenLoopResolutionKey{key: key}
+	}
+	return scopedOpenLoopResolutionKey{
+		scope:     mem.Scope,
+		projectID: mem.ProjectID,
+		sessionID: mem.SessionID,
+		key:       key,
+	}
 }
 
 func openLoopResolutionKeys(subject, tightDescription string) []string {

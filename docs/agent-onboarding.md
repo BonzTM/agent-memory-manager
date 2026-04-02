@@ -446,7 +446,7 @@ The baseline runner follows a 6-phase structure to ensure clean dependencies:
 
 1. **Phase 1: Reflection** — `reflect` extracts candidates from events.
 2. **Phase 2: Initial Indexing** — `rebuild_indexes` builds embeddings so downstream jobs can use semantic scoring.
-3. **Phase 3: Compression** — `compress_history`, `consolidate_sessions`, `build_topic_summaries` structure the raw history.
+3. **Phase 3: Compression** — `compress_history`, `consolidate_sessions`, `build_topic_summaries`, `rebuild_indexes` structure the raw history and rebuild embeddings for downstream phases.
 4. **Phase 4: Linking** — `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `form_episodes` build the knowledge graph.
 5. **Phase 5: Quality** — `detect_contradictions`, `decay_stale_memory`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces` refine the store.
 6. **Phase 6: Finalization** — `rebuild_indexes` (catches items from phases 3-5), `cleanup_recall_history`, `update_ranking_weights` finalize the cycle.

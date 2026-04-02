@@ -193,6 +193,107 @@ func TestReflect_RetriesHeuristicFallbackOnNextRun(t *testing.T) {
 	}
 }
 
+func TestReflect_RetriesEmptyHeuristicFallbackOnNextRun(t *testing.T) {
+	ctx := context.Background()
+	var extractionCalls atomic.Int32
+
+	svc, repo := testServiceAndRepo(t)
+	svc.SetMinConfidenceForCreation(0)
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		isLLM: true,
+		extractBatchWithMethod: func(contents []string) ([]core.MemoryCandidate, string, error) {
+			if len(contents) != 1 {
+				t.Fatalf("expected one extraction input, got %d", len(contents))
+			}
+			if extractionCalls.Add(1) == 1 {
+				return nil, MethodHeuristic, nil
+			}
+			return []core.MemoryCandidate{{
+				Type:             core.MemoryTypeDecision,
+				Subject:          "tool event policy",
+				Body:             "Ignore tool events by default during ingestion",
+				TightDescription: "ignore tool events by default",
+				Confidence:       0.93,
+				SourceEventNums:  []int{1},
+			}}, MethodLLM, nil
+		},
+	})
+
+	now := time.Now().UTC().Truncate(time.Second)
+	evt := &core.Event{
+		ID:           "evt_reflect_empty_retry",
+		Kind:         "message_user",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "We decided to ignore tool events by default because it reduces noise.",
+		OccurredAt:   now,
+		IngestedAt:   now,
+	}
+	if err := repo.InsertEvent(ctx, evt); err != nil {
+		t.Fatalf("insert event: %v", err)
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatalf("first reflect: %v", err)
+	}
+	if created != 0 {
+		t.Fatalf("expected no memories on empty heuristic fallback, got %d", created)
+	}
+
+	memories, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatalf("list memories after first reflect: %v", err)
+	}
+	if len(memories) != 0 {
+		t.Fatalf("expected no active memories after empty heuristic fallback, got %d", len(memories))
+	}
+
+	updatedEvent, err := repo.GetEvent(ctx, evt.ID)
+	if err != nil {
+		t.Fatalf("get event after first reflect: %v", err)
+	}
+	if updatedEvent.ReflectedAt != nil {
+		t.Fatal("expected empty heuristic fallback to clear reflected_at for retry")
+	}
+	if got := updatedEvent.Metadata[metaReflectFallbackCount]; got != "1" {
+		t.Fatalf("expected reflect fallback count=1 after first empty fallback, got %q", got)
+	}
+
+	created, err = svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatalf("second reflect: %v", err)
+	}
+	if created != 1 {
+		t.Fatalf("expected second reflect to create one llm memory, got %d", created)
+	}
+
+	memories, err = repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatalf("list memories after second reflect: %v", err)
+	}
+	if len(memories) != 1 {
+		t.Fatalf("expected one active memory after retry success, got %d", len(memories))
+	}
+	if got := memories[0].Metadata[MetaExtractionMethod]; got != MethodLLM {
+		t.Fatalf("expected llm extraction_method after retry success, got %q", got)
+	}
+	if memories[0].Body != "Ignore tool events by default during ingestion" {
+		t.Fatalf("expected llm retry to create final memory body, got %q", memories[0].Body)
+	}
+
+	updatedEvent, err = repo.GetEvent(ctx, evt.ID)
+	if err != nil {
+		t.Fatalf("get event after second reflect: %v", err)
+	}
+	if updatedEvent.ReflectedAt == nil {
+		t.Fatal("expected retry success to leave reflected_at set")
+	}
+	if got := updatedEvent.Metadata[metaReflectFallbackCount]; got != "" {
+		t.Fatalf("expected reflect fallback count to clear after retry success, got %q", got)
+	}
+}
+
 func TestCompressFallbackWhenBatchCompressionErrors(t *testing.T) {
 	fallbackSummarize := func(_ string, maxLen int) (string, error) {
 		if maxLen <= 200 {

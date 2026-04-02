@@ -102,6 +102,11 @@ type topicSummaryPlan struct {
 	title      string
 }
 
+type sessionDerivedArtifacts struct {
+	summaryIDs []string
+	episodeIDs []string
+}
+
 // CompressHistory summarizes recent event chunks into leaf summaries and
 // returns the number created.
 func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
@@ -427,10 +432,12 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 		// Fetch prior summary for context continuity (incremental consolidation).
 		priorSummary := s.latestSessionSummary(ctx, sessionID)
 		priorSummaryFallbackCount := currentSummaryFallbackCount(priorSummary)
+		retryArtifacts := sessionDerivedArtifacts{}
 		sessionRetryRun := summaryNeedsLLMRetry(priorSummary) || sessionHasRetryableMemories(linkedMemories)
 		if sessionRetryRun {
-			if err := s.deleteSessionDerivedArtifacts(ctx, sessionID); err != nil {
-				return created, fmt.Errorf("delete prior session artifacts for retry: %w", err)
+			retryArtifacts, err = s.listSessionDerivedArtifacts(ctx, sessionID)
+			if err != nil {
+				return created, fmt.Errorf("list prior session artifacts for retry: %w", err)
 			}
 			priorSummary = nil
 		}
@@ -462,14 +469,13 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 			return created, err
 		}
 		narrativeRetryable := s.intelligence != nil && s.intelligence.IsLLMBacked() && narrativeMethod == MethodHeuristic
+		resolvedOpenLoopIDs := []string(nil)
 
 		if usedNarrative {
 			if err := s.insertNarrativeEpisode(ctx, narrativeResult, sessionID, scope, projectID, eventIDs, evts, narrativeMethod, narrativeRetryable, priorSummaryFallbackCount); err != nil {
 				return created, fmt.Errorf("insert narrative episode: %w", err)
 			}
-			if err := s.archiveResolvedOpenLoops(ctx, narrativeResult.ResolvedLoops); err != nil {
-				return created, fmt.Errorf("archive resolved open loops: %w", err)
-			}
+			resolvedOpenLoopIDs = append(resolvedOpenLoopIDs, narrativeResult.ResolvedLoops...)
 			openLoops = filterOpenLoopsByID(openLoops, narrativeResult.ResolvedLoops)
 
 			// Extract memories from the narrative using the full extraction pipeline.
@@ -603,6 +609,14 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 
 		if err := s.markMemoriesNarrativeIncluded(ctx, linkedMemories); err != nil {
 			return created, fmt.Errorf("mark narrative included metadata: %w", err)
+		}
+		if err := s.archiveResolvedOpenLoops(ctx, resolvedOpenLoopIDs); err != nil {
+			return created, fmt.Errorf("archive resolved open loops: %w", err)
+		}
+		if sessionRetryRun {
+			if err := s.deleteSessionDerivedArtifacts(ctx, retryArtifacts); err != nil {
+				return created, fmt.Errorf("delete prior session artifacts for retry: %w", err)
+			}
 		}
 
 		shouldRetrySession, err := s.shouldRetrySourceEvents(ctx, eventIDs)
@@ -1292,19 +1306,18 @@ func (s *AMMService) archiveResolvedOpenLoops(ctx context.Context, ids []string)
 	return nil
 }
 
-func (s *AMMService) deleteSessionDerivedArtifacts(ctx context.Context, sessionID string) error {
+func (s *AMMService) listSessionDerivedArtifacts(ctx context.Context, sessionID string) (sessionDerivedArtifacts, error) {
+	artifacts := sessionDerivedArtifacts{}
 	summaries, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{
 		Kind:      "session",
 		SessionID: sessionID,
 		Limit:     100,
 	})
 	if err != nil {
-		return fmt.Errorf("list session summaries: %w", err)
+		return artifacts, fmt.Errorf("list session summaries: %w", err)
 	}
 	for _, summary := range summaries {
-		if err := s.repo.DeleteSummary(ctx, summary.ID); err != nil {
-			return fmt.Errorf("delete session summary %s: %w", summary.ID, err)
-		}
+		artifacts.summaryIDs = append(artifacts.summaryIDs, summary.ID)
 	}
 
 	episodes, err := s.repo.ListEpisodes(ctx, core.ListEpisodesOptions{
@@ -1312,11 +1325,30 @@ func (s *AMMService) deleteSessionDerivedArtifacts(ctx context.Context, sessionI
 		Limit:     100,
 	})
 	if err != nil {
-		return fmt.Errorf("list session episodes: %w", err)
+		return artifacts, fmt.Errorf("list session episodes: %w", err)
 	}
 	for _, episode := range episodes {
-		if err := s.repo.DeleteEpisode(ctx, episode.ID); err != nil {
-			return fmt.Errorf("delete session episode %s: %w", episode.ID, err)
+		artifacts.episodeIDs = append(artifacts.episodeIDs, episode.ID)
+	}
+
+	return artifacts, nil
+}
+
+func (s *AMMService) deleteSessionDerivedArtifacts(ctx context.Context, artifacts sessionDerivedArtifacts) error {
+	for _, summaryID := range artifacts.summaryIDs {
+		if strings.TrimSpace(summaryID) == "" {
+			continue
+		}
+		if err := s.repo.DeleteSummary(ctx, summaryID); err != nil {
+			return fmt.Errorf("delete session summary %s: %w", summaryID, err)
+		}
+	}
+	for _, episodeID := range artifacts.episodeIDs {
+		if strings.TrimSpace(episodeID) == "" {
+			continue
+		}
+		if err := s.repo.DeleteEpisode(ctx, episodeID); err != nil {
+			return fmt.Errorf("delete session episode %s: %w", episodeID, err)
 		}
 	}
 

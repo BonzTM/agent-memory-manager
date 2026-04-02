@@ -167,6 +167,20 @@ type consolidateTestIntelligence struct {
 	topicBatchCallCountPtr    *int32
 }
 
+type failNthInsertSummaryRepo struct {
+	core.Repository
+	failAt int
+	calls  int
+}
+
+func (r *failNthInsertSummaryRepo) InsertSummary(ctx context.Context, summary *core.Summary) error {
+	r.calls++
+	if r.failAt > 0 && r.calls == r.failAt {
+		return fmt.Errorf("insert summary failed")
+	}
+	return r.Repository.InsertSummary(ctx, summary)
+}
+
 func (s consolidateTestSummarizer) Summarize(_ context.Context, content string, maxLen int) (string, error) {
 	if s.summarize == nil {
 		return content, nil
@@ -2117,6 +2131,154 @@ func TestConsolidateSessions_RetriesHeuristicFallbackOnNextRun(t *testing.T) {
 		if updated.ReflectedAt == nil {
 			t.Fatalf("expected event %s to be marked reflected after retry success", evt.ID)
 		}
+	}
+}
+
+func TestConsolidateSessions_RetryFailureKeepsPriorArtifactsAndOpenLoops(t *testing.T) {
+	ctx := context.Background()
+	baseSvc, repo := testServiceAndRepo(t)
+	wrappedRepo := &failNthInsertSummaryRepo{Repository: repo, failAt: 2}
+	svc := New(wrappedRepo, baseSvc.dbPath, nil, nil)
+	svc.SetMinConfidenceForCreation(0)
+	svc.SetSessionIdleTimeout(0)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	openLoop := &core.Memory{
+		ID:               "mem_retry_failure_open_loop",
+		Type:             core.MemoryTypeOpenLoop,
+		Scope:            core.ScopeProject,
+		ProjectID:        "proj_retry_failure",
+		Subject:          "tool event policy",
+		Body:             "Need to decide how tool events should be filtered during ingestion.",
+		TightDescription: "tool event policy unresolved",
+		Confidence:       0.8,
+		Importance:       0.6,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now.Add(-time.Hour),
+		UpdatedAt:        now.Add(-time.Hour),
+	}
+	if err := repo.InsertMemory(ctx, openLoop); err != nil {
+		t.Fatalf("insert open loop: %v", err)
+	}
+
+	var narrativeCalls atomic.Int32
+	var extractionCalls atomic.Int32
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		isLLM: true,
+		consolidateWithMethod: func(_ []core.EventContent, _ []core.MemorySummary) (*core.NarrativeResult, string, error) {
+			if narrativeCalls.Add(1) == 1 {
+				return &core.NarrativeResult{
+					Title:     "Tool event policy fallback",
+					Summary:   "heuristic retryable session summary",
+					TightDesc: "heuristic tool event policy",
+					Episode: &core.EpisodeCandidate{
+						Title: "Tool event policy fallback",
+						Body:  "heuristic retryable episode",
+					},
+				}, MethodHeuristic, nil
+			}
+			return &core.NarrativeResult{
+				Title:         "Tool event policy finalized",
+				Summary:       "llm retry summary",
+				TightDesc:     "llm tool event policy",
+				ResolvedLoops: []string{openLoop.ID},
+				Episode: &core.EpisodeCandidate{
+					Title: "Tool event policy finalized",
+					Body:  "llm retry episode",
+				},
+			}, MethodLLM, nil
+		},
+		extractBatchWithMethod: func(contents []string) ([]core.MemoryCandidate, string, error) {
+			if len(contents) != 1 {
+				t.Fatalf("expected one narrative extraction input, got %d", len(contents))
+			}
+			if extractionCalls.Add(1) == 1 {
+				return []core.MemoryCandidate{{
+					Type:             core.MemoryTypeDecision,
+					Subject:          "tool event policy",
+					Body:             "Heuristic tool event policy decision",
+					TightDescription: "heuristic tool event policy",
+					Confidence:       0.45,
+				}}, MethodHeuristic, nil
+			}
+			return []core.MemoryCandidate{{
+				Type:             core.MemoryTypeDecision,
+				Subject:          "tool event policy",
+				Body:             "Ignore tool events by default during ingestion",
+				TightDescription: "ignore tool events by default",
+				Confidence:       0.93,
+			}}, MethodLLM, nil
+		},
+	})
+
+	for i := 0; i < 2; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			SessionID:    "sess_retry_failure",
+			ProjectID:    "proj_retry_failure",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("retry failure event %d", i+1),
+			OccurredAt:   now.Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatalf("ingest event %d: %v", i+1, err)
+		}
+	}
+
+	created, err := svc.ConsolidateSessions(ctx)
+	if err != nil {
+		t.Fatalf("first consolidate: %v", err)
+	}
+	if created != 1 {
+		t.Fatalf("expected one session summary on first consolidate, got %d", created)
+	}
+
+	summaries, err := repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "session", SessionID: "sess_retry_failure", Limit: 10})
+	if err != nil {
+		t.Fatalf("list session summaries after first consolidate: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 session summary after first consolidate, got %d", len(summaries))
+	}
+	firstSummaryID := summaries[0].ID
+
+	episodes, err := repo.ListEpisodes(ctx, core.ListEpisodesOptions{SessionID: "sess_retry_failure", Limit: 10})
+	if err != nil {
+		t.Fatalf("list episodes after first consolidate: %v", err)
+	}
+	if len(episodes) != 1 {
+		t.Fatalf("expected 1 episode after first consolidate, got %d", len(episodes))
+	}
+	firstEpisodeID := episodes[0].ID
+
+	updatedOpenLoop, err := repo.GetMemory(ctx, openLoop.ID)
+	if err != nil {
+		t.Fatalf("get open loop after first consolidate: %v", err)
+	}
+	if updatedOpenLoop.Status != core.MemoryStatusActive {
+		t.Fatalf("expected open loop to remain active before retry, got %s", updatedOpenLoop.Status)
+	}
+
+	_, err = svc.ConsolidateSessions(ctx)
+	if err == nil || !strings.Contains(err.Error(), "insert summary failed") {
+		t.Fatalf("expected wrapped summary insert failure on retry, got %v", err)
+	}
+
+	if _, err := repo.GetSummary(ctx, firstSummaryID); err != nil {
+		t.Fatalf("expected prior summary to survive failed retry: %v", err)
+	}
+	if _, err := repo.GetEpisode(ctx, firstEpisodeID); err != nil {
+		t.Fatalf("expected prior episode to survive failed retry: %v", err)
+	}
+
+	updatedOpenLoop, err = repo.GetMemory(ctx, openLoop.ID)
+	if err != nil {
+		t.Fatalf("get open loop after failed retry: %v", err)
+	}
+	if updatedOpenLoop.Status != core.MemoryStatusActive {
+		t.Fatalf("expected failed retry to leave open loop active, got %s", updatedOpenLoop.Status)
 	}
 }
 

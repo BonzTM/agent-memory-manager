@@ -119,7 +119,7 @@ log_phase "Phase 2: Build embeddings"
 run_job rebuild_indexes
 
 log_phase "Phase 3: Compress and structure"
-for job in compress_history consolidate_sessions build_topic_summaries; do
+for job in compress_history consolidate_sessions build_topic_summaries rebuild_indexes; do
   run_job "$job"
 done
 

@@ -268,6 +268,67 @@ func TestLifecycleReview_ArchivesResolvedOpenLoopsWhenDecisionExists(t *testing.
 	}
 }
 
+func TestLifecycleReview_DoesNotArchiveResolvedOpenLoopsAcrossProjects(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	openLoopCreatedAt := time.Now().UTC().Add(-48 * time.Hour)
+	decisionCreatedAt := time.Now().UTC().Add(-24 * time.Hour)
+
+	openLoop := &core.Memory{
+		ID:               "mem_open_loop_proj_b",
+		Type:             core.MemoryTypeOpenLoop,
+		Scope:            core.ScopeProject,
+		ProjectID:        "proj_b",
+		Subject:          "tool event policy",
+		Body:             "Need to decide how tool events should be filtered during ingestion.",
+		TightDescription: "tool event policy unresolved",
+		Confidence:       0.8,
+		Importance:       0.6,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        openLoopCreatedAt,
+		UpdatedAt:        openLoopCreatedAt,
+	}
+	decision := &core.Memory{
+		ID:               "mem_decision_proj_a",
+		Type:             core.MemoryTypeDecision,
+		Scope:            core.ScopeProject,
+		ProjectID:        "proj_a",
+		Subject:          "tool event policy",
+		Body:             "Tool events should be ignored by default during ingestion.",
+		TightDescription: "default tool event ignore policy",
+		Confidence:       0.9,
+		Importance:       0.8,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        decisionCreatedAt,
+		UpdatedAt:        decisionCreatedAt,
+	}
+	for _, mem := range []*core.Memory{openLoop, decision} {
+		if err := repo.InsertMemory(ctx, mem); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	svc.SetIntelligenceProvider(&lifecycleReviewIntelligenceStub{})
+
+	affected, err := svc.LifecycleReview(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected != 0 {
+		t.Fatalf("expected no lifecycle mutations across projects, got %d", affected)
+	}
+
+	updatedOpenLoop, err := repo.GetMemory(ctx, openLoop.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedOpenLoop.Status != core.MemoryStatusActive {
+		t.Fatalf("expected cross-project open loop to remain active, got %s", updatedOpenLoop.Status)
+	}
+}
+
 func TestLifecycleReview_TagsReviewedMemories(t *testing.T) {
 	svc, repo := testServiceAndRepo(t)
 	ctx := context.Background()
