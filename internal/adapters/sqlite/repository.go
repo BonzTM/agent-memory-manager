@@ -180,6 +180,17 @@ func strToTime(s string) time.Time {
 	return t
 }
 
+// normalizeRFC3339ToUTC parses an RFC3339 timestamp and re-formats it in UTC
+// with the "Z" suffix. This ensures consistent lexicographic comparison against
+// SQLite's text-stored timestamps which are always in UTC "Z" format.
+func normalizeRFC3339ToUTC(s string) string {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return s // pass through if unparseable; validation should catch this earlier
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
 func nullStrToPtrTime(ns sql.NullString) *time.Time {
 	if !ns.Valid {
 		return nil
@@ -291,7 +302,7 @@ func (r *SQLiteRepository) ListEvents(ctx context.Context, opts core.ListEventsO
 		args = append(args, opts.Kind)
 	}
 	if opts.Before != "" {
-		query += " AND occurred_at < ?"
+		query += " AND occurred_at <= ?"
 		args = append(args, opts.Before)
 	}
 	if opts.BeforeSequenceID > 0 {
@@ -299,7 +310,7 @@ func (r *SQLiteRepository) ListEvents(ctx context.Context, opts core.ListEventsO
 		args = append(args, opts.BeforeSequenceID)
 	}
 	if opts.After != "" {
-		query += " AND occurred_at > ?"
+		query += " AND occurred_at >= ?"
 		args = append(args, opts.After)
 	}
 	if opts.AfterSequenceID > 0 {
@@ -534,6 +545,14 @@ func (r *SQLiteRepository) ListSummaries(ctx context.Context, opts core.ListSumm
 		query += " AND session_id = ?"
 		args = append(args, opts.SessionID)
 	}
+	if opts.After != "" {
+		query += " AND created_at >= ?"
+		args = append(args, normalizeRFC3339ToUTC(opts.After))
+	}
+	if opts.Before != "" {
+		query += " AND created_at <= ?"
+		args = append(args, normalizeRFC3339ToUTC(opts.Before))
+	}
 	query += " ORDER BY created_at DESC LIMIT ?"
 	args = append(args, defaultLimit(opts.Limit))
 
@@ -576,6 +595,67 @@ func (r *SQLiteRepository) SearchSummaries(ctx context.Context, query string, li
 		WHERE summaries_fts MATCH ?
 		ORDER BY rank
 		LIMIT ?`, q, defaultLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var summaries []core.Summary
+	for rows.Next() {
+		var s core.Summary
+		var spanJSON, metaJSON, createdAt, updatedAt string
+		if err := rows.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID,
+			&s.AgentID, &s.Title, &s.Body, &s.TightDescription,
+			&s.PrivacyLevel, &spanJSON, &metaJSON, &s.Depth, &s.CondensedKind, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(spanJSON), &s.SourceSpan); err != nil {
+			slog.Warn("decode field failed", "field", "source_span_json", "summary_id", s.ID, "error", err)
+		}
+		s.Metadata = unmarshalMap(metaJSON)
+		s.CreatedAt = strToTime(createdAt)
+		s.UpdatedAt = strToTime(updatedAt)
+		summaries = append(summaries, s)
+	}
+	return summaries, rows.Err()
+}
+
+func (r *SQLiteRepository) SearchScopedSummaries(ctx context.Context, query string, opts core.ListSummariesOptions) ([]core.Summary, error) {
+	q := sanitizeFTS5Query(query)
+	if q == "" {
+		return nil, nil
+	}
+	sqlQ := `SELECT s.id, s.kind, s.scope, COALESCE(s.project_id,''), COALESCE(s.session_id,''),
+		COALESCE(s.agent_id,''), COALESCE(s.title,''), s.body, s.tight_description,
+		s.privacy_level, s.source_span_json, s.metadata_json, s.depth, COALESCE(s.condensed_kind,''), s.created_at, s.updated_at
+		FROM summaries_fts f JOIN summaries s ON f.id = s.id
+		WHERE summaries_fts MATCH ?`
+	args := []interface{}{q}
+
+	if opts.Kind != "" {
+		sqlQ += " AND s.kind = ?"
+		args = append(args, opts.Kind)
+	}
+	if opts.ProjectID != "" {
+		sqlQ += " AND s.project_id = ?"
+		args = append(args, opts.ProjectID)
+	}
+	if opts.SessionID != "" {
+		sqlQ += " AND s.session_id = ?"
+		args = append(args, opts.SessionID)
+	}
+	if opts.After != "" {
+		sqlQ += " AND s.created_at >= ?"
+		args = append(args, normalizeRFC3339ToUTC(opts.After))
+	}
+	if opts.Before != "" {
+		sqlQ += " AND s.created_at <= ?"
+		args = append(args, normalizeRFC3339ToUTC(opts.Before))
+	}
+	sqlQ += " ORDER BY rank LIMIT ?"
+	args = append(args, defaultLimit(opts.Limit))
+
+	rows, err := r.QueryContext(ctx, sqlQ, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -284,7 +284,7 @@ func (r *Repository) ListEvents(ctx context.Context, opts core.ListEventsOptions
 		i++
 	}
 	if opts.Before != "" {
-		query += fmt.Sprintf(" AND occurred_at < $%d", i)
+		query += fmt.Sprintf(" AND occurred_at <= $%d", i)
 		args = append(args, opts.Before)
 		i++
 	}
@@ -294,7 +294,7 @@ func (r *Repository) ListEvents(ctx context.Context, opts core.ListEventsOptions
 		i++
 	}
 	if opts.After != "" {
-		query += fmt.Sprintf(" AND occurred_at > $%d", i)
+		query += fmt.Sprintf(" AND occurred_at >= $%d", i)
 		args = append(args, opts.After)
 		i++
 	}
@@ -507,6 +507,16 @@ func (r *Repository) ListSummaries(ctx context.Context, opts core.ListSummariesO
 		args = append(args, opts.SessionID)
 		i++
 	}
+	if opts.After != "" {
+		query += fmt.Sprintf(" AND created_at >= $%d", i)
+		args = append(args, opts.After)
+		i++
+	}
+	if opts.Before != "" {
+		query += fmt.Sprintf(" AND created_at <= $%d", i)
+		args = append(args, opts.Before)
+		i++
+	}
 	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", i)
 	args = append(args, defaultLimit(opts.Limit))
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -552,6 +562,65 @@ func (r *Repository) SearchSummaries(ctx context.Context, query string, limit in
 		if err := rows.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID, &s.AgentID,
 			&s.Title, &s.Body, &s.TightDescription, &s.PrivacyLevel, &span, &meta, &s.Depth, &s.CondensedKind, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, wrapErr("search summaries", err)
+		}
+		s.SourceSpan = parseSourceSpanJSON(span)
+		s.Metadata = parseMapJSON(meta)
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) SearchScopedSummaries(ctx context.Context, query string, opts core.ListSummariesOptions) ([]core.Summary, error) {
+	if strings.TrimSpace(query) == "" {
+		return nil, nil
+	}
+	sqlQ := `SELECT id, kind, scope, COALESCE(project_id,''), COALESCE(session_id,''), COALESCE(agent_id,''),
+		COALESCE(title,''), body, tight_description, privacy_level,
+		source_span_json, metadata_json, depth, COALESCE(condensed_kind,''), created_at, updated_at
+		FROM summaries
+		WHERE summaries_fts @@ plainto_tsquery('simple', $1)`
+	args := []any{query}
+	i := 2
+	if opts.Kind != "" {
+		sqlQ += fmt.Sprintf(" AND kind = $%d", i)
+		args = append(args, opts.Kind)
+		i++
+	}
+	if opts.ProjectID != "" {
+		sqlQ += fmt.Sprintf(" AND project_id = $%d", i)
+		args = append(args, opts.ProjectID)
+		i++
+	}
+	if opts.SessionID != "" {
+		sqlQ += fmt.Sprintf(" AND session_id = $%d", i)
+		args = append(args, opts.SessionID)
+		i++
+	}
+	if opts.After != "" {
+		sqlQ += fmt.Sprintf(" AND created_at >= $%d", i)
+		args = append(args, opts.After)
+		i++
+	}
+	if opts.Before != "" {
+		sqlQ += fmt.Sprintf(" AND created_at <= $%d", i)
+		args = append(args, opts.Before)
+		i++
+	}
+	sqlQ += fmt.Sprintf(" ORDER BY ts_rank(summaries_fts, plainto_tsquery('simple', $1)) DESC, created_at DESC LIMIT $%d", i)
+	args = append(args, defaultLimit(opts.Limit))
+
+	rows, err := r.db.QueryContext(ctx, sqlQ, args...)
+	if err != nil {
+		return nil, wrapErr("search scoped summaries", err)
+	}
+	defer rows.Close()
+	out := make([]core.Summary, 0)
+	for rows.Next() {
+		var s core.Summary
+		var span, meta []byte
+		if err := rows.Scan(&s.ID, &s.Kind, &s.Scope, &s.ProjectID, &s.SessionID, &s.AgentID,
+			&s.Title, &s.Body, &s.TightDescription, &s.PrivacyLevel, &span, &meta, &s.Depth, &s.CondensedKind, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, wrapErr("search scoped summaries", err)
 		}
 		s.SourceSpan = parseSourceSpanJSON(span)
 		s.Metadata = parseMapJSON(meta)
