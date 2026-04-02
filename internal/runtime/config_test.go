@@ -441,3 +441,123 @@ func TestLoadConfig_ParsesIntakeQualityToml(t *testing.T) {
 		t.Fatalf("expected TOML min importance 0.2, got %v", cfg.IntakeQuality.MinImportanceForCreation)
 	}
 }
+
+func TestDefaultConfig_TimeoutDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Summarizer.TimeoutSeconds != defaultSummarizerTimeoutSeconds {
+		t.Fatalf("expected default summarizer timeout %d, got %d", defaultSummarizerTimeoutSeconds, cfg.Summarizer.TimeoutSeconds)
+	}
+	if cfg.Summarizer.EmbeddingTimeoutSeconds != defaultEmbeddingTimeoutSeconds {
+		t.Fatalf("expected default embedding timeout %d, got %d", defaultEmbeddingTimeoutSeconds, cfg.Summarizer.EmbeddingTimeoutSeconds)
+	}
+	if cfg.HTTP.ReadTimeoutSeconds != defaultHTTPReadTimeout {
+		t.Fatalf("expected default HTTP read timeout %d, got %d", defaultHTTPReadTimeout, cfg.HTTP.ReadTimeoutSeconds)
+	}
+	if cfg.HTTP.WriteTimeoutSeconds != defaultHTTPWriteTimeout {
+		t.Fatalf("expected default HTTP write timeout %d, got %d", defaultHTTPWriteTimeout, cfg.HTTP.WriteTimeoutSeconds)
+	}
+	if cfg.HTTP.IdleTimeoutSeconds != defaultHTTPIdleTimeout {
+		t.Fatalf("expected default HTTP idle timeout %d, got %d", defaultHTTPIdleTimeout, cfg.HTTP.IdleTimeoutSeconds)
+	}
+}
+
+func TestConfigFromEnv_OverridesTimeouts(t *testing.T) {
+	t.Setenv("AMM_SUMMARIZER_TIMEOUT_SECONDS", "600")
+	t.Setenv("AMM_EMBEDDING_TIMEOUT_SECONDS", "45")
+	t.Setenv("AMM_HTTP_READ_TIMEOUT_SECONDS", "15")
+	t.Setenv("AMM_HTTP_WRITE_TIMEOUT_SECONDS", "90")
+	t.Setenv("AMM_HTTP_IDLE_TIMEOUT_SECONDS", "180")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.Summarizer.TimeoutSeconds != 600 {
+		t.Fatalf("expected summarizer timeout 600, got %d", cfg.Summarizer.TimeoutSeconds)
+	}
+	if cfg.Summarizer.EmbeddingTimeoutSeconds != 45 {
+		t.Fatalf("expected embedding timeout 45, got %d", cfg.Summarizer.EmbeddingTimeoutSeconds)
+	}
+	if cfg.HTTP.ReadTimeoutSeconds != 15 {
+		t.Fatalf("expected HTTP read timeout 15, got %d", cfg.HTTP.ReadTimeoutSeconds)
+	}
+	if cfg.HTTP.WriteTimeoutSeconds != 90 {
+		t.Fatalf("expected HTTP write timeout 90, got %d", cfg.HTTP.WriteTimeoutSeconds)
+	}
+	if cfg.HTTP.IdleTimeoutSeconds != 180 {
+		t.Fatalf("expected HTTP idle timeout 180, got %d", cfg.HTTP.IdleTimeoutSeconds)
+	}
+}
+
+func TestConfigFromEnv_IgnoresInvalidTimeouts(t *testing.T) {
+	t.Setenv("AMM_SUMMARIZER_TIMEOUT_SECONDS", "0")
+	t.Setenv("AMM_EMBEDDING_TIMEOUT_SECONDS", "-1")
+	t.Setenv("AMM_HTTP_READ_TIMEOUT_SECONDS", "abc")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.Summarizer.TimeoutSeconds != defaultSummarizerTimeoutSeconds {
+		t.Fatalf("expected default summarizer timeout, got %d", cfg.Summarizer.TimeoutSeconds)
+	}
+	if cfg.Summarizer.EmbeddingTimeoutSeconds != defaultEmbeddingTimeoutSeconds {
+		t.Fatalf("expected default embedding timeout, got %d", cfg.Summarizer.EmbeddingTimeoutSeconds)
+	}
+	if cfg.HTTP.ReadTimeoutSeconds != defaultHTTPReadTimeout {
+		t.Fatalf("expected default HTTP read timeout, got %d", cfg.HTTP.ReadTimeoutSeconds)
+	}
+}
+
+func TestConfigFromEnv_OverridesReasoningFields(t *testing.T) {
+	t.Setenv("AMM_SUMMARIZER_REASONING", "enabled")
+	t.Setenv("AMM_SUMMARIZER_REASONING_EFFORT", "high")
+	t.Setenv("AMM_REVIEW_REASONING", "enabled")
+	t.Setenv("AMM_REVIEW_REASONING_EFFORT", "low")
+
+	cfg := ConfigFromEnv(DefaultConfig())
+	if cfg.Summarizer.Reasoning != "enabled" {
+		t.Fatalf("expected summarizer reasoning 'enabled', got %q", cfg.Summarizer.Reasoning)
+	}
+	if cfg.Summarizer.ReasoningEffort != "high" {
+		t.Fatalf("expected summarizer reasoning effort 'high', got %q", cfg.Summarizer.ReasoningEffort)
+	}
+	if cfg.Summarizer.ReviewReasoning != "enabled" {
+		t.Fatalf("expected review reasoning 'enabled', got %q", cfg.Summarizer.ReviewReasoning)
+	}
+	if cfg.Summarizer.ReviewReasoningEffort != "low" {
+		t.Fatalf("expected review reasoning effort 'low', got %q", cfg.Summarizer.ReviewReasoningEffort)
+	}
+}
+
+func TestLoadConfig_ParsesTimeoutToml(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	content := []byte("[summarizer]\ntimeout_seconds = \"600\"\nembedding_timeout_seconds = \"45\"\nreasoning = \"enabled\"\nreasoning_effort = \"medium\"\nreview_reasoning = \"enabled\"\n\n[http]\nread_timeout_seconds = \"15\"\nwrite_timeout_seconds = \"90\"\nidle_timeout_seconds = \"180\"\n")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("expected TOML config to load, got error: %v", err)
+	}
+	if cfg.Summarizer.TimeoutSeconds != 600 {
+		t.Fatalf("expected TOML summarizer timeout 600, got %d", cfg.Summarizer.TimeoutSeconds)
+	}
+	if cfg.Summarizer.EmbeddingTimeoutSeconds != 45 {
+		t.Fatalf("expected TOML embedding timeout 45, got %d", cfg.Summarizer.EmbeddingTimeoutSeconds)
+	}
+	if cfg.Summarizer.Reasoning != "enabled" {
+		t.Fatalf("expected TOML reasoning 'enabled', got %q", cfg.Summarizer.Reasoning)
+	}
+	if cfg.Summarizer.ReasoningEffort != "medium" {
+		t.Fatalf("expected TOML reasoning effort 'medium', got %q", cfg.Summarizer.ReasoningEffort)
+	}
+	if cfg.Summarizer.ReviewReasoning != "enabled" {
+		t.Fatalf("expected TOML review reasoning 'enabled', got %q", cfg.Summarizer.ReviewReasoning)
+	}
+	if cfg.HTTP.ReadTimeoutSeconds != 15 {
+		t.Fatalf("expected TOML HTTP read timeout 15, got %d", cfg.HTTP.ReadTimeoutSeconds)
+	}
+	if cfg.HTTP.WriteTimeoutSeconds != 90 {
+		t.Fatalf("expected TOML HTTP write timeout 90, got %d", cfg.HTTP.WriteTimeoutSeconds)
+	}
+	if cfg.HTTP.IdleTimeoutSeconds != 180 {
+		t.Fatalf("expected TOML HTTP idle timeout 180, got %d", cfg.HTTP.IdleTimeoutSeconds)
+	}
+}

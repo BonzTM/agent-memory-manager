@@ -30,6 +30,11 @@ const (
 	defaultSummarizerContextWindow        = 128000
 	defaultEntityHubThreshold              = 10
 	defaultTemporalAttenuation            = 0.3
+	defaultSummarizerTimeoutSeconds        = 300 // 5 minutes — large-context LLM calls need headroom
+	defaultEmbeddingTimeoutSeconds         = 30
+	defaultHTTPReadTimeout                 = 30
+	defaultHTTPWriteTimeout                = 60
+	defaultHTTPIdleTimeout                 = 120
 )
 
 // Config holds all runtime configuration for amm.
@@ -67,19 +72,24 @@ type CompressionConfig struct {
 }
 
 type HTTPConfig struct {
-	Addr        string `json:"addr"`
-	CORSOrigins string `json:"cors_origins"`
+	Addr                string `json:"addr"`
+	CORSOrigins         string `json:"cors_origins"`
+	ReadTimeoutSeconds  int    `json:"read_timeout_seconds"`  // HTTP server read timeout (default 30)
+	WriteTimeoutSeconds int    `json:"write_timeout_seconds"` // HTTP server write timeout (default 60)
+	IdleTimeoutSeconds  int    `json:"idle_timeout_seconds"`  // HTTP server idle timeout (default 120)
 }
 
 type SummarizerConfig struct {
 	Endpoint                        string  `json:"endpoint"`
 	APIKey                          string  `json:"api_key"`
 	Model                           string  `json:"model"`
-	ReasoningEffort                 string  `json:"reasoning_effort"`       // low, medium, high — empty disables
+	Reasoning                       string  `json:"reasoning"`               // "enabled" sends reasoning=true; any other value omits
+	ReasoningEffort                 string  `json:"reasoning_effort"`        // low, medium, high — empty omits
 	ReviewEndpoint                  string  `json:"review_endpoint"`
 	ReviewAPIKey                    string  `json:"review_api_key"`
 	ReviewModel                     string  `json:"review_model"`
-	ReviewReasoningEffort           string  `json:"review_reasoning_effort"` // low, medium, high — empty disables
+	ReviewReasoning                 string  `json:"review_reasoning"`        // "enabled" sends reasoning=true; any other value omits
+	ReviewReasoningEffort           string  `json:"review_reasoning_effort"` // low, medium, high — empty omits
 	ReprocessBatchSize              int     `json:"reprocess_batch_size"`
 	ReflectBatchSize                int     `json:"reflect_batch_size"`
 	ReflectLLMBatchSize             int     `json:"reflect_llm_batch_size"`
@@ -92,6 +102,8 @@ type SummarizerConfig struct {
 	CrossProjectSimilarityThreshold float64 `json:"cross_project_similarity_threshold"`
 	SessionIdleTimeoutMinutes       int     `json:"session_idle_timeout_minutes"`
 	SummarizerContextWindow         int     `json:"summarizer_context_window"`
+	TimeoutSeconds                  int     `json:"timeout_seconds"`          // HTTP client timeout for LLM summarizer/review calls (default 300)
+	EmbeddingTimeoutSeconds         int     `json:"embedding_timeout_seconds"` // HTTP client timeout for embedding calls (default 30)
 }
 
 type EmbeddingsConfig struct {
@@ -178,6 +190,8 @@ func DefaultConfig() Config {
 			CrossProjectSimilarityThreshold: defaultCrossProjectSimilarity,
 			SessionIdleTimeoutMinutes:       defaultSessionIdleTimeoutMinutes,
 			SummarizerContextWindow:         defaultSummarizerContextWindow,
+			TimeoutSeconds:                  defaultSummarizerTimeoutSeconds,
+			EmbeddingTimeoutSeconds:         defaultEmbeddingTimeoutSeconds,
 		},
 		Embeddings: EmbeddingsConfig{
 			Enabled: false,
@@ -188,7 +202,10 @@ func DefaultConfig() Config {
 		},
 		MaxExpandDepth: defaultMaxExpandDepth,
 		HTTP: HTTPConfig{
-			Addr: ":8080",
+			Addr:                ":8080",
+			ReadTimeoutSeconds:  defaultHTTPReadTimeout,
+			WriteTimeoutSeconds: defaultHTTPWriteTimeout,
+			IdleTimeoutSeconds:  defaultHTTPIdleTimeout,
 		},
 	}
 }
@@ -325,8 +342,12 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			cfg.Summarizer.APIKey = val
 		case "summarizer.model":
 			cfg.Summarizer.Model = val
+		case "summarizer.reasoning":
+			cfg.Summarizer.Reasoning = val
 		case "summarizer.reasoning_effort":
 			cfg.Summarizer.ReasoningEffort = val
+		case "summarizer.review_reasoning":
+			cfg.Summarizer.ReviewReasoning = val
 		case "summarizer.review_reasoning_effort":
 			cfg.Summarizer.ReviewReasoningEffort = val
 		case "summarizer.reprocess_batch_size":
@@ -375,6 +396,14 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
 				cfg.Summarizer.CrossProjectSimilarityThreshold = f
 			}
+		case "summarizer.timeout_seconds":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.Summarizer.TimeoutSeconds = n
+			}
+		case "summarizer.embedding_timeout_seconds":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.Summarizer.EmbeddingTimeoutSeconds = n
+			}
 		case "embeddings.enabled":
 			if b, err := strconv.ParseBool(val); err == nil {
 				cfg.Embeddings.Enabled = b
@@ -406,6 +435,18 @@ func parseFlatTOML(data []byte, cfg *Config) error {
 			cfg.HTTP.Addr = val
 		case "http.cors_origins":
 			cfg.HTTP.CORSOrigins = val
+		case "http.read_timeout_seconds":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.HTTP.ReadTimeoutSeconds = n
+			}
+		case "http.write_timeout_seconds":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.HTTP.WriteTimeoutSeconds = n
+			}
+		case "http.idle_timeout_seconds":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.HTTP.IdleTimeoutSeconds = n
+			}
 		case "api.url":
 			cfg.API.URL = val
 		case "api.key":
@@ -457,7 +498,9 @@ func LoadConfigWithEnv() Config {
 //	AMM_SUMMARIZER_ENDPOINT -> Summarizer.Endpoint
 //	AMM_SUMMARIZER_API_KEY -> Summarizer.APIKey
 //	AMM_SUMMARIZER_MODEL -> Summarizer.Model
+//	AMM_SUMMARIZER_REASONING -> Summarizer.Reasoning ("enabled" sends reasoning=true; any other value omits)
 //	AMM_SUMMARIZER_REASONING_EFFORT -> Summarizer.ReasoningEffort (low/medium/high)
+//	AMM_REVIEW_REASONING -> Summarizer.ReviewReasoning ("enabled" sends reasoning=true; any other value omits)
 //	AMM_REVIEW_REASONING_EFFORT -> Summarizer.ReviewReasoningEffort (low/medium/high)
 //	AMM_REPROCESS_BATCH_SIZE -> Summarizer.ReprocessBatchSize
 //	AMM_COMPRESS_CHUNK_SIZE -> Summarizer.CompressChunkSize
@@ -468,6 +511,11 @@ func LoadConfigWithEnv() Config {
 //	AMM_SUMMARIZER_CONTEXT_WINDOW -> Summarizer.SummarizerContextWindow
 //	AMM_EMBEDDING_BATCH_SIZE -> Summarizer.EmbeddingBatchSize
 //	AMM_CROSS_PROJECT_SIMILARITY_THRESHOLD -> Summarizer.CrossProjectSimilarityThreshold
+//	AMM_SUMMARIZER_TIMEOUT_SECONDS -> Summarizer.TimeoutSeconds (default 300)
+//	AMM_EMBEDDING_TIMEOUT_SECONDS -> Summarizer.EmbeddingTimeoutSeconds (default 30)
+//	AMM_HTTP_READ_TIMEOUT_SECONDS -> HTTP.ReadTimeoutSeconds (default 30)
+//	AMM_HTTP_WRITE_TIMEOUT_SECONDS -> HTTP.WriteTimeoutSeconds (default 60)
+//	AMM_HTTP_IDLE_TIMEOUT_SECONDS -> HTTP.IdleTimeoutSeconds (default 120)
 //	AMM_EMBEDDINGS_ENABLED -> Embeddings.Enabled (true/false)
 //	AMM_EMBEDDINGS_PROVIDER -> Embeddings.Provider
 //	AMM_EMBEDDINGS_ENDPOINT -> Embeddings.Endpoint
@@ -550,6 +598,9 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_SUMMARIZER_MODEL"); v != "" {
 		base.Summarizer.Model = v
 	}
+	if v := os.Getenv("AMM_SUMMARIZER_REASONING"); v != "" {
+		base.Summarizer.Reasoning = v
+	}
 	if v := os.Getenv("AMM_SUMMARIZER_REASONING_EFFORT"); v != "" {
 		base.Summarizer.ReasoningEffort = v
 	}
@@ -566,6 +617,9 @@ func ConfigFromEnv(base Config) Config {
 	}
 	if v := os.Getenv("AMM_REVIEW_MODEL"); v != "" {
 		base.Summarizer.ReviewModel = v
+	}
+	if v := os.Getenv("AMM_REVIEW_REASONING"); v != "" {
+		base.Summarizer.ReviewReasoning = v
 	}
 	if v := os.Getenv("AMM_REVIEW_REASONING_EFFORT"); v != "" {
 		base.Summarizer.ReviewReasoningEffort = v
@@ -623,6 +677,31 @@ func ConfigFromEnv(base Config) Config {
 	if v := os.Getenv("AMM_SUMMARIZER_CONTEXT_WINDOW"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			base.Summarizer.SummarizerContextWindow = n
+		}
+	}
+	if v := os.Getenv("AMM_SUMMARIZER_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Summarizer.TimeoutSeconds = n
+		}
+	}
+	if v := os.Getenv("AMM_EMBEDDING_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.Summarizer.EmbeddingTimeoutSeconds = n
+		}
+	}
+	if v := os.Getenv("AMM_HTTP_READ_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.HTTP.ReadTimeoutSeconds = n
+		}
+	}
+	if v := os.Getenv("AMM_HTTP_WRITE_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.HTTP.WriteTimeoutSeconds = n
+		}
+	}
+	if v := os.Getenv("AMM_HTTP_IDLE_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			base.HTTP.IdleTimeoutSeconds = n
 		}
 	}
 	if v := os.Getenv("AMM_EMBEDDINGS_ENABLED"); v != "" {
