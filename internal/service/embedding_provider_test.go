@@ -74,7 +74,7 @@ func TestAPIEmbeddingProvider_HappyPath(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewAPIEmbeddingProvider(ts.URL+"/v1", "test-key", "test-model")
+	provider := NewAPIEmbeddingProvider(ts.URL+"/v1", "test-key", "test-model", 0)
 	vectors, err := provider.Embed(context.Background(), []string{"text1", "text2"})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
@@ -104,7 +104,7 @@ func TestAPIEmbeddingProvider_HTTPError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewAPIEmbeddingProvider(ts.URL, "test-key", "test-model")
+	provider := NewAPIEmbeddingProvider(ts.URL, "test-key", "test-model", 0)
 	_, err := provider.Embed(context.Background(), []string{"text1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -121,7 +121,7 @@ func TestAPIEmbeddingProvider_EmptyInput(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewAPIEmbeddingProvider(ts.URL, "test-key", "test-model")
+	provider := NewAPIEmbeddingProvider(ts.URL, "test-key", "test-model", 0)
 	vectors, err := provider.Embed(context.Background(), []string{})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
@@ -137,7 +137,7 @@ func TestAPIEmbeddingProvider_EmptyInput(t *testing.T) {
 func TestAPIEmbeddingProvider_NameAndModel(t *testing.T) {
 	t.Parallel()
 
-	provider := NewAPIEmbeddingProvider("http://example.com", "test-key", "test-model")
+	provider := NewAPIEmbeddingProvider("http://example.com", "test-key", "test-model", 0)
 	if provider.Name() != "api" {
 		t.Fatalf("expected name %q, got %q", "api", provider.Name())
 	}

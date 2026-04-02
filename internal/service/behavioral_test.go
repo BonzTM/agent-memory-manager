@@ -632,7 +632,7 @@ func TestReflect_SetsVerifiedWhenLLM(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	llm := NewLLMSummarizer(server.URL, "test-key", "test-model")
+	llm := NewLLMSummarizer(server.URL, "test-key", "test-model", 0)
 	svc, _ := testServiceAndRepoWithSummarizer(t, llm)
 
 	evt, err := svc.IngestEvent(ctx, &core.Event{
@@ -2686,7 +2686,7 @@ func TestReflect_ProcessesNoiseEventsWithLLMSummarizer(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	llm := NewLLMSummarizer(server.URL, "test-key", "test-model")
+	llm := NewLLMSummarizer(server.URL, "test-key", "test-model", 0)
 	svc, _ := testServiceAndRepoWithSummarizer(t, llm)
 	if svc.intelligence == nil || !svc.intelligence.IsLLMBacked() {
 		t.Fatal("expected service to detect LLM summarizer")

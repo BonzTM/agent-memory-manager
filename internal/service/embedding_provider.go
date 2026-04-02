@@ -34,12 +34,17 @@ type APIEmbeddingProvider struct {
 var _ core.EmbeddingProvider = (*NoopEmbeddingProvider)(nil)
 var _ core.EmbeddingProvider = (*APIEmbeddingProvider)(nil)
 
-func NewAPIEmbeddingProvider(endpoint, apiKey, model string) *APIEmbeddingProvider {
+// NewAPIEmbeddingProvider creates an embedding provider backed by an
+// OpenAI-compatible API. Pass 0 for timeout to use the default (30s).
+func NewAPIEmbeddingProvider(endpoint, apiKey, model string, timeout time.Duration) *APIEmbeddingProvider {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
 	return &APIEmbeddingProvider{
 		endpoint: strings.TrimRight(endpoint, "/"),
 		apiKey:   apiKey,
 		model:    model,
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   &http.Client{Timeout: timeout},
 	}
 }
 

@@ -17,7 +17,7 @@ import (
 
 func TestReflect_UsesAnalyzeEventsAndCreatesRelationships(t *testing.T) {
 	ctx := context.Background()
-	llm := service.NewLLMSummarizer("http://127.0.0.1:1", "test-key", "test-model")
+	llm := service.NewLLMSummarizer("http://127.0.0.1:1", "test-key", "test-model", 0)
 	svc, repo := testServiceForReprocessWithSummarizer(t, llm)
 	concreteSvc, ok := svc.(*service.AMMService)
 	if !ok {
@@ -138,7 +138,7 @@ func TestReflect_FallsBackToSummarizerWhenAnalyzeEventsFails(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	llm := service.NewLLMSummarizer(server.URL, "test-key", "test-model")
+	llm := service.NewLLMSummarizer(server.URL, "test-key", "test-model", 0)
 	svc, repo := testServiceForReprocessWithSummarizer(t, llm)
 	concreteSvc, ok := svc.(*service.AMMService)
 	if !ok {

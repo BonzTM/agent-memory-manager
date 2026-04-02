@@ -38,7 +38,7 @@ func TestLLMSummarizer_Summarize(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
 	ctx := context.Background()
 
 	result, err := s.Summarize(ctx, "A very long piece of text that needs summarization into something shorter and more useful.", 200)
@@ -78,7 +78,7 @@ func TestLLMSummarizer_ExtractMemoryCandidate(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
 	ctx := context.Background()
 
 	result, err := s.ExtractMemoryCandidate(ctx, "Josh said he prefers concise commit messages. We also decided to use SQLite.")
@@ -117,7 +117,7 @@ func TestLLMSummarizer_ExtractPromptIncludesDecisionGuidance(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
 	_, err := s.ExtractMemoryCandidate(context.Background(), "We decided to use SQLite because local setup is simpler")
 	if err != nil {
 		t.Fatalf("extract prompt error: %v", err)
@@ -155,7 +155,7 @@ func TestLLMSummarizer_ExtractFallsBackOnBadJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
 	ctx := context.Background()
 
 	result, err := s.ExtractMemoryCandidate(ctx, "I prefer tabs over spaces because Go requires gofmt formatting")
@@ -174,7 +174,7 @@ func TestLLMSummarizer_ExtractFallsBackOnHTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
 	ctx := context.Background()
 
 	result, err := s.ExtractMemoryCandidate(ctx, "We decided to use Go because it requires minimal dependencies")
@@ -192,7 +192,7 @@ func TestLLMSummarizer_SummarizeFallsBackOnHTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
 	ctx := context.Background()
 
 	result, err := s.Summarize(ctx, "Some text to summarize that is quite long", 200)
@@ -213,7 +213,7 @@ func TestLLMSummarizer_Timeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
@@ -233,7 +233,7 @@ func TestLLMSummarizer_ExtractEmptyResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
 	ctx := context.Background()
 
 	result, err := s.ExtractMemoryCandidate(ctx, "The weather is nice today")
@@ -267,7 +267,7 @@ func TestLLMSummarizer_RequestFormat(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "gpt-4o-mini")
+	s := NewLLMSummarizer(srv.URL, "test-key", "gpt-4o-mini", 0)
 	ctx := context.Background()
 	s.Summarize(ctx, "test", 100)
 
@@ -293,7 +293,7 @@ func TestLLMSummarizer_ExtractBatchHappyPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
 	ctx := context.Background()
 
 	result, err := s.ExtractMemoryCandidateBatch(ctx, []string{
@@ -338,7 +338,7 @@ func TestLLMSummarizer_ExtractBatchPromptIncludesDecisionGuidance(t *testing.T) 
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
 	_, err := s.ExtractMemoryCandidateBatch(context.Background(), []string{
 		"We should maybe use Postgres",
 		"We decided to use SQLite because local setup is simpler",
@@ -367,7 +367,7 @@ func TestLLMSummarizer_ExtractBatchFallsBackOnError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
 	ctx := context.Background()
 
 	result, err := s.ExtractMemoryCandidateBatch(ctx, []string{
@@ -382,7 +382,7 @@ func TestLLMSummarizer_ExtractBatchFallsBackOnError(t *testing.T) {
 }
 
 func TestLLMSummarizer_ExtractBatchEmpty(t *testing.T) {
-	s := NewLLMSummarizer("http://unused", "key", "model")
+	s := NewLLMSummarizer("http://unused", "key", "model", 0)
 	result, err := s.ExtractMemoryCandidateBatch(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -405,7 +405,7 @@ func TestLLMSummarizer_ExtractBatchTruncatesLongEvents(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewLLMSummarizer(srv.URL, "test-key", "test-model")
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
 	longContent := make([]byte, 3000)
 	for i := range longContent {
 		longContent[i] = 'a'
@@ -420,6 +420,101 @@ func TestLLMSummarizer_ExtractBatchTruncatesLongEvents(t *testing.T) {
 	}
 	if strings.Contains(receivedPrompt, strings.Repeat("a", maxEventContentLen+1)) {
 		t.Fatal("expected prompt to exclude content beyond maxEventContentLen")
+	}
+}
+
+func TestLLMSummarizer_ReasoningEffortSendsObject(t *testing.T) {
+	var receivedBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(mockChatResponse("summary")))
+	}))
+	defer srv.Close()
+
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
+	s.SetReasoningEffort("high")
+	s.Summarize(context.Background(), "test", 200)
+
+	reasoning, ok := receivedBody["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected reasoning to be an object, got %T: %v", receivedBody["reasoning"], receivedBody["reasoning"])
+	}
+	if reasoning["effort"] != "high" {
+		t.Fatalf("expected reasoning.effort='high', got %v", reasoning["effort"])
+	}
+	if _, hasEnabled := reasoning["enabled"]; hasEnabled {
+		t.Fatal("expected reasoning.enabled to be omitted when effort is set")
+	}
+}
+
+func TestLLMSummarizer_ReasoningEnabledSendsObject(t *testing.T) {
+	var receivedBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(mockChatResponse("summary")))
+	}))
+	defer srv.Close()
+
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
+	enabled := true
+	s.SetReasoning(&enabled)
+	s.Summarize(context.Background(), "test", 200)
+
+	reasoning, ok := receivedBody["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected reasoning to be an object, got %T: %v", receivedBody["reasoning"], receivedBody["reasoning"])
+	}
+	if reasoning["enabled"] != true {
+		t.Fatalf("expected reasoning.enabled=true, got %v", reasoning["enabled"])
+	}
+	if _, hasEffort := reasoning["effort"]; hasEffort {
+		t.Fatal("expected reasoning.effort to be omitted when only enabled is set")
+	}
+}
+
+func TestLLMSummarizer_NoReasoningOmitsField(t *testing.T) {
+	var receivedBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(mockChatResponse("summary")))
+	}))
+	defer srv.Close()
+
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
+	s.Summarize(context.Background(), "test", 200)
+
+	if _, hasReasoning := receivedBody["reasoning"]; hasReasoning {
+		t.Fatalf("expected reasoning field to be omitted, got %v", receivedBody["reasoning"])
+	}
+}
+
+func TestLLMSummarizer_EffortTakesPrecedenceOverEnabled(t *testing.T) {
+	var receivedBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&receivedBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(mockChatResponse("summary")))
+	}))
+	defer srv.Close()
+
+	s := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
+	enabled := true
+	s.SetReasoning(&enabled)
+	s.SetReasoningEffort("medium")
+	s.Summarize(context.Background(), "test", 200)
+
+	reasoning, ok := receivedBody["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected reasoning to be an object, got %T", receivedBody["reasoning"])
+	}
+	if reasoning["effort"] != "medium" {
+		t.Fatalf("expected reasoning.effort='medium', got %v", reasoning["effort"])
+	}
+	if _, hasEnabled := reasoning["enabled"]; hasEnabled {
+		t.Fatal("expected reasoning.enabled to be omitted when effort is set")
 	}
 }
 

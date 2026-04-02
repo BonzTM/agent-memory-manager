@@ -19,25 +19,37 @@ type LLMSummarizer struct {
 	endpoint        string
 	apiKey          string
 	model           string
-	reasoningEffort string // low, medium, high — empty means reasoning disabled
+	reasoning       *bool  // when true, sends reasoning.enabled=true; nil omits
+	reasoningEffort string // low, medium, high — sends reasoning.effort; empty omits
 	client          *http.Client
 	fallback        *HeuristicSummarizer
 }
 
 // NewLLMSummarizer constructs an LLM-backed summarizer for the supplied
-// endpoint, API key, and model.
-func NewLLMSummarizer(endpoint, apiKey, model string) *LLMSummarizer {
+// endpoint, API key, and model. The timeout controls the HTTP client
+// deadline for each LLM request. Pass 0 to use the default (5 minutes).
+func NewLLMSummarizer(endpoint, apiKey, model string, timeout time.Duration) *LLMSummarizer {
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
 	return &LLMSummarizer{
 		endpoint: strings.TrimRight(endpoint, "/"),
 		apiKey:   apiKey,
 		model:    model,
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   &http.Client{Timeout: timeout},
 		fallback: &HeuristicSummarizer{},
 	}
 }
 
+// SetReasoning explicitly enables or disables the reasoning boolean field
+// in LLM requests. Some models require only this flag, others only
+// reasoning_effort, and a few support both. Pass nil to omit from requests.
+func (s *LLMSummarizer) SetReasoning(enabled *bool) {
+	s.reasoning = enabled
+}
+
 // SetReasoningEffort configures the reasoning_effort parameter for LLM calls.
-// Valid values: "low", "medium", "high". Empty disables reasoning parameters.
+// Valid values: "low", "medium", "high". Empty omits the field from requests.
 func (s *LLMSummarizer) SetReasoningEffort(effort string) {
 	s.reasoningEffort = strings.ToLower(strings.TrimSpace(effort))
 }
@@ -166,11 +178,17 @@ Events:
 %s`, label, fieldLines.String(), rules.String(), eventsBlock.String())
 }
 
+// reasoningConfig is the object-format reasoning parameter used by
+// OpenAI and OpenRouter APIs. Only one of Effort or Enabled should be set.
+type reasoningConfig struct {
+	Effort  string `json:"effort,omitempty"`  // low, medium, high (OpenAI/OpenRouter)
+	Enabled *bool  `json:"enabled,omitempty"` // simple toggle (OpenRouter)
+}
+
 type chatRequest struct {
-	Model           string        `json:"model"`
-	Messages        []chatMessage `json:"messages"`
-	Reasoning       *bool         `json:"reasoning,omitempty"`
-	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+	Model     string           `json:"model"`
+	Messages  []chatMessage    `json:"messages"`
+	Reasoning *reasoningConfig `json:"reasoning,omitempty"`
 }
 
 type chatMessage struct {
@@ -191,10 +209,13 @@ func (s *LLMSummarizer) chatComplete(ctx context.Context, prompt string) (string
 			{Role: "user", Content: prompt},
 		},
 	}
+	// Build the reasoning object. Effort takes precedence when both are set,
+	// since it's more specific than the simple enabled toggle.
 	if s.reasoningEffort != "" {
+		body.Reasoning = &reasoningConfig{Effort: s.reasoningEffort}
+	} else if s.reasoning != nil && *s.reasoning {
 		t := true
-		body.Reasoning = &t
-		body.ReasoningEffort = s.reasoningEffort
+		body.Reasoning = &reasoningConfig{Enabled: &t}
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {

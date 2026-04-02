@@ -50,7 +50,7 @@ func TestRegisterProject_NilGuard(t *testing.T) {
 }
 
 func TestReflectFallbackWhenExtractorErrors(t *testing.T) {
-	svc, _ := testServiceAndRepoWithSummarizer(t, NewLLMSummarizer("http://127.0.0.1:1", "test-key", "test-model"))
+	svc, _ := testServiceAndRepoWithSummarizer(t, NewLLMSummarizer("http://127.0.0.1:1", "test-key", "test-model", 0))
 	svc.SetMinConfidenceForCreation(0) // Allow heuristic fallback candidates (confidence 0.45)
 	ctx := context.Background()
 	now := time.Now().UTC()

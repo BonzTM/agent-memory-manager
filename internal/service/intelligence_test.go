@@ -121,7 +121,7 @@ func TestTriage_LLMClassifiesBorderline(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model"), nil)
+	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model", 0), nil)
 	decisions, err := provider.TriageEvents(context.Background(), []core.EventContent{{Index: 1, Content: "This may or may not matter later."}, {Index: 2, Content: "tool output: no output"}})
 	if err != nil {
 		t.Fatalf("TriageEvents error: %v", err)
@@ -143,7 +143,7 @@ func TestTriage_FallsBackOnLLMFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model"), nil)
+	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model", 0), nil)
 	decisions, err := provider.TriageEvents(context.Background(), []core.EventContent{{Index: 1, Content: "We decided to use Postgres for production storage."}, {Index: 2, Content: "heartbeat"}})
 	if err != nil {
 		t.Fatalf("expected fallback instead of error: %v", err)
@@ -184,7 +184,7 @@ func TestLLMIntelligence_AnalyzeEvents_ReturnsStructuredResult(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model"), nil)
+	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model", 0), nil)
 	result, err := provider.AnalyzeEvents(context.Background(), []core.EventContent{{Index: 1, Content: "We decided to use SQLite."}})
 	if err != nil {
 		t.Fatalf("AnalyzeEvents error: %v", err)
@@ -209,7 +209,7 @@ func TestLLMIntelligence_FallsBackToHeuristic(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model"), nil)
+	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model", 0), nil)
 	result, err := provider.AnalyzeEvents(context.Background(), []core.EventContent{{Index: 1, Content: "We decided to use Go because it requires minimal dependencies."}})
 	if err != nil {
 		t.Fatalf("expected fallback instead of error: %v", err)
@@ -239,7 +239,7 @@ func TestLLMIntelligence_ReviewMemories(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model"), nil)
+	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model", 0), nil)
 	result, err := provider.ReviewMemories(context.Background(), []core.MemoryReview{{ID: "mem_1", Body: "A"}, {ID: "mem_2", Body: "B"}})
 	if err != nil {
 		t.Fatalf("ReviewMemories error: %v", err)
@@ -271,7 +271,7 @@ func TestLLMIntelligence_ConsolidateNarrative(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model"), nil)
+	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model", 0), nil)
 	result, err := provider.ConsolidateNarrative(
 		context.Background(),
 		[]core.EventContent{{Index: 1, Content: "Implemented interface"}},
@@ -301,7 +301,7 @@ func TestLLMIntelligence_CompressEventBatches_ReturnsMappedResults(t *testing.T)
 	}))
 	defer srv.Close()
 
-	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model"), nil)
+	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model", 0), nil)
 	results, err := provider.CompressEventBatches(context.Background(), []core.EventChunk{
 		{Index: 1, Contents: []string{"event 1", "event 2"}},
 		{Index: 2, Contents: []string{"event 3"}},
@@ -333,7 +333,7 @@ func TestLLMIntelligence_SummarizeTopicBatches_ReturnsMappedResults(t *testing.T
 	}))
 	defer srv.Close()
 
-	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model"), nil)
+	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model", 0), nil)
 	results, err := provider.SummarizeTopicBatches(context.Background(), []core.TopicChunk{
 		{Index: 7, Title: "Topic A", Contents: []string{"leaf 1", "leaf 2"}},
 		{Index: 8, Title: "Topic B", Contents: []string{"leaf 3"}},

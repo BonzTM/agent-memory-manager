@@ -817,7 +817,7 @@ func TestReprocess_SetsUpgradedQuality(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	llm := service.NewLLMSummarizer(server.URL, "test-key", "test-model")
+	llm := service.NewLLMSummarizer(server.URL, "test-key", "test-model", 0)
 	svc, repo := testServiceForReprocessWithSummarizer(t, llm)
 	now := time.Now().UTC()
 
@@ -865,7 +865,7 @@ func TestReprocess_SetsUpgradedQuality(t *testing.T) {
 
 func TestReprocessAll_UsesIntelligenceAnalyzeAfterTriageAndLinksEntities(t *testing.T) {
 	ctx := context.Background()
-	llm := service.NewLLMSummarizer("http://127.0.0.1:1", "test-key", "test-model")
+	llm := service.NewLLMSummarizer("http://127.0.0.1:1", "test-key", "test-model", 0)
 	svc, repo := testServiceForReprocessWithSummarizer(t, llm)
 	concreteSvc, ok := svc.(*service.AMMService)
 	if !ok {
@@ -985,7 +985,7 @@ func TestReprocessAll_UsesIntelligenceAnalyzeAfterTriageAndLinksEntities(t *test
 
 func TestReprocessAll_LinksEntitiesForDuplicateUpdates(t *testing.T) {
 	ctx := context.Background()
-	llm := service.NewLLMSummarizer("http://127.0.0.1:1", "test-key", "test-model")
+	llm := service.NewLLMSummarizer("http://127.0.0.1:1", "test-key", "test-model", 0)
 	svc, repo := testServiceForReprocessWithSummarizer(t, llm)
 	concreteSvc, ok := svc.(*service.AMMService)
 	if !ok {
