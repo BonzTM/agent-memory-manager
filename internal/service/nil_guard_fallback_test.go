@@ -2,7 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -73,6 +78,118 @@ func TestReflectFallbackWhenExtractorErrors(t *testing.T) {
 	}
 	if len(memories) == 0 {
 		t.Fatal("expected heuristic fallback to still create reflected memory")
+	}
+}
+
+func TestReflect_RetriesHeuristicFallbackOnNextRun(t *testing.T) {
+	ctx := context.Background()
+	var analyzeCalls atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		prompt := req.Messages[0].Content
+		if !strings.Contains(prompt, "In addition to memories") {
+			http.Error(w, "unexpected prompt", http.StatusBadRequest)
+			return
+		}
+
+		call := analyzeCalls.Add(1)
+		if call == 1 {
+			http.Error(w, "temporary failure", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(mockChatResponse(`{
+			"memories":[{"type":"decision","subject":"tool event policy","body":"Ignore tool events by default during ingestion","tight_description":"ignore tool events by default","confidence":0.93,"source_events":[1]}],
+			"entities":[],
+			"relationships":[],
+			"event_quality":{"1":"durable"}
+		}`)))
+	}))
+	defer server.Close()
+
+	svc, repo := testServiceAndRepoWithSummarizer(t, NewLLMSummarizer(server.URL, "test-key", "test-model", 0))
+	svc.SetMinConfidenceForCreation(0)
+	now := time.Now().UTC().Truncate(time.Second)
+	evt := &core.Event{
+		ID:           "evt_reflect_retry",
+		Kind:         "message_user",
+		SourceSystem: "test",
+		PrivacyLevel: core.PrivacyPrivate,
+		Content:      "We decided to ignore tool events by default because it requires less noisy storage.",
+		OccurredAt:   now,
+		IngestedAt:   now,
+	}
+	if err := repo.InsertEvent(ctx, evt); err != nil {
+		t.Fatalf("insert event: %v", err)
+	}
+
+	created, err := svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatalf("first reflect: %v", err)
+	}
+	if created != 1 {
+		t.Fatalf("expected one heuristic memory on first reflect, got %d", created)
+	}
+
+	memories, err := repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatalf("list memories after first reflect: %v", err)
+	}
+	if len(memories) != 1 {
+		t.Fatalf("expected one active memory after first reflect, got %d", len(memories))
+	}
+	if got := memories[0].Metadata[MetaExtractionMethod]; got != MethodHeuristic {
+		t.Fatalf("expected heuristic extraction_method on first reflect, got %q", got)
+	}
+	if got := memories[0].Metadata[MetaFallbackCount]; got != "1" {
+		t.Fatalf("expected fallback_count=1 on first reflect, got %q", got)
+	}
+
+	updatedEvent, err := repo.GetEvent(ctx, evt.ID)
+	if err != nil {
+		t.Fatalf("get event after first reflect: %v", err)
+	}
+	if updatedEvent.ReflectedAt != nil {
+		t.Fatal("expected first reflect to clear reflected_at for retry")
+	}
+
+	created, err = svc.Reflect(ctx, "")
+	if err != nil {
+		t.Fatalf("second reflect: %v", err)
+	}
+	if created != 0 {
+		t.Fatalf("expected second reflect to upgrade existing memory instead of creating a new one, got %d", created)
+	}
+
+	memories, err = repo.ListMemories(ctx, core.ListMemoriesOptions{Status: core.MemoryStatusActive, Limit: 10})
+	if err != nil {
+		t.Fatalf("list memories after second reflect: %v", err)
+	}
+	if len(memories) != 1 {
+		t.Fatalf("expected one active memory after second reflect, got %d", len(memories))
+	}
+	if got := memories[0].Metadata[MetaExtractionMethod]; got != MethodLLM {
+		t.Fatalf("expected llm extraction_method after retry success, got %q", got)
+	}
+	if got := memories[0].Metadata[MetaFallbackCount]; got != "" {
+		t.Fatalf("expected fallback_count to clear after retry success, got %q", got)
+	}
+	if memories[0].Body != "Ignore tool events by default during ingestion" {
+		t.Fatalf("expected llm retry to replace memory body, got %q", memories[0].Body)
+	}
+
+	updatedEvent, err = repo.GetEvent(ctx, evt.ID)
+	if err != nil {
+		t.Fatalf("get event after second reflect: %v", err)
+	}
+	if updatedEvent.ReflectedAt == nil {
+		t.Fatal("expected second reflect to leave reflected_at set after llm success")
 	}
 }
 

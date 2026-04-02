@@ -79,7 +79,7 @@ func TestNeedsLLMUpgrade(t *testing.T) {
 
 func TestMarkExtracted_LLM(t *testing.T) {
 	mem := &core.Memory{}
-	markExtracted(mem, MethodLLM, "gpt-4o-mini")
+	markExtracted(mem, MethodLLM, "gpt-4o-mini", false)
 
 	if got := getProcessingMeta(mem, MetaExtractionMethod); got != MethodLLM {
 		t.Fatalf("expected %q, got %q", MethodLLM, got)
@@ -95,7 +95,7 @@ func TestMarkExtracted_LLM(t *testing.T) {
 
 func TestMarkExtracted_Heuristic(t *testing.T) {
 	mem := &core.Memory{}
-	markExtracted(mem, MethodHeuristic, "")
+	markExtracted(mem, MethodHeuristic, "", false)
 
 	if got := getProcessingMeta(mem, MetaExtractionMethod); got != MethodHeuristic {
 		t.Fatalf("expected %q, got %q", MethodHeuristic, got)
@@ -106,7 +106,32 @@ func TestMarkExtracted_Heuristic(t *testing.T) {
 	if got := getProcessingMeta(mem, MetaExtractedModel); got != "" {
 		t.Fatalf("expected empty extracted model, got %q", got)
 	}
+	if got := getProcessingMeta(mem, MetaFallbackCount); got != "" {
+		t.Fatalf("expected fallback_count to remain unset for non-retryable heuristic output, got %q", got)
+	}
 	assertRFC3339(t, getProcessingMeta(mem, MetaExtractedAt))
+}
+
+func TestMarkExtracted_HeuristicRetryableIncrementsFallbackCount(t *testing.T) {
+	mem := &core.Memory{Status: core.MemoryStatusActive}
+	markExtracted(mem, MethodHeuristic, "", true)
+	markExtracted(mem, MethodHeuristic, "", true)
+
+	if got := getProcessingMeta(mem, MetaFallbackCount); got != "2" {
+		t.Fatalf("expected fallback_count=2 after two retryable heuristic passes, got %q", got)
+	}
+	if !shouldRetryHeuristicMemory(mem) {
+		t.Fatal("expected retryable heuristic memory to remain eligible below cap")
+	}
+}
+
+func TestMarkExtracted_LLMClearsFallbackCount(t *testing.T) {
+	mem := &core.Memory{Metadata: map[string]string{MetaFallbackCount: "2"}}
+	markExtracted(mem, MethodLLM, "gpt-4o-mini", false)
+
+	if got := getProcessingMeta(mem, MetaFallbackCount); got != "" {
+		t.Fatalf("expected llm extraction to clear fallback_count, got %q", got)
+	}
 }
 
 func TestMarkEmbedded(t *testing.T) {

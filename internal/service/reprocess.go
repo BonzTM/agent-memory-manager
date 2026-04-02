@@ -270,7 +270,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 				method := s.extractionMethod()
 				markUpgraded := shouldMarkAsUpgraded(duplicate, method)
 				if getProcessingMeta(duplicate, MetaExtractionMethod) == "" || method == MethodLLM {
-					markExtracted(duplicate, method, s.extractionModelName())
+					markExtracted(duplicate, method, s.extractionModelName(), false)
 					if markUpgraded {
 						setProcessingMeta(duplicate, MetaExtractionQuality, QualityUpgraded)
 					}
@@ -335,7 +335,7 @@ func (s *AMMService) Reprocess(ctx context.Context, reprocessAll bool) (int, int
 				CreatedAt:        now,
 				UpdatedAt:        now,
 			}
-			markExtracted(mem, method, s.extractionModelName())
+			markExtracted(mem, method, s.extractionModelName(), false)
 			setProcessingMeta(mem, "source_system", "reprocess")
 			if shouldMarkInsertedAsUpgraded(eventToMemories, sourceEventIDs, method) {
 				setProcessingMeta(mem, MetaExtractionQuality, QualityUpgraded)

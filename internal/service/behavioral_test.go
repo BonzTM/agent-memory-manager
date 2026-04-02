@@ -32,8 +32,8 @@ func testServiceAndRepo(t *testing.T) (*AMMService, *sqlite.SQLiteRepository) {
 	}
 	repo := &sqlite.SQLiteRepository{DB: db}
 	svc := New(repo, dbPath, nil, nil)
-	svc.SetMinConfidenceForCreation(0)            // Tests use heuristic extraction (confidence 0.45)
-	svc.SetSessionIdleTimeout(0) // 0 = process immediately in tests
+	svc.SetMinConfidenceForCreation(0) // Tests use heuristic extraction (confidence 0.45)
+	svc.SetSessionIdleTimeout(0)       // 0 = process immediately in tests
 	t.Cleanup(func() { db.Close() })
 	return svc, repo
 }
@@ -52,8 +52,8 @@ func testServiceAndRepoWithSummarizer(t *testing.T, summarizer core.Summarizer) 
 	}
 	repo := &sqlite.SQLiteRepository{DB: db}
 	svc := New(repo, dbPath, summarizer, nil)
-	svc.SetMinConfidenceForCreation(0)            // Tests use heuristic extraction (confidence 0.45)
-	svc.SetSessionIdleTimeout(0) // 0 = process immediately in tests
+	svc.SetMinConfidenceForCreation(0) // Tests use heuristic extraction (confidence 0.45)
+	svc.SetSessionIdleTimeout(0)       // 0 = process immediately in tests
 	t.Cleanup(func() { db.Close() })
 	return svc, repo
 }
@@ -127,10 +127,12 @@ type consolidateTestSummarizer struct {
 type consolidateTestIntelligence struct {
 	summarize                 func(content string, maxLen int) (string, error)
 	consolidate               func(events []core.EventContent, existingMemories []core.MemorySummary) (*core.NarrativeResult, error)
+	consolidateWithMethod     func(events []core.EventContent, existingMemories []core.MemorySummary) (*core.NarrativeResult, string, error)
 	compressEventBatches      func(chunks []core.EventChunk) ([]core.CompressionResult, error)
 	summarizeTopicBatches     func(topics []core.TopicChunk) ([]core.CompressionResult, error)
 	triage                    func(events []core.EventContent) (map[int]core.TriageDecision, error)
 	extractBatch              func([]string) ([]core.MemoryCandidate, error)
+	extractBatchWithMethod    func([]string) ([]core.MemoryCandidate, string, error)
 	isLLM                     bool
 	callCountPtr              *int32
 	compressBatchCallCountPtr *int32
@@ -176,6 +178,18 @@ func (m consolidateTestIntelligence) ExtractMemoryCandidateBatch(_ context.Conte
 		return m.extractBatch(contents)
 	}
 	return nil, nil
+}
+
+func (m consolidateTestIntelligence) ExtractMemoryCandidateBatchWithMethod(_ context.Context, contents []string) ([]core.MemoryCandidate, string, error) {
+	if m.extractBatchWithMethod != nil {
+		return m.extractBatchWithMethod(contents)
+	}
+	candidates, err := m.ExtractMemoryCandidateBatch(context.Background(), contents)
+	method := MethodHeuristic
+	if m.isLLM {
+		method = MethodLLM
+	}
+	return candidates, method, err
 }
 
 func (consolidateTestIntelligence) AnalyzeEvents(context.Context, []core.EventContent) (*core.AnalysisResult, error) {
@@ -245,6 +259,27 @@ func (m consolidateTestIntelligence) ConsolidateNarrative(_ context.Context, eve
 		return m.consolidate(events, existingMemories)
 	}
 	return &core.NarrativeResult{}, nil
+}
+
+func (m consolidateTestIntelligence) ConsolidateNarrativeWithMethod(_ context.Context, events []core.EventContent, existingMemories []core.MemorySummary) (*core.NarrativeResult, string, error) {
+	if m.callCountPtr != nil {
+		atomic.AddInt32(m.callCountPtr, 1)
+	}
+	if m.consolidateWithMethod != nil {
+		return m.consolidateWithMethod(events, existingMemories)
+	}
+	var result *core.NarrativeResult
+	var err error
+	if m.consolidate != nil {
+		result, err = m.consolidate(events, existingMemories)
+	} else {
+		result = &core.NarrativeResult{}
+	}
+	method := MethodHeuristic
+	if m.isLLM {
+		method = MethodLLM
+	}
+	return result, method, err
 }
 
 func (s reflectTestSummarizer) Summarize(context.Context, string, int) (string, error) {
@@ -1758,6 +1793,305 @@ func TestConsolidateSessions_AutoExtractsOpenLoops(t *testing.T) {
 	}
 }
 
+func TestConsolidateSessions_ArchivesResolvedOpenLoops(t *testing.T) {
+	svc, repo := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{})
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	openLoop := &core.Memory{
+		ID:               "mem_session_open_loop",
+		Type:             core.MemoryTypeOpenLoop,
+		Scope:            core.ScopeProject,
+		ProjectID:        "proj_open_loop_resolution",
+		Subject:          "tool event policy",
+		Body:             "Need to decide how tool events should be filtered during ingestion.",
+		TightDescription: "tool event policy unresolved",
+		Confidence:       0.8,
+		Importance:       0.6,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now.Add(-time.Hour),
+		UpdatedAt:        now.Add(-time.Hour),
+	}
+	if err := repo.InsertMemory(ctx, openLoop); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		consolidate: func(_ []core.EventContent, existing []core.MemorySummary) (*core.NarrativeResult, error) {
+			foundOpenLoop := false
+			for _, summary := range existing {
+				if summary.ID == openLoop.ID && summary.Type == string(core.MemoryTypeOpenLoop) {
+					foundOpenLoop = true
+					break
+				}
+			}
+			if !foundOpenLoop {
+				t.Fatal("expected active open_loop to be included in narrative context")
+			}
+			return &core.NarrativeResult{
+				Summary:       "Resolved the tool event policy question.",
+				TightDesc:     "tool event policy resolved",
+				ResolvedLoops: []string{openLoop.ID},
+			}, nil
+		},
+		extractBatch: func(contents []string) ([]core.MemoryCandidate, error) {
+			if len(contents) != 1 {
+				t.Fatalf("expected one extraction input, got %d", len(contents))
+			}
+			if strings.Contains(contents[0], openLoop.TightDescription) {
+				t.Fatalf("expected resolved open_loop to be filtered from extraction input, got %q", contents[0])
+			}
+			return nil, nil
+		},
+	})
+
+	sessID := "sess_consolidate_resolved_open_loop"
+	for i := 0; i < 2; i++ {
+		_, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			SessionID:    sessID,
+			ProjectID:    "proj_open_loop_resolution",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("resolved open loop event %d", i),
+			OccurredAt:   now.Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := svc.ConsolidateSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := repo.GetMemory(ctx, openLoop.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != core.MemoryStatusArchived {
+		t.Fatalf("expected resolved open_loop to be archived, got %s", updated.Status)
+	}
+}
+
+func TestConsolidateSessions_RetriesHeuristicFallbackOnNextRun(t *testing.T) {
+	svc, repo := testServiceAndRepoWithSummarizer(t, consolidateTestSummarizer{})
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	var narrativeCalls atomic.Int32
+	var extractionCalls atomic.Int32
+	svc.SetIntelligenceProvider(consolidateTestIntelligence{
+		isLLM: true,
+		consolidateWithMethod: func(_ []core.EventContent, _ []core.MemorySummary) (*core.NarrativeResult, string, error) {
+			if narrativeCalls.Add(1) == 1 {
+				return &core.NarrativeResult{
+					Title:     "Tool event policy fallback",
+					Summary:   "heuristic session summary",
+					TightDesc: "heuristic tool event policy",
+					Episode: &core.EpisodeCandidate{
+						Title: "Tool event policy fallback",
+						Body:  "heuristic episode summary",
+					},
+				}, MethodHeuristic, nil
+			}
+			return &core.NarrativeResult{
+				Title:     "Tool event policy finalized",
+				Summary:   "llm session summary",
+				TightDesc: "llm tool event policy",
+				Episode: &core.EpisodeCandidate{
+					Title: "Tool event policy finalized",
+					Body:  "llm episode summary",
+				},
+			}, MethodLLM, nil
+		},
+		extractBatchWithMethod: func(contents []string) ([]core.MemoryCandidate, string, error) {
+			if len(contents) != 1 {
+				t.Fatalf("expected one narrative extraction input, got %d", len(contents))
+			}
+			if extractionCalls.Add(1) == 1 {
+				return []core.MemoryCandidate{{
+					Type:             core.MemoryTypeDecision,
+					Body:             "We decided to ignore tool events by default because it requires less noisy storage.",
+					TightDescription: "ignore tool events noisy storage",
+					Confidence:       0.45,
+				}}, MethodHeuristic, nil
+			}
+			return []core.MemoryCandidate{{
+				Type:             core.MemoryTypeDecision,
+				Subject:          "tool event policy",
+				Body:             "Ignore tool events by default during ingestion",
+				TightDescription: "ignore tool events by default",
+				Confidence:       0.93,
+			}}, MethodLLM, nil
+		},
+	})
+
+	events := make([]*core.Event, 0, 2)
+	for i := 0; i < 2; i++ {
+		evt, err := svc.IngestEvent(ctx, &core.Event{
+			Kind:         "message",
+			SourceSystem: "test",
+			SessionID:    "sess_retry_consolidate",
+			ProjectID:    "proj_retry_consolidate",
+			PrivacyLevel: core.PrivacyPrivate,
+			Content:      fmt.Sprintf("tool policy event %d", i+1),
+			OccurredAt:   now.Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, evt)
+	}
+
+	created, err := svc.ConsolidateSessions(ctx)
+	if err != nil {
+		t.Fatalf("first consolidate: %v", err)
+	}
+	if created != 1 {
+		t.Fatalf("expected one session summary on first consolidate, got %d", created)
+	}
+
+	summaries, err := repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "session", SessionID: "sess_retry_consolidate", Limit: 10})
+	if err != nil {
+		t.Fatalf("list session summaries after first consolidate: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 session summary after first consolidate, got %d", len(summaries))
+	}
+	firstSummaryID := summaries[0].ID
+	if got := summaries[0].Metadata[MetaExtractionMethod]; got != MethodHeuristic {
+		t.Fatalf("expected heuristic session summary on first consolidate, got %q", got)
+	}
+	if got := summaries[0].Metadata[MetaFallbackCount]; got != "1" {
+		t.Fatalf("expected fallback_count=1 on first session summary, got %q", got)
+	}
+
+	episodes, err := repo.ListEpisodes(ctx, core.ListEpisodesOptions{SessionID: "sess_retry_consolidate", Limit: 10})
+	if err != nil {
+		t.Fatalf("list episodes after first consolidate: %v", err)
+	}
+	if len(episodes) != 1 {
+		t.Fatalf("expected 1 episode after first consolidate, got %d", len(episodes))
+	}
+	firstEpisodeID := episodes[0].ID
+	if got := episodes[0].Metadata[MetaExtractionMethod]; got != MethodHeuristic {
+		t.Fatalf("expected heuristic episode on first consolidate, got %q", got)
+	}
+	if got := episodes[0].Metadata[MetaFallbackCount]; got != "1" {
+		t.Fatalf("expected fallback_count=1 on first episode, got %q", got)
+	}
+
+	mems, err := repo.ListMemories(ctx, core.ListMemoriesOptions{
+		Type:      core.MemoryTypeDecision,
+		Scope:     core.ScopeProject,
+		ProjectID: "proj_retry_consolidate",
+		Status:    core.MemoryStatusActive,
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("list memories after first consolidate: %v", err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 active decision memory after first consolidate, got %d", len(mems))
+	}
+	if got := mems[0].Metadata[MetaExtractionMethod]; got != MethodHeuristic {
+		t.Fatalf("expected heuristic decision memory on first consolidate, got %q", got)
+	}
+	if got := mems[0].Metadata[MetaFallbackCount]; got != "1" {
+		t.Fatalf("expected fallback_count=1 on first decision memory, got %q", got)
+	}
+
+	for _, evt := range events {
+		updated, err := repo.GetEvent(ctx, evt.ID)
+		if err != nil {
+			t.Fatalf("get event %s after first consolidate: %v", evt.ID, err)
+		}
+		if updated.ReflectedAt != nil {
+			t.Fatalf("expected event %s to remain unreflected for retry", evt.ID)
+		}
+	}
+
+	created, err = svc.ConsolidateSessions(ctx)
+	if err != nil {
+		t.Fatalf("second consolidate: %v", err)
+	}
+	if created != 1 {
+		t.Fatalf("expected one session summary on second consolidate, got %d", created)
+	}
+
+	summaries, err = repo.ListSummaries(ctx, core.ListSummariesOptions{Kind: "session", SessionID: "sess_retry_consolidate", Limit: 10})
+	if err != nil {
+		t.Fatalf("list session summaries after second consolidate: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected prior session summary to be replaced, got %d summaries", len(summaries))
+	}
+	if summaries[0].ID == firstSummaryID {
+		t.Fatal("expected retry run to replace the prior session summary artifact")
+	}
+	if got := summaries[0].Metadata[MetaExtractionMethod]; got != MethodLLM {
+		t.Fatalf("expected llm session summary after retry, got %q", got)
+	}
+	if got := summaries[0].Metadata[MetaFallbackCount]; got != "" {
+		t.Fatalf("expected summary fallback_count cleared after retry success, got %q", got)
+	}
+	if summaries[0].Body != "llm session summary" {
+		t.Fatalf("expected llm summary body after retry, got %q", summaries[0].Body)
+	}
+
+	episodes, err = repo.ListEpisodes(ctx, core.ListEpisodesOptions{SessionID: "sess_retry_consolidate", Limit: 10})
+	if err != nil {
+		t.Fatalf("list episodes after second consolidate: %v", err)
+	}
+	if len(episodes) != 1 {
+		t.Fatalf("expected prior episode to be replaced, got %d episodes", len(episodes))
+	}
+	if episodes[0].ID == firstEpisodeID {
+		t.Fatal("expected retry run to replace the prior episode artifact")
+	}
+	if got := episodes[0].Metadata[MetaExtractionMethod]; got != MethodLLM {
+		t.Fatalf("expected llm episode after retry, got %q", got)
+	}
+	if got := episodes[0].Metadata[MetaFallbackCount]; got != "" {
+		t.Fatalf("expected episode fallback_count cleared after retry success, got %q", got)
+	}
+
+	mems, err = repo.ListMemories(ctx, core.ListMemoriesOptions{
+		Type:      core.MemoryTypeDecision,
+		Scope:     core.ScopeProject,
+		ProjectID: "proj_retry_consolidate",
+		Status:    core.MemoryStatusActive,
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("list memories after second consolidate: %v", err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("expected decision memory to be upgraded in place, got %d active memories", len(mems))
+	}
+	if got := mems[0].Metadata[MetaExtractionMethod]; got != MethodLLM {
+		t.Fatalf("expected llm decision memory after retry, got %q", got)
+	}
+	if got := mems[0].Metadata[MetaFallbackCount]; got != "" {
+		t.Fatalf("expected decision fallback_count cleared after retry success, got %q", got)
+	}
+	if mems[0].Body != "Ignore tool events by default during ingestion" {
+		t.Fatalf("expected llm retry to replace decision body, got %q", mems[0].Body)
+	}
+
+	for _, evt := range events {
+		updated, err := repo.GetEvent(ctx, evt.ID)
+		if err != nil {
+			t.Fatalf("get event %s after second consolidate: %v", evt.ID, err)
+		}
+		if updated.ReflectedAt == nil {
+			t.Fatalf("expected event %s to be marked reflected after retry success", evt.ID)
+		}
+	}
+}
+
 func TestConsolidateSessions_FallsBackOnError(t *testing.T) {
 	var summarizeCalls int32
 	var consolidateCalls int32
@@ -2520,9 +2854,13 @@ func TestIngestionPolicy_ExplicitPolicyOverridesNoiseHeuristic(t *testing.T) {
 
 func TestIngestionPolicy_NoiseHeuristicDowngradesConservativeCases(t *testing.T) {
 	testCases := []struct {
-		name      string
-		event     *core.Event
-		noiseKind string
+		name            string
+		event           *core.Event
+		expectIngest    bool
+		expectCreateMem bool
+		expectMode      string
+		expectReason    string
+		expectNoiseKind string
 	}{
 		{
 			name: "tool_result kind",
@@ -2532,7 +2870,8 @@ func TestIngestionPolicy_NoiseHeuristicDowngradesConservativeCases(t *testing.T)
 				PrivacyLevel: core.PrivacyPrivate,
 				Content:      "{}",
 			},
-			noiseKind: "tool_result",
+			expectIngest:    false,
+			expectCreateMem: false,
 		},
 		{
 			name: "amm tool call",
@@ -2542,7 +2881,8 @@ func TestIngestionPolicy_NoiseHeuristicDowngradesConservativeCases(t *testing.T)
 				PrivacyLevel: core.PrivacyPrivate,
 				Content:      `{"tool":"amm_recall","arguments":{"query":"preferences"}}`,
 			},
-			noiseKind: "amm_self_reference",
+			expectIngest:    false,
+			expectCreateMem: false,
 		},
 		{
 			name: "large json blob",
@@ -2552,7 +2892,11 @@ func TestIngestionPolicy_NoiseHeuristicDowngradesConservativeCases(t *testing.T)
 				PrivacyLevel: core.PrivacyPrivate,
 				Content:      `{"records":[{"line":"` + strings.Repeat("a", 2400) + `"}]}`,
 			},
-			noiseKind: "json_blob",
+			expectIngest:    true,
+			expectCreateMem: false,
+			expectMode:      "read_only",
+			expectReason:    "noise_filter",
+			expectNoiseKind: "json_blob",
 		},
 		{
 			name: "build output dump",
@@ -2562,7 +2906,11 @@ func TestIngestionPolicy_NoiseHeuristicDowngradesConservativeCases(t *testing.T)
 				PrivacyLevel: core.PrivacyPrivate,
 				Content:      "=== RUN   TestAlpha\n=== RUN   TestBeta\n--- PASS: TestAlpha (0.00s)\n--- FAIL: TestBeta (0.00s)\nerror: compile failed\nFAIL\tgithub.com/example/project\t0.123s",
 			},
-			noiseKind: "build_or_test_log",
+			expectIngest:    true,
+			expectCreateMem: false,
+			expectMode:      "read_only",
+			expectReason:    "noise_filter",
+			expectNoiseKind: "build_or_test_log",
 		},
 		{
 			name: "grep style dump",
@@ -2572,7 +2920,11 @@ func TestIngestionPolicy_NoiseHeuristicDowngradesConservativeCases(t *testing.T)
 				PrivacyLevel: core.PrivacyPrivate,
 				Content:      "internal/a.go:10:func A()\ninternal/b.go:11:func B()\ninternal/c.go:12:func C()\ninternal/d.go:13:func D()\ninternal/e.go:14:func E()\ninternal/f.go:15:func F()\ninternal/g.go:16:func G()\ninternal/h.go:17:func H()",
 			},
-			noiseKind: "listing_or_diff_dump",
+			expectIngest:    true,
+			expectCreateMem: false,
+			expectMode:      "read_only",
+			expectReason:    "noise_filter",
+			expectNoiseKind: "listing_or_diff_dump",
 		},
 	}
 
@@ -2588,17 +2940,23 @@ func TestIngestionPolicy_NoiseHeuristicDowngradesConservativeCases(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !ingest || createMem {
-				t.Fatalf("expected noisy unmatched event to downgrade to read_only; got ingest=%t createMemory=%t", ingest, createMem)
+			if ingest != tc.expectIngest || createMem != tc.expectCreateMem {
+				t.Fatalf("unexpected ingestion decision; got ingest=%t createMemory=%t", ingest, createMem)
 			}
-			if evt.Metadata["ingestion_mode"] != "read_only" {
-				t.Fatalf("expected ingestion_mode=read_only, got metadata=%#v", evt.Metadata)
+			if tc.expectMode == "" {
+				if evt.Metadata != nil {
+					t.Fatalf("expected no downgrade metadata for ignored event, got metadata=%#v", evt.Metadata)
+				}
+				return
 			}
-			if evt.Metadata["ingestion_reason"] != "noise_filter" {
-				t.Fatalf("expected ingestion_reason=noise_filter, got metadata=%#v", evt.Metadata)
+			if evt.Metadata["ingestion_mode"] != tc.expectMode {
+				t.Fatalf("expected ingestion_mode=%s, got metadata=%#v", tc.expectMode, evt.Metadata)
 			}
-			if evt.Metadata["noise_kind"] != tc.noiseKind {
-				t.Fatalf("expected noise_kind=%s, got metadata=%#v", tc.noiseKind, evt.Metadata)
+			if evt.Metadata["ingestion_reason"] != tc.expectReason {
+				t.Fatalf("expected ingestion_reason=%s, got metadata=%#v", tc.expectReason, evt.Metadata)
+			}
+			if evt.Metadata["noise_kind"] != tc.expectNoiseKind {
+				t.Fatalf("expected noise_kind=%s, got metadata=%#v", tc.expectNoiseKind, evt.Metadata)
 			}
 		})
 	}
@@ -2628,7 +2986,7 @@ func TestIngestionPolicy_NoiseHeuristicKeepsNormalProseFull(t *testing.T) {
 	}
 }
 
-func TestReflect_SkipsNoiseDowngradedEvents(t *testing.T) {
+func TestReflect_DefaultToolIgnorePolicySkipsToolResultEvents(t *testing.T) {
 	summarizer := reflectTestSummarizer{extract: func(_ string) ([]core.MemoryCandidate, error) {
 		return []core.MemoryCandidate{{
 			Type:             core.MemoryTypeFact,
@@ -2650,8 +3008,8 @@ func TestReflect_SkipsNoiseDowngradedEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if evt.Metadata["ingestion_mode"] != "read_only" {
-		t.Fatalf("expected noisy event to be tagged read_only, got metadata=%#v", evt.Metadata)
+	if evt.Metadata != nil {
+		t.Fatalf("expected ignored tool_result event to carry no ingest metadata, got metadata=%#v", evt.Metadata)
 	}
 
 	created, err := svc.Reflect(ctx, "")
@@ -2671,7 +3029,7 @@ func TestReflect_SkipsNoiseDowngradedEvents(t *testing.T) {
 	}
 }
 
-func TestReflect_ProcessesNoiseEventsWithLLMSummarizer(t *testing.T) {
+func TestReflect_DefaultToolIgnorePolicySkipsToolResultEventsWithLLMSummarizer(t *testing.T) {
 	ctx := context.Background()
 	var extractionCalls atomic.Int32
 
@@ -2702,8 +3060,8 @@ func TestReflect_ProcessesNoiseEventsWithLLMSummarizer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if evt.Metadata["ingestion_mode"] != "read_only" {
-		t.Fatalf("expected noisy event to be tagged read_only, got metadata=%#v", evt.Metadata)
+	if evt.Metadata != nil {
+		t.Fatalf("expected ignored tool_result event to carry no ingest metadata, got metadata=%#v", evt.Metadata)
 	}
 
 	created, err := svc.Reflect(ctx, "")
@@ -2711,14 +3069,14 @@ func TestReflect_ProcessesNoiseEventsWithLLMSummarizer(t *testing.T) {
 		t.Fatal(err)
 	}
 	if created != 0 {
-		t.Fatalf("expected no memories from empty LLM extraction result, got %d", created)
+		t.Fatalf("expected ignored tool_result event to produce no memories, got %d", created)
 	}
-	if extractionCalls.Load() == 0 {
-		t.Fatal("expected reflect to process read_only event with LLM summarizer")
+	if extractionCalls.Load() != 0 {
+		t.Fatalf("expected ignored tool_result event to skip LLM extraction, got %d calls", extractionCalls.Load())
 	}
 }
 
-func TestReflect_SkipsNoiseEventsWithoutLLMSummarizer(t *testing.T) {
+func TestReflect_DefaultToolIgnorePolicySkipsToolResultEventsWithoutLLMSummarizer(t *testing.T) {
 	svc, _ := testServiceAndRepo(t)
 	ctx := context.Background()
 
@@ -2732,8 +3090,8 @@ func TestReflect_SkipsNoiseEventsWithoutLLMSummarizer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if evt.Metadata["ingestion_mode"] != "read_only" {
-		t.Fatalf("expected noisy event to be tagged read_only, got metadata=%#v", evt.Metadata)
+	if evt.Metadata != nil {
+		t.Fatalf("expected ignored tool_result event to carry no ingest metadata, got metadata=%#v", evt.Metadata)
 	}
 
 	created, err := svc.Reflect(ctx, "")
@@ -3108,6 +3466,122 @@ func TestEmbeddingDedup_NoopWithoutProvider(t *testing.T) {
 	}
 	if len(active) != 3 {
 		t.Fatalf("expected new memory insertion without embedding dedup, got %d active", len(active))
+	}
+}
+
+func TestEmbeddingDedup_OpenLoopUsesLowerThreshold(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	openLoopExisting := &core.Memory{
+		ID:               "mem_open_loop_existing",
+		Type:             core.MemoryTypeOpenLoop,
+		Scope:            core.ScopeProject,
+		ProjectID:        "proj-open-loop",
+		Body:             "Need to resolve the ingestion backlog for tool output cleanup.",
+		TightDescription: "resolve ingestion backlog cleanup",
+		Confidence:       0.8,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	factExisting := &core.Memory{
+		ID:               "mem_fact_existing",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeProject,
+		ProjectID:        "proj-open-loop",
+		Body:             "The ingestion backlog for tool output cleanup is unresolved.",
+		TightDescription: "ingestion backlog unresolved",
+		Confidence:       0.8,
+		Importance:       0.5,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	for _, mem := range []*core.Memory{openLoopExisting, factExisting} {
+		if err := repo.InsertMemory(ctx, mem); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	candidateOpenLoop := core.Memory{
+		ID:               "mem_open_loop_candidate",
+		Type:             core.MemoryTypeOpenLoop,
+		Scope:            core.ScopeProject,
+		ProjectID:        "proj-open-loop",
+		Body:             "Need to close the unresolved tool-output cleanup backlog.",
+		TightDescription: "close tool-output cleanup backlog",
+		Confidence:       0.9,
+		Importance:       0.6,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	candidateFact := core.Memory{
+		ID:               "mem_fact_candidate",
+		Type:             core.MemoryTypeFact,
+		Scope:            core.ScopeProject,
+		ProjectID:        "proj-open-loop",
+		Body:             "The unresolved tool-output cleanup backlog still exists.",
+		TightDescription: "tool-output cleanup backlog exists",
+		Confidence:       0.9,
+		Importance:       0.6,
+		PrivacyLevel:     core.PrivacyPrivate,
+		Status:           core.MemoryStatusActive,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	candidateVector := []float32{1, 0}
+	existingVector := []float32{0.82, float32(math.Sqrt(1 - 0.82*0.82))}
+	provider := staticEmbeddingProvider{
+		model: "open-loop-threshold-model",
+		vectors: map[string][]float32{
+			buildMemoryEmbeddingText(&candidateOpenLoop): candidateVector,
+			buildMemoryEmbeddingText(&candidateFact):     candidateVector,
+		},
+	}
+	svc.embeddingProvider = provider
+
+	for _, record := range []*core.EmbeddingRecord{
+		{ObjectID: openLoopExisting.ID, ObjectKind: "memory", Model: provider.Model(), Vector: existingVector, CreatedAt: now},
+		{ObjectID: factExisting.ID, ObjectKind: "memory", Model: provider.Model(), Vector: existingVector, CreatedAt: now},
+	} {
+		if err := repo.UpsertEmbedding(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if dupes := svc.findDuplicatesByEmbedding(ctx, candidateOpenLoop, []*core.Memory{openLoopExisting}); len(dupes) != 1 || dupes[0].ID != openLoopExisting.ID {
+		t.Fatalf("expected open_loop candidate to dedup at cosine 0.82, got %#v", dupes)
+	}
+	if dupes := svc.findDuplicatesByEmbedding(ctx, candidateFact, []*core.Memory{factExisting}); len(dupes) != 0 {
+		t.Fatalf("expected fact candidate to keep default threshold and not dedup at cosine 0.82, got %#v", dupes)
+	}
+
+	for _, mem := range []*core.Memory{&candidateOpenLoop, &candidateFact} {
+		if err := repo.InsertMemory(ctx, mem); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, record := range []*core.EmbeddingRecord{
+		{ObjectID: candidateOpenLoop.ID, ObjectKind: "memory", Model: provider.Model(), Vector: candidateVector, CreatedAt: now},
+		{ObjectID: candidateFact.ID, ObjectKind: "memory", Model: provider.Model(), Vector: candidateVector, CreatedAt: now},
+	} {
+		if err := repo.UpsertEmbedding(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if dupes := svc.findDuplicatesByStoredEmbedding(ctx, candidateOpenLoop, []*core.Memory{&candidateOpenLoop, openLoopExisting}); len(dupes) != 1 || dupes[0].ID != openLoopExisting.ID {
+		t.Fatalf("expected stored open_loop duplicate at cosine 0.82, got %#v", dupes)
+	}
+	if dupes := svc.findDuplicatesByStoredEmbedding(ctx, candidateFact, []*core.Memory{&candidateFact, factExisting}); len(dupes) != 0 {
+		t.Fatalf("expected stored fact duplicate search to keep default threshold, got %#v", dupes)
 	}
 }
 
@@ -4208,7 +4682,7 @@ func TestMergeDuplicates(t *testing.T) {
 	// Insert two nearly identical memories directly (bypassing Remember dedup).
 	now := time.Now().UTC()
 	if err := repo.InsertMemory(ctx, &core.Memory{
-			ID:               core.GenerateID("mem_"),
+		ID:               core.GenerateID("mem_"),
 		Type:             core.MemoryTypeFact,
 		Scope:            core.ScopeGlobal,
 		Body:             "The deployment pipeline uses GitHub Actions for CI and CD",
@@ -4223,7 +4697,7 @@ func TestMergeDuplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := repo.InsertMemory(ctx, &core.Memory{
-			ID:               core.GenerateID("mem_"),
+		ID:               core.GenerateID("mem_"),
 		Type:             core.MemoryTypeFact,
 		Scope:            core.ScopeGlobal,
 		Body:             "The deployment pipeline uses GitHub Actions for CI and CD workflows",

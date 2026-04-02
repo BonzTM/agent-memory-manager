@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -69,17 +70,17 @@ func maxEventSequenceID(events []core.Event) int64 {
 }
 
 const (
-	defaultCompressChunkSize              = 10
-	defaultCompressMaxEvents              = 200
-	defaultCompressBatchSize              = 15
-	defaultTopicBatchSize                 = 15
-	leafBodyMaxChars                      = 1000
-	sessionBodyMaxChars                   = 2000
-	topicBodyMaxChars                     = 2000
+	defaultCompressChunkSize               = 10
+	defaultCompressMaxEvents               = 200
+	defaultCompressBatchSize               = 15
+	defaultTopicBatchSize                  = 15
+	leafBodyMaxChars                       = 1000
+	sessionBodyMaxChars                    = 2000
+	topicBodyMaxChars                      = 2000
 	defaultEscalationDeterministicMaxChars = 2048
-	defaultSessionIdleTimeout             = 15 * time.Minute
-	defaultSummarizerContextWindow        = 128000 // tokens
-	defaultCompressCooldown               = 24 * time.Hour
+	defaultSessionIdleTimeout              = 15 * time.Minute
+	defaultSummarizerContextWindow         = 128000 // tokens
+	defaultCompressCooldown                = 24 * time.Hour
 )
 
 type compressEventChunkPlan struct {
@@ -420,9 +421,19 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 		if err != nil {
 			return created, fmt.Errorf("collect session memory context: %w", err)
 		}
+		openLoops := s.activeOpenLoopsForScope(ctx, scope, projectID)
+		narrativeMemoryContext := appendMemorySummaries(existingMemories, openLoops)
 
 		// Fetch prior summary for context continuity (incremental consolidation).
 		priorSummary := s.latestSessionSummary(ctx, sessionID)
+		priorSummaryFallbackCount := currentSummaryFallbackCount(priorSummary)
+		sessionRetryRun := summaryNeedsLLMRetry(priorSummary) || sessionHasRetryableMemories(linkedMemories)
+		if sessionRetryRun {
+			if err := s.deleteSessionDerivedArtifacts(ctx, sessionID); err != nil {
+				return created, fmt.Errorf("delete prior session artifacts for retry: %w", err)
+			}
+			priorSummary = nil
+		}
 
 		// Prepend prior summary as context for the narrative LLM.
 		narrativeContents := eventContents
@@ -446,22 +457,26 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 		// Check if we need map-reduce chunking for large sessions.
 		narrativeContents, narrativeJoined = s.chunkSessionIfNeeded(ctx, narrativeContents, narrativeJoined, existingMemories, sessionID)
 
-		body, tightDesc, narrativeResult, usedNarrative, err := s.buildSessionNarrative(ctx, narrativeContents, narrativeJoined, evts, existingMemories)
+		body, tightDesc, narrativeResult, usedNarrative, narrativeMethod, err := s.buildSessionNarrative(ctx, narrativeContents, narrativeJoined, evts, narrativeMemoryContext)
 		if err != nil {
 			return created, err
 		}
+		narrativeRetryable := s.intelligence != nil && s.intelligence.IsLLMBacked() && narrativeMethod == MethodHeuristic
 
 		if usedNarrative {
-			if err := s.insertNarrativeEpisode(ctx, narrativeResult, sessionID, scope, projectID, eventIDs, evts); err != nil {
+			if err := s.insertNarrativeEpisode(ctx, narrativeResult, sessionID, scope, projectID, eventIDs, evts, narrativeMethod, narrativeRetryable, priorSummaryFallbackCount); err != nil {
 				return created, fmt.Errorf("insert narrative episode: %w", err)
 			}
+			if err := s.archiveResolvedOpenLoops(ctx, narrativeResult.ResolvedLoops); err != nil {
+				return created, fmt.Errorf("archive resolved open loops: %w", err)
+			}
+			openLoops = filterOpenLoopsByID(openLoops, narrativeResult.ResolvedLoops)
 
 			// Extract memories from the narrative using the full extraction pipeline.
 			// Include KeyDecisions/Unresolved and active open loops as
 			// supplementary context so the extraction LLM can close resolved
 			// loops and avoid re-creating existing ones.
 			if s.intelligence != nil && narrativeResult.Summary != "" {
-				openLoops := s.activeOpenLoopsForScope(ctx, scope, projectID)
 				extractionInput := buildExtractionInput(narrativeResult, openLoops)
 
 				// Try AnalyzeEvents on the narrative for entities/relationships
@@ -470,6 +485,8 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 				var analysisEntities []core.EntityCandidate
 				var analysisRelationships []core.RelationshipCandidate
 				usedAnalysis := false
+				extractionMethod := narrativeMethod
+				retryableHeuristic := narrativeRetryable
 
 				if s.intelligence.IsLLMBacked() {
 					narrativeEvent := []core.EventContent{{
@@ -478,23 +495,26 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 						ProjectID: projectID,
 						SessionID: sessionID,
 					}}
-					analysis, analysisErr := s.intelligence.AnalyzeEvents(ctx, narrativeEvent)
+					analysis, analysisMethod, analysisErr := analyzeEventsWithMethod(ctx, s.intelligence, narrativeEvent)
 					if analysisErr == nil && analysis != nil && len(analysis.Memories) > 0 {
 						extracted = analysis.Memories
 						analysisEntities = analysis.Entities
 						analysisRelationships = analysis.Relationships
 						usedAnalysis = true
+						extractionMethod = analysisMethod
+						retryableHeuristic = analysisMethod == MethodHeuristic
 					}
 				}
 
 				// Fall back to extraction-only if analysis didn't produce memories.
 				if len(extracted) == 0 {
 					var err error
-					extracted, err = s.intelligence.ExtractMemoryCandidateBatch(ctx, []string{extractionInput})
+					extracted, extractionMethod, err = extractBatchWithMethod(ctx, s.intelligence, []string{extractionInput})
 					if err != nil {
 						slog.Warn("narrative memory extraction failed, skipping",
 							"session_id", sessionID, "error", err)
 					}
+					retryableHeuristic = extractionMethod == MethodHeuristic && s.intelligence.IsLLMBacked()
 				}
 
 				if len(extracted) > 0 {
@@ -509,6 +529,8 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 						analysisEntities:      analysisEntities,
 						analysisRelationships: analysisRelationships,
 						usedAnalysis:          usedAnalysis,
+						extractionMethod:      extractionMethod,
+						retryableHeuristic:    retryableHeuristic,
 					})
 					if err != nil {
 						return created, fmt.Errorf("process narrative memory candidates: %w", err)
@@ -561,6 +583,7 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 			CreatedAt: summaryCreatedAt,
 			UpdatedAt: summaryUpdatedAt,
 		}
+		summary.Metadata = applyExtractionMetadata(summary.Metadata, narrativeMethod, s.extractionModelName(), narrativeRetryable, priorSummaryFallbackCount)
 
 		if err := s.repo.InsertSummary(ctx, summary); err != nil {
 			return created, fmt.Errorf("insert session summary: %w", err)
@@ -578,19 +601,44 @@ func (s *AMMService) ConsolidateSessions(ctx context.Context) (int, error) {
 			}
 		}
 
-		// Mark events reflected AFTER summary persistence succeeds.
-		// If we mark before and the summary write fails, the burst is lost.
-		if err := s.markEventsReflected(ctx, evts); err != nil {
-			return created, fmt.Errorf("mark session events reflected: %w", err)
-		}
-
 		if err := s.markMemoriesNarrativeIncluded(ctx, linkedMemories); err != nil {
 			return created, fmt.Errorf("mark narrative included metadata: %w", err)
 		}
 
+		shouldRetrySession, err := s.shouldRetrySourceEvents(ctx, eventIDs)
+		if err != nil {
+			return created, fmt.Errorf("check retryable session events: %w", err)
+		}
+		if narrativeRetryable && priorSummaryFallbackCount+1 < maxHeuristicFallbackRetries {
+			shouldRetrySession = true
+		}
+
+		// Mark events reflected AFTER summary persistence succeeds.
+		// If we mark before and the summary write fails, the burst is lost.
+		if shouldRetrySession {
+			if err := s.clearEventsReflected(ctx, evts); err != nil {
+				return created, fmt.Errorf("clear session events reflected for retry: %w", err)
+			}
+			minSeq := evts[0].SequenceID
+			for _, evt := range evts[1:] {
+				if evt.SequenceID < minSeq {
+					minSeq = evt.SequenceID
+				}
+			}
+			if skippedMinSeq == 0 || minSeq < skippedMinSeq {
+				skippedMinSeq = minSeq
+			}
+		} else {
+			if err := s.markEventsReflected(ctx, evts); err != nil {
+				return created, fmt.Errorf("mark session events reflected: %w", err)
+			}
+		}
+
 		// Only advance frontier past sessions we actually completed.
-		if seq := maxEventSequenceID(evts); seq > processedMaxSeq {
-			processedMaxSeq = seq
+		if !shouldRetrySession {
+			if seq := maxEventSequenceID(evts); seq > processedMaxSeq {
+				processedMaxSeq = seq
+			}
 		}
 
 		created++
@@ -636,7 +684,7 @@ func (s *AMMService) BuildTopicSummaries(ctx context.Context) (int, error) {
 	recordTopicJob := func(created int) error {
 		now := time.Now().UTC()
 		topicJob := &core.Job{
-		ID:         core.GenerateID("job_"),
+			ID:         core.GenerateID("job_"),
 			Kind:       "build_topic_summaries",
 			Status:     "completed",
 			StartedAt:  &now,
@@ -1004,9 +1052,9 @@ func (s *AMMService) buildSessionNarrative(
 	joinedContent string,
 	evts []core.Event,
 	existingMemories []core.MemorySummary,
-) (string, string, *core.NarrativeResult, bool, error) {
+) (string, string, *core.NarrativeResult, bool, string, error) {
 	if s.intelligence != nil {
-		result, err := s.intelligence.ConsolidateNarrative(ctx, eventContents, existingMemories)
+		result, method, err := consolidateNarrativeWithMethod(ctx, s.intelligence, eventContents, existingMemories)
 		if err == nil && result != nil {
 			body := strings.TrimSpace(result.Summary)
 			if body == "" {
@@ -1015,20 +1063,20 @@ func (s *AMMService) buildSessionNarrative(
 			if len(body) > sessionBodyMaxChars {
 				body, err = s.escalate(ctx, body, sessionBodyMaxChars)
 				if err != nil {
-					return "", "", nil, false, fmt.Errorf("escalate session body: %w", err)
+					return "", "", nil, false, method, fmt.Errorf("escalate session body: %w", err)
 				}
 			}
 			tightDesc := fallbackSessionTightDesc(evts)
 			if cleaned, ok := sanitizeTightDescription(result.TightDesc); ok {
 				tightDesc = cleaned
 			}
-			return body, tightDesc, result, true, nil
+			return body, tightDesc, result, true, method, nil
 		}
 	}
 
 	body, err := s.escalate(ctx, joinedContent, sessionBodyMaxChars)
 	if err != nil {
-		return "", "", nil, false, fmt.Errorf("summarize session body: %w", err)
+		return "", "", nil, false, MethodHeuristic, fmt.Errorf("summarize session body: %w", err)
 	}
 
 	tightDesc := fallbackSessionTightDesc(evts)
@@ -1038,7 +1086,7 @@ func (s *AMMService) buildSessionNarrative(
 		}
 	}
 
-	return body, tightDesc, nil, false, nil
+	return body, tightDesc, nil, false, MethodHeuristic, nil
 }
 
 func fallbackSessionTightDesc(evts []core.Event) string {
@@ -1054,6 +1102,9 @@ func (s *AMMService) insertNarrativeEpisode(
 	projectID string,
 	eventIDs []string,
 	evts []core.Event,
+	extractionMethod string,
+	retryable bool,
+	priorFallbackCount int,
 ) error {
 	if result == nil || result.Episode == nil {
 		return nil
@@ -1071,22 +1122,22 @@ func (s *AMMService) insertNarrativeEpisode(
 	now := time.Now().UTC()
 	startedAt, endedAt := eventTimeBounds(evts)
 	episode := &core.Episode{
-			ID:               core.GenerateID("ep_"),
-		Title:            title,
-		Summary:          summary,
+		ID:      core.GenerateID("ep_"),
+		Title:   title,
+		Summary: summary,
 		TightDescription: func() string {
 			if td, ok := sanitizeTightDescription(extractTightDescription(summary, 160)); ok {
 				return td
 			}
 			return fallbackSessionTightDesc(evts)
 		}(),
-		Scope:            scope,
-		ProjectID:        projectID,
-		SessionID:        sessionID,
-		Importance:       0.6,
-		PrivacyLevel:     core.PrivacyPrivate,
-		StartedAt:        startedAt,
-		EndedAt:          endedAt,
+		Scope:        scope,
+		ProjectID:    projectID,
+		SessionID:    sessionID,
+		Importance:   0.6,
+		PrivacyLevel: core.PrivacyPrivate,
+		StartedAt:    startedAt,
+		EndedAt:      endedAt,
 		SourceSpan: core.SourceSpan{
 			EventIDs: eventIDs,
 		},
@@ -1096,6 +1147,7 @@ func (s *AMMService) insertNarrativeEpisode(
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
+	episode.Metadata = applyExtractionMetadata(episode.Metadata, extractionMethod, s.extractionModelName(), retryable, priorFallbackCount)
 
 	return s.repo.InsertEpisode(ctx, episode)
 }
@@ -1116,7 +1168,6 @@ func eventTimeBounds(events []core.Event) (*time.Time, *time.Time) {
 	}
 	return &minTime, &maxTime
 }
-
 
 func (s *AMMService) collectSessionMemoryContext(
 	ctx context.Context,
@@ -1142,6 +1193,7 @@ func (s *AMMService) collectSessionMemoryContext(
 		}
 		linked = append(linked, mem)
 		summaries = append(summaries, core.MemorySummary{
+			ID:               mem.ID,
 			Type:             string(mem.Type),
 			Subject:          mem.Subject,
 			TightDescription: mem.TightDescription,
@@ -1149,6 +1201,126 @@ func (s *AMMService) collectSessionMemoryContext(
 	}
 
 	return summaries, linked, nil
+}
+
+func appendMemorySummaries(existing []core.MemorySummary, memories []core.Memory) []core.MemorySummary {
+	if len(memories) == 0 {
+		return existing
+	}
+	seen := make(map[string]bool, len(existing)+len(memories))
+	summaries := make([]core.MemorySummary, 0, len(existing)+len(memories))
+	for _, summary := range existing {
+		summaries = append(summaries, summary)
+		if summary.ID != "" {
+			seen[summary.ID] = true
+		}
+	}
+	for _, mem := range memories {
+		if mem.ID != "" && seen[mem.ID] {
+			continue
+		}
+		summaries = append(summaries, core.MemorySummary{
+			ID:               mem.ID,
+			Type:             string(mem.Type),
+			Subject:          mem.Subject,
+			TightDescription: mem.TightDescription,
+		})
+		if mem.ID != "" {
+			seen[mem.ID] = true
+		}
+	}
+	return summaries
+}
+
+func filterOpenLoopsByID(openLoops []core.Memory, excludeIDs []string) []core.Memory {
+	if len(openLoops) == 0 || len(excludeIDs) == 0 {
+		return openLoops
+	}
+	excluded := make(map[string]bool, len(excludeIDs))
+	for _, id := range excludeIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		excluded[id] = true
+	}
+	filtered := make([]core.Memory, 0, len(openLoops))
+	for _, mem := range openLoops {
+		if excluded[mem.ID] {
+			continue
+		}
+		filtered = append(filtered, mem)
+	}
+	return filtered
+}
+
+func sessionHasRetryableMemories(memories []*core.Memory) bool {
+	for _, mem := range memories {
+		if shouldRetryHeuristicMemory(mem) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *AMMService) archiveResolvedOpenLoops(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		mem, err := s.repo.GetMemory(ctx, id)
+		if err != nil {
+			if errors.Is(err, core.ErrNotFound) {
+				continue
+			}
+			return fmt.Errorf("load memory %s: %w", id, err)
+		}
+		if mem == nil || mem.Type != core.MemoryTypeOpenLoop || mem.Status != core.MemoryStatusActive {
+			continue
+		}
+		mem.Status = core.MemoryStatusArchived
+		mem.UpdatedAt = now
+		if err := s.repo.UpdateMemory(ctx, mem); err != nil {
+			return fmt.Errorf("archive memory %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
+func (s *AMMService) deleteSessionDerivedArtifacts(ctx context.Context, sessionID string) error {
+	summaries, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{
+		Kind:      "session",
+		SessionID: sessionID,
+		Limit:     100,
+	})
+	if err != nil {
+		return fmt.Errorf("list session summaries: %w", err)
+	}
+	for _, summary := range summaries {
+		if err := s.repo.DeleteSummary(ctx, summary.ID); err != nil {
+			return fmt.Errorf("delete session summary %s: %w", summary.ID, err)
+		}
+	}
+
+	episodes, err := s.repo.ListEpisodes(ctx, core.ListEpisodesOptions{
+		SessionID: sessionID,
+		Limit:     100,
+	})
+	if err != nil {
+		return fmt.Errorf("list session episodes: %w", err)
+	}
+	for _, episode := range episodes {
+		if err := s.repo.DeleteEpisode(ctx, episode.ID); err != nil {
+			return fmt.Errorf("delete session episode %s: %w", episode.ID, err)
+		}
+	}
+
+	return nil
 }
 
 func isMemoryLinkedToSession(mem *core.Memory, sessionID string, eventSet map[string]struct{}) bool {
@@ -1181,12 +1353,16 @@ func (s *AMMService) markMemoriesNarrativeIncluded(ctx context.Context, memories
 			continue
 		}
 		seen[mem.ID] = struct{}{}
-		if getProcessingMeta(mem, MetaNarrativeIncluded) == "true" {
+		current, err := s.repo.GetMemory(ctx, mem.ID)
+		if err != nil {
+			return fmt.Errorf("load memory %s for narrative metadata: %w", mem.ID, err)
+		}
+		if getProcessingMeta(current, MetaNarrativeIncluded) == "true" {
 			continue
 		}
-		setProcessingMeta(mem, MetaNarrativeIncluded, "true")
-		mem.UpdatedAt = now
-		if err := s.repo.UpdateMemory(ctx, mem); err != nil {
+		setProcessingMeta(current, MetaNarrativeIncluded, "true")
+		current.UpdatedAt = now
+		if err := s.repo.UpdateMemory(ctx, current); err != nil {
 			return err
 		}
 	}
@@ -1437,6 +1613,45 @@ func (s *AMMService) markEventsReflected(ctx context.Context, events []core.Even
 		}
 	}
 	return nil
+}
+
+func (s *AMMService) clearEventsReflected(ctx context.Context, events []core.Event) error {
+	for i := range events {
+		if events[i].ReflectedAt == nil {
+			continue
+		}
+		events[i].ReflectedAt = nil
+		if err := s.repo.UpdateEvent(ctx, &events[i]); err != nil {
+			return fmt.Errorf("clear reflected_at for event %s: %w", events[i].ID, err)
+		}
+	}
+	return nil
+}
+
+func applyExtractionMetadata(metadata map[string]string, method, model string, retryable bool, priorFallbackCount int) map[string]string {
+	if metadata == nil {
+		metadata = make(map[string]string)
+	}
+	if method == "" {
+		method = MethodHeuristic
+	}
+	metadata[MetaExtractionMethod] = method
+	if method == MethodLLM {
+		metadata[MetaExtractionQuality] = QualityVerified
+		delete(metadata, MetaFallbackCount)
+	} else {
+		metadata[MetaExtractionQuality] = QualityProvisional
+		if retryable {
+			metadata[MetaFallbackCount] = strconv.Itoa(priorFallbackCount + 1)
+		} else {
+			delete(metadata, MetaFallbackCount)
+		}
+	}
+	metadata[MetaExtractedAt] = time.Now().UTC().Format(time.RFC3339)
+	if model != "" {
+		metadata[MetaExtractedModel] = model
+	}
+	return metadata
 }
 
 func buildTopicSnippets(events []core.Event, n int) string {

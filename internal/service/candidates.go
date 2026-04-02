@@ -42,12 +42,24 @@ type candidateProcessingInput struct {
 
 	// sessionID is attached to created memories when non-empty.
 	sessionID string
+
+	// extractionMethod records whether the current batch output came from the
+	// LLM or from heuristic fallback.
+	extractionMethod string
+
+	// retryableHeuristic marks heuristic output that came from an LLM-backed
+	// pipeline fallback and should be retried on later passes.
+	retryableHeuristic bool
 }
 
 // processMemoryCandidates validates, deduplicates, and inserts memory
 // candidates. It returns the number of memories created.
 func (s *AMMService) processMemoryCandidates(ctx context.Context, input candidateProcessingInput) (int, error) {
 	created := 0
+	method := input.extractionMethod
+	if method == "" {
+		method = s.extractionMethod()
+	}
 
 	for _, rawCandidate := range input.candidates {
 		candidate, ok := prepareMemoryCandidate(rawCandidate)
@@ -121,6 +133,13 @@ func (s *AMMService) processMemoryCandidates(ctx context.Context, input candidat
 		for i := range existing {
 			activeMemories = append(activeMemories, &existing[i])
 		}
+		if len(sourceEventIDs) > 0 {
+			relatedBySource, err := s.repo.ListMemoriesBySourceEventIDs(ctx, sourceEventIDs)
+			if err != nil {
+				return created, fmt.Errorf("list %s memories by source events: %w", input.sourceSystem, err)
+			}
+			activeMemories = mergeMemoryPointerSets(activeMemories, relatedBySource)
+		}
 
 		importance := importanceForCandidate(candidate)
 		candidateMemory := core.Memory{
@@ -145,8 +164,9 @@ func (s *AMMService) processMemoryCandidates(ctx context.Context, input candidat
 		}
 
 		duplicates := findDuplicateActiveMemories(activeMemories, candidateMemory)
+		duplicates = mergeDuplicateMemories(duplicates, findRetryUpgradeDuplicates(activeMemories, candidateMemory, method))
 		if len(duplicates) > 0 {
-			if err := s.handleDuplicateCandidate(ctx, duplicates, candidateMemory, input, candidateEntities, candidateRelationships, sourceContent); err != nil {
+			if err := s.handleDuplicateCandidate(ctx, duplicates, candidateMemory, input, candidateEntities, candidateRelationships, sourceContent, method); err != nil {
 				return created, err
 			}
 			continue
@@ -171,7 +191,7 @@ func (s *AMMService) processMemoryCandidates(ctx context.Context, input candidat
 			CreatedAt:        now,
 			UpdatedAt:        now,
 		}
-		markExtracted(mem, s.extractionMethod(), s.extractionModelName())
+		markExtracted(mem, method, s.extractionModelName(), input.retryableHeuristic)
 		setProcessingMeta(mem, "source_system", input.sourceSystem)
 
 		if err := s.repo.InsertMemory(ctx, mem); err != nil {
@@ -188,6 +208,87 @@ func (s *AMMService) processMemoryCandidates(ctx context.Context, input candidat
 	return created, nil
 }
 
+func mergeMemoryPointerSets(existing []*core.Memory, additional []core.Memory) []*core.Memory {
+	if len(additional) == 0 {
+		return existing
+	}
+	seen := make(map[string]bool, len(existing)+len(additional))
+	merged := make([]*core.Memory, 0, len(existing)+len(additional))
+	for _, mem := range existing {
+		if mem == nil || mem.ID == "" || seen[mem.ID] {
+			continue
+		}
+		seen[mem.ID] = true
+		merged = append(merged, mem)
+	}
+	for i := range additional {
+		mem := &additional[i]
+		if mem.ID == "" || seen[mem.ID] {
+			continue
+		}
+		seen[mem.ID] = true
+		merged = append(merged, mem)
+	}
+	return merged
+}
+
+func mergeDuplicateMemories(existing []*core.Memory, additional []*core.Memory) []*core.Memory {
+	if len(additional) == 0 {
+		return existing
+	}
+	seen := make(map[string]bool, len(existing)+len(additional))
+	merged := make([]*core.Memory, 0, len(existing)+len(additional))
+	for _, mem := range existing {
+		if mem == nil || mem.ID == "" || seen[mem.ID] {
+			continue
+		}
+		seen[mem.ID] = true
+		merged = append(merged, mem)
+	}
+	for _, mem := range additional {
+		if mem == nil || mem.ID == "" || seen[mem.ID] {
+			continue
+		}
+		seen[mem.ID] = true
+		merged = append(merged, mem)
+	}
+	return merged
+}
+
+func findRetryUpgradeDuplicates(activeMemories []*core.Memory, candidate core.Memory, extractionMethod string) []*core.Memory {
+	if extractionMethod != MethodLLM || len(candidate.SourceEventIDs) == 0 {
+		return nil
+	}
+	sourceIDs := make(map[string]bool, len(candidate.SourceEventIDs))
+	for _, id := range candidate.SourceEventIDs {
+		if id != "" {
+			sourceIDs[id] = true
+		}
+	}
+	if len(sourceIDs) == 0 {
+		return nil
+	}
+	duplicates := make([]*core.Memory, 0, 2)
+	for _, existing := range activeMemories {
+		if existing == nil || existing.Status != core.MemoryStatusActive {
+			continue
+		}
+		if existing.Type != candidate.Type || existing.Scope != candidate.Scope || existing.ProjectID != candidate.ProjectID {
+			continue
+		}
+		if !needsLLMUpgrade(existing, MetaExtractionMethod) {
+			continue
+		}
+		for _, sourceID := range existing.SourceEventIDs {
+			if sourceIDs[sourceID] {
+				duplicates = append(duplicates, existing)
+				break
+			}
+		}
+	}
+	return duplicates
+}
+
 // handleDuplicateCandidate merges a candidate into existing duplicate memories.
 func (s *AMMService) handleDuplicateCandidate(
 	ctx context.Context,
@@ -197,6 +298,7 @@ func (s *AMMService) handleDuplicateCandidate(
 	candidateEntities []core.EntityCandidate,
 	candidateRelationships []core.RelationshipCandidate,
 	sourceContent string,
+	method string,
 ) error {
 	now := time.Now().UTC()
 	duplicate := selectDuplicateKeeper(duplicates)
@@ -213,14 +315,13 @@ func (s *AMMService) handleDuplicateCandidate(
 	if candidateMemory.Importance > duplicate.Importance {
 		duplicate.Importance = candidateMemory.Importance
 	}
-	if shouldUpgradeDuplicateContent(duplicate, candidateMemory, s.extractionMethod()) {
+	if shouldUpgradeDuplicateContent(duplicate, candidateMemory, method) {
 		duplicate.Subject = candidateMemory.Subject
 		duplicate.Body = candidateMemory.Body
 		duplicate.TightDescription = candidateMemory.TightDescription
 	}
-	method := s.extractionMethod()
-	if getProcessingMeta(duplicate, MetaExtractionMethod) == "" || method == MethodLLM {
-		markExtracted(duplicate, method, s.extractionModelName())
+	if getProcessingMeta(duplicate, MetaExtractionMethod) == "" || method == MethodLLM || (method == MethodHeuristic && input.retryableHeuristic) {
+		markExtracted(duplicate, method, s.extractionModelName(), input.retryableHeuristic)
 	}
 	duplicate.UpdatedAt = now
 	if err := s.repo.UpdateMemory(ctx, duplicate); err != nil {

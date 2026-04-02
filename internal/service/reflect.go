@@ -20,6 +20,7 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 	slog.Debug("Reflect called", "job_id", jobID)
 	created := 0
 	processedCount := 0
+	retryEvents := make([]core.Event, 0)
 	claimBatchSize := s.reflectBatchSize
 	if claimBatchSize <= 0 {
 		claimBatchSize = defaultReflectBatchSize
@@ -68,6 +69,8 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 			analysisRelationships := make([]core.RelationshipCandidate, 0)
 			var eventQuality map[int]string
 			usedAnalysis := false
+			extractionMethod := MethodHeuristic
+			retryableHeuristic := false
 
 			if s.intelligence != nil && s.intelligence.IsLLMBacked() {
 				analysisInputs := make([]core.EventContent, 0, len(batch))
@@ -80,7 +83,7 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 					})
 				}
 
-				analysis, analysisErr := s.intelligence.AnalyzeEvents(ctx, analysisInputs)
+				analysis, analysisMethod, analysisErr := analyzeEventsWithMethod(ctx, s.intelligence, analysisInputs)
 				if analysisErr == nil {
 					if analysis != nil {
 						candidates = append(candidates, analysis.Memories...)
@@ -89,25 +92,34 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 						eventQuality = analysis.EventQuality
 					}
 					usedAnalysis = len(candidates) > 0
+					if usedAnalysis {
+						extractionMethod = analysisMethod
+						retryableHeuristic = analysisMethod == MethodHeuristic
+					}
 					if len(candidates) == 0 {
-						extracted, err := s.intelligence.ExtractMemoryCandidateBatch(ctx, contents)
+						extracted, method, err := extractBatchWithMethod(ctx, s.intelligence, contents)
 						if err != nil {
 							return created, fmt.Errorf("extract memory candidate batch: %w", err)
 						}
+						extractionMethod = method
+						retryableHeuristic = method == MethodHeuristic
 						candidates = append(candidates, extracted...)
 					}
 				} else {
-					extracted, err := s.intelligence.ExtractMemoryCandidateBatch(ctx, contents)
+					extracted, method, err := extractBatchWithMethod(ctx, s.intelligence, contents)
 					if err != nil {
 						return created, fmt.Errorf("extract memory candidate batch: %w", err)
 					}
+					extractionMethod = method
+					retryableHeuristic = method == MethodHeuristic
 					candidates = append(candidates, extracted...)
 				}
 			} else {
-				extracted, err := s.intelligence.ExtractMemoryCandidateBatch(ctx, contents)
+				extracted, method, err := extractBatchWithMethod(ctx, s.intelligence, contents)
 				if err != nil {
 					return created, fmt.Errorf("extract memory candidate batch: %w", err)
 				}
+				extractionMethod = method
 				candidates = append(candidates, extracted...)
 			}
 
@@ -123,11 +135,29 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 				analysisRelationships: analysisRelationships,
 				usedAnalysis:          usedAnalysis,
 				sourceSystem:          "reflect",
+				extractionMethod:      extractionMethod,
+				retryableHeuristic:    retryableHeuristic,
 			})
 			if err != nil {
 				return created, err
 			}
 			created += batchCreated
+
+			if retryableHeuristic {
+				shouldRetry, err := s.shouldRetrySourceEvents(ctx, eventIDsFromEvents(batch))
+				if err != nil {
+					return created, fmt.Errorf("check retryable reflected events: %w", err)
+				}
+				if shouldRetry {
+					retryEvents = append(retryEvents, batch...)
+				}
+			}
+		}
+	}
+
+	if len(retryEvents) > 0 {
+		if err := s.clearEventsReflected(ctx, dedupeEventsByID(retryEvents)); err != nil {
+			return created, fmt.Errorf("clear reflected events for retry: %w", err)
 		}
 	}
 
@@ -146,6 +176,22 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 	}
 
 	return created, nil
+}
+
+func dedupeEventsByID(events []core.Event) []core.Event {
+	if len(events) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(events))
+	out := make([]core.Event, 0, len(events))
+	for _, evt := range events {
+		if evt.ID == "" || seen[evt.ID] {
+			continue
+		}
+		seen[evt.ID] = true
+		out = append(out, evt)
+	}
+	return out
 }
 
 func filterReflectEventsByMetadata(events []core.Event, isLLMBacked bool) []core.Event {
