@@ -1,6 +1,6 @@
 {
   "name": "@bonztm/amm",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "AMM memory plugin for OpenClaw — ambient recall injection and conversation event capture.",
   "type": "module",
   "openclaw": {

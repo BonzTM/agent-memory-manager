@@ -4,7 +4,7 @@
  */
 export default {
   name: 'amm-http',
-  version: '1.3.1',
+  version: '1.3.2',
   description: 'Connect to AMM via HTTP API',
   config: {
     apiUrl: process.env.AMM_API_URL || 'http://localhost:8080',
