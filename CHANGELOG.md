@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.2] - 2026-04-02
 
+### Added
+
+- **Default tool event ignore policy.** Fresh installs now seed an ingestion policy (`pol_default_tool_events_ignore`) that ignores `tool_*` events by default (kind glob, priority 100). Previously operators had to manually add this policy after installation. Applies to both SQLite (migration 10) and PostgreSQL (migration 4).
+- **Embedding-based candidate deduplication fallback.** When text-based duplicate detection finds no matches, `processMemoryCandidates` now falls back to `findDuplicatesByEmbedding` using cosine similarity before inserting a new memory. Prevents near-duplicate memories when surface text differs but semantic content overlaps.
+- **Enrichment relationship creation from analysis.** The `Enrich` pipeline now creates relationships from `AnalyzeEvents` relationship candidates (via `createRelationshipsFromAnalysis`), not just entities. Previously only entity linking was wired through the enrichment path.
+- **Open loop lifecycle archival.** `LifecycleReview` now deterministically archives open loops that are stale (no access in 30 days) or resolved (a matching decision memory exists with a more recent timestamp). Runs as part of the normal lifecycle review batch alongside LLM-driven promote/decay/merge/archive decisions.
+- **Heuristic fallback retry pipeline.** When an LLM-backed pipeline falls back to heuristic extraction, the output is marked as retryable. Subsequent reflect/consolidate passes re-attempt LLM extraction on those events (up to 3 attempts). Tracked via `reflect_fallback_count` event metadata and `fallback_count` memory metadata.
+- **LLM fallback WARN logging.** All LLM intelligence operations (`AnalyzeEvents`, `ExtractMemoryCandidateBatch`, `ConsolidateNarrative`, `ReviewMemories`, `CompressEventBatches`, `SummarizeTopicBatches`, `TriageEvents`) now log `slog.Warn` with operation name, fallback type, model, and error when falling back to heuristic processing.
+
+### Fixed
+
+- **Stale metadata cleared on reset-derived.** `ResetDerived` now strips processing metadata (`extraction_method`, `extraction_model`, `fallback_count`, `entities_extracted`, `entities_extraction_method`, `lifecycle_reviewed_at`, `lifecycle_reviewed_model`, `narrative_included`) from manually-created memories that are preserved during the reset. Previously these fields survived the purge and caused stale state on re-extraction.
+- **Lower open_loop dedup threshold.** Embedding-based duplicate detection for `open_loop` type memories now uses a lower cosine similarity threshold (0.82 vs 0.85 default), reducing false negatives where semantically similar open loops were created as separate memories.
+
+### Changed
+
+- **Summary-level heuristic retry tracking.** Session summaries produced by heuristic fallback now track their own `fallback_count` in metadata. `summaryNeedsLLMRetry` checks whether a summary was heuristic-produced and under the retry cap, allowing `ConsolidateSessions` to re-attempt LLM narrative generation on subsequent passes.
+
 ## [1.3.1] - 2026-04-02
 
 ### Fixed
