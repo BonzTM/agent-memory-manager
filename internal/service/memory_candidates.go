@@ -8,7 +8,17 @@ import (
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
 
-const embeddingDedupThreshold = 0.85
+const (
+	embeddingDedupThreshold         = 0.85
+	openLoopEmbeddingDedupThreshold = 0.80
+)
+
+func embeddingDedupThresholdFor(memoryType core.MemoryType) float64 {
+	if memoryType == core.MemoryTypeOpenLoop {
+		return openLoopEmbeddingDedupThreshold
+	}
+	return embeddingDedupThreshold
+}
 
 func importanceForCandidate(candidate core.MemoryCandidate) float64 {
 	if candidate.Importance != nil {
@@ -106,6 +116,7 @@ func (s *AMMService) findDuplicatesByEmbedding(ctx context.Context, candidate co
 	candidateVector := vectors[0]
 	duplicates := make([]*core.Memory, 0, 4)
 	model := s.embeddingProvider.Model()
+	threshold := embeddingDedupThresholdFor(candidate.Type)
 	for _, existing := range activeMemories {
 		if existing == nil || existing.Status != core.MemoryStatusActive {
 			continue
@@ -123,7 +134,7 @@ func (s *AMMService) findDuplicatesByEmbedding(ctx context.Context, candidate co
 		if !ok {
 			continue
 		}
-		if cosine >= embeddingDedupThreshold {
+		if cosine >= threshold {
 			duplicates = append(duplicates, existing)
 		}
 	}
@@ -164,6 +175,7 @@ func (s *AMMService) findDuplicatesByStoredEmbeddingWithCache(ctx context.Contex
 	}
 
 	duplicates := make([]*core.Memory, 0, 4)
+	threshold := embeddingDedupThresholdFor(candidate.Type)
 	for _, existing := range activeMemories {
 		if ctx.Err() != nil {
 			return duplicates
@@ -187,7 +199,7 @@ func (s *AMMService) findDuplicatesByStoredEmbeddingWithCache(ctx context.Contex
 		if !ok {
 			continue
 		}
-		if cosine >= embeddingDedupThreshold {
+		if cosine >= threshold {
 			duplicates = append(duplicates, existing)
 		}
 	}
