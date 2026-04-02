@@ -37,26 +37,43 @@ func NewLLMIntelligenceProvider(summarizer *LLMSummarizer, reviewChatComplete Ch
 	return provider
 }
 
-func NewLLMIntelligenceProviderWithReviewConfig(summarizer *LLMSummarizer, reviewEndpoint, reviewAPIKey, reviewModel, reviewReasoningEffort string) *LLMIntelligenceProvider {
+// ReviewConfig holds the optional separate-model configuration for review tasks.
+type ReviewConfig struct {
+	Endpoint        string
+	APIKey          string
+	Model           string
+	Reasoning       *bool         // explicit true/false; nil omits
+	ReasoningEffort string        // low, medium, high; empty omits
+	Timeout         time.Duration // 0 uses the default (5 min)
+}
+
+func NewLLMIntelligenceProviderWithReviewConfig(summarizer *LLMSummarizer, rc ReviewConfig) *LLMIntelligenceProvider {
 	if summarizer == nil {
 		return NewLLMIntelligenceProvider(nil, nil)
 	}
-	if strings.TrimSpace(reviewEndpoint) == "" {
+	if strings.TrimSpace(rc.Endpoint) == "" {
 		return NewLLMIntelligenceProvider(summarizer, nil)
 	}
-	model := strings.TrimSpace(reviewModel)
+	model := strings.TrimSpace(rc.Model)
 	if model == "" {
 		model = strings.TrimSpace(summarizer.model)
 		if model == "" {
 			model = "gpt-4o-mini"
 		}
 	}
-	apiKey := strings.TrimSpace(reviewAPIKey)
+	apiKey := strings.TrimSpace(rc.APIKey)
 	if apiKey == "" {
 		apiKey = summarizer.apiKey
 	}
-	reviewSummarizer := NewLLMSummarizer(reviewEndpoint, apiKey, model)
-	if effort := strings.TrimSpace(reviewReasoningEffort); effort != "" {
+	timeout := rc.Timeout
+	if timeout <= 0 {
+		timeout = summarizer.client.Timeout
+	}
+	reviewSummarizer := NewLLMSummarizer(rc.Endpoint, apiKey, model, timeout)
+	if rc.Reasoning != nil {
+		reviewSummarizer.SetReasoning(rc.Reasoning)
+	}
+	if effort := strings.TrimSpace(rc.ReasoningEffort); effort != "" {
 		reviewSummarizer.SetReasoningEffort(effort)
 	}
 	return NewLLMIntelligenceProvider(summarizer, reviewSummarizer.chatComplete)

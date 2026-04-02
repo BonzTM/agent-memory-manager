@@ -575,7 +575,7 @@ func TestLifecycleReviewAndLLMUtilityHelpers(t *testing.T) {
 		t.Fatalf("expected future timestamp to map to 0d, got %q", got)
 	}
 
-	provider := NewLLMIntelligenceProviderWithReviewConfig(NewLLMSummarizer("http://example.com", "k", "m"), "http://review.example.com", "", "", "")
+	provider := NewLLMIntelligenceProviderWithReviewConfig(NewLLMSummarizer("http://example.com", "k", "m", 0), ReviewConfig{Endpoint: "http://review.example.com"})
 	if provider == nil || provider.reviewChatComplete == nil {
 		t.Fatal("expected review-configured LLM intelligence provider")
 	}
