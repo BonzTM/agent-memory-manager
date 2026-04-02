@@ -1,8 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +14,17 @@ import (
 
 	"github.com/bonztm/agent-memory-manager/internal/core"
 )
+
+func captureDefaultWarnLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	var logBuffer bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previousDefault) })
+
+	return &logBuffer
+}
 
 func TestHeuristicIntelligence_ImplementsSummarizer(t *testing.T) {
 	var _ core.Summarizer = (*HeuristicIntelligenceProvider)(nil)
@@ -216,6 +230,54 @@ func TestLLMIntelligence_FallsBackToHeuristic(t *testing.T) {
 	}
 	if len(result.Memories) == 0 {
 		t.Fatal("expected heuristic fallback memories")
+	}
+}
+
+func TestLLMIntelligence_AnalyzeEvents_LogsFallbackWarn(t *testing.T) {
+	logBuffer := captureDefaultWarnLogs(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	provider := NewLLMIntelligenceProvider(NewLLMSummarizer(srv.URL, "test-key", "test-model", 0), nil)
+	if _, err := provider.AnalyzeEvents(context.Background(), []core.EventContent{{Index: 1, Content: "We decided to use Go because it requires minimal dependencies."}}); err != nil {
+		t.Fatalf("expected heuristic fallback instead of error: %v", err)
+	}
+
+	logs := logBuffer.String()
+	for _, want := range []string{"level=WARN", "operation=analyze_events", "fallback=heuristic", "model=test-model"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("expected fallback warn log to contain %q, got %q", want, logs)
+		}
+	}
+}
+
+func TestLLMIntelligence_ExtractMemoryCandidateBatch_LogsFallbackWarn(t *testing.T) {
+	logBuffer := captureDefaultWarnLogs(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(mockChatResponse(`[{"type":"decision","subject":"database","body":"Use SQLite","tight_description":"Use SQLite","confidence":0.9}]`)))
+	}))
+	defer srv.Close()
+
+	summarizer := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
+	provider := NewLLMIntelligenceProvider(summarizer, func(context.Context, string) (string, error) {
+		return "", errors.New("review model timeout")
+	})
+	candidates, err := provider.ExtractMemoryCandidateBatch(context.Background(), []string{"We decided to use SQLite because it requires no server setup."})
+	if err != nil {
+		t.Fatalf("expected summarizer fallback instead of error: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected fallback summarizer candidate, got %d", len(candidates))
+	}
+
+	logs := logBuffer.String()
+	for _, want := range []string{"level=WARN", "operation=extract_memory_candidate_batch", "fallback=summarizer", "model=test-model"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("expected fallback warn log to contain %q, got %q", want, logs)
+		}
 	}
 }
 

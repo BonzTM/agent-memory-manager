@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -107,5 +109,54 @@ func TestHeuristicSummarizer_ConfidenceIs045(t *testing.T) {
 	}
 	if candidates[0].Confidence != 0.45 {
 		t.Fatalf("expected heuristic confidence 0.45, got %f", candidates[0].Confidence)
+	}
+}
+
+func TestLLMSummarizer_Summarize_LogsFallbackWarn(t *testing.T) {
+	logBuffer := captureDefaultWarnLogs(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	summarizer := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
+	summary, err := summarizer.Summarize(context.Background(), "This text should fall back to heuristic summarization.", 24)
+	if err != nil {
+		t.Fatalf("expected heuristic fallback instead of error: %v", err)
+	}
+	if summary == "" {
+		t.Fatal("expected heuristic fallback summary")
+	}
+
+	logs := logBuffer.String()
+	for _, want := range []string{"level=WARN", "operation=summarize", "fallback=heuristic", "model=test-model"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("expected fallback warn log to contain %q, got %q", want, logs)
+		}
+	}
+}
+
+func TestLLMSummarizer_ExtractMemoryCandidateBatch_LogsDecodeFallbackWarn(t *testing.T) {
+	logBuffer := captureDefaultWarnLogs(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(mockChatResponse(`not-json`)))
+	}))
+	defer srv.Close()
+
+	summarizer := NewLLMSummarizer(srv.URL, "test-key", "test-model", 0)
+	candidates, err := summarizer.ExtractMemoryCandidateBatch(context.Background(), []string{"We decided to use PostgreSQL because it requires less maintenance."})
+	if err != nil {
+		t.Fatalf("expected heuristic decode fallback instead of error: %v", err)
+	}
+	if len(candidates) == 0 {
+		t.Fatal("expected heuristic fallback candidates")
+	}
+
+	logs := logBuffer.String()
+	for _, want := range []string{"level=WARN", "operation=extract_memory_candidate_batch", "fallback=heuristic", "model=test-model"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("expected fallback warn log to contain %q, got %q", want, logs)
+		}
 	}
 }

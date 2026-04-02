@@ -102,18 +102,20 @@ type ContradictionPair struct {
 }
 
 type MemorySummary struct {
+	ID               string
 	Type             string
 	Subject          string
 	TightDescription string
 }
 
 type NarrativeResult struct {
-	Summary      string            `json:"summary"`
-	Title        string            `json:"title"`
-	TightDesc    string            `json:"tight_description"`
-	Episode      *EpisodeCandidate `json:"episode,omitempty"`
-	KeyDecisions []string          `json:"key_decisions,omitempty"`
-	Unresolved   []string          `json:"unresolved,omitempty"`
+	Summary       string            `json:"summary"`
+	Title         string            `json:"title"`
+	TightDesc     string            `json:"tight_description"`
+	Episode       *EpisodeCandidate `json:"episode,omitempty"`
+	KeyDecisions  []string          `json:"key_decisions,omitempty"`
+	Unresolved    []string          `json:"unresolved,omitempty"`
+	ResolvedLoops []string          `json:"resolved_loops,omitempty"`
 }
 
 type EpisodeCandidate struct {

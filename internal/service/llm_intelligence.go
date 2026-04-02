@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -94,13 +95,19 @@ func (p *LLMIntelligenceProvider) ModelName() string {
 // extraction through the review model (strong instruction following) instead
 // of the summarizer model. Falls back to the summarizer if no review model.
 func (p *LLMIntelligenceProvider) ExtractMemoryCandidateBatch(ctx context.Context, eventContents []string) ([]core.MemoryCandidate, error) {
+	candidates, _, err := p.ExtractMemoryCandidateBatchWithMethod(ctx, eventContents)
+	return candidates, err
+}
+
+func (p *LLMIntelligenceProvider) ExtractMemoryCandidateBatchWithMethod(ctx context.Context, eventContents []string) ([]core.MemoryCandidate, string, error) {
 	if len(eventContents) == 0 {
-		return nil, nil
+		return nil, MethodLLM, nil
 	}
 	chatComplete := p.reviewChatComplete
 	if chatComplete == nil {
 		// No review model configured — fall through to summarizer.
-		return p.LLMSummarizer.ExtractMemoryCandidateBatch(ctx, eventContents)
+		candidates, err := p.LLMSummarizer.ExtractMemoryCandidateBatch(ctx, eventContents)
+		return candidates, MethodLLM, err
 	}
 
 	// includeSourceEvents=true for multi-event batches (Reflect path, needs
@@ -109,24 +116,33 @@ func (p *LLMIntelligenceProvider) ExtractMemoryCandidateBatch(ctx context.Contex
 	prompt := buildMemoryExtractionPrompt(eventContents, len(eventContents) > 1)
 	result, err := chatComplete(ctx, prompt)
 	if err != nil {
-		return p.LLMSummarizer.ExtractMemoryCandidateBatch(ctx, eventContents)
+		p.logFallback("extract_memory_candidate_batch", "summarizer", err)
+		candidates, method, fallbackErr := p.LLMSummarizer.ExtractMemoryCandidateBatchWithMethod(ctx, eventContents)
+		return candidates, method, fallbackErr
 	}
 
 	var candidates []core.MemoryCandidate
 	if err := json.Unmarshal([]byte(trimLLMJSON(result)), &candidates); err != nil {
-		return p.LLMSummarizer.ExtractMemoryCandidateBatch(ctx, eventContents)
+		p.logFallback("extract_memory_candidate_batch", "summarizer", fmt.Errorf("decode llm response: %w", err))
+		fallbackCandidates, method, fallbackErr := p.LLMSummarizer.ExtractMemoryCandidateBatchWithMethod(ctx, eventContents)
+		return fallbackCandidates, method, fallbackErr
 	}
-	return candidates, nil
+	return candidates, MethodLLM, nil
 }
 
 func (p *LLMIntelligenceProvider) AnalyzeEvents(ctx context.Context, events []core.EventContent) (*core.AnalysisResult, error) {
+	result, _, err := p.AnalyzeEventsWithMethod(ctx, events)
+	return result, err
+}
+
+func (p *LLMIntelligenceProvider) AnalyzeEventsWithMethod(ctx context.Context, events []core.EventContent) (*core.AnalysisResult, string, error) {
 	if len(events) == 0 {
 		return &core.AnalysisResult{
 			Memories:      []core.MemoryCandidate{},
 			Entities:      []core.EntityCandidate{},
 			Relationships: []core.RelationshipCandidate{},
 			EventQuality:  map[int]string{},
-		}, nil
+		}, MethodLLM, nil
 	}
 	// AnalyzeEvents is a structured extraction/reasoning task → review model.
 	chatComplete := p.reviewChatComplete
@@ -134,21 +150,26 @@ func (p *LLMIntelligenceProvider) AnalyzeEvents(ctx context.Context, events []co
 		chatComplete = p.extractChatComplete
 	}
 	if chatComplete == nil {
-		return p.fallback.AnalyzeEvents(ctx, events)
+		result, err := p.fallback.AnalyzeEvents(ctx, events)
+		return result, MethodHeuristic, err
 	}
 
 	prompt := buildAnalyzeEventsPrompt(events)
 	raw, err := chatComplete(ctx, prompt)
 	if err != nil {
-		return p.fallback.AnalyzeEvents(ctx, events)
+		p.logFallback("analyze_events", "heuristic", err)
+		result, fallbackErr := p.fallback.AnalyzeEvents(ctx, events)
+		return result, MethodHeuristic, fallbackErr
 	}
 
 	parsed, err := parseAnalysisResult(raw)
 	if err != nil {
-		return p.fallback.AnalyzeEvents(ctx, events)
+		p.logFallback("analyze_events", "heuristic", fmt.Errorf("decode llm response: %w", err))
+		result, fallbackErr := p.fallback.AnalyzeEvents(ctx, events)
+		return result, MethodHeuristic, fallbackErr
 	}
 
-	return parsed, nil
+	return parsed, MethodLLM, nil
 }
 
 func (p *LLMIntelligenceProvider) TriageEvents(ctx context.Context, events []core.EventContent) (map[int]core.TriageDecision, error) {
@@ -167,11 +188,13 @@ func (p *LLMIntelligenceProvider) TriageEvents(ctx context.Context, events []cor
 	prompt := buildTriageEventsPrompt(events)
 	raw, err := chatComplete(ctx, prompt)
 	if err != nil {
+		p.logFallback("triage_events", "heuristic", err)
 		return p.fallback.TriageEvents(ctx, events)
 	}
 
 	parsed, err := parseTriageDecisions(raw, events)
 	if err != nil {
+		p.logFallback("triage_events", "heuristic", fmt.Errorf("decode llm response: %w", err))
 		return p.fallback.TriageEvents(ctx, events)
 	}
 
@@ -189,6 +212,7 @@ func (p *LLMIntelligenceProvider) CompressEventBatches(ctx context.Context, chun
 	prompt := buildCompressEventBatchesPrompt(chunks)
 	raw, err := p.extractChatComplete(ctx, prompt)
 	if err != nil {
+		p.logFallback("compress_event_batches", "heuristic", err)
 		return p.fallback.CompressEventBatches(ctx, chunks)
 	}
 
@@ -198,6 +222,7 @@ func (p *LLMIntelligenceProvider) CompressEventBatches(ctx context.Context, chun
 	}
 	parsed, err := parseCompressionResults(raw, requiredIndexes)
 	if err != nil {
+		p.logFallback("compress_event_batches", "heuristic", fmt.Errorf("decode llm response: %w", err))
 		return p.fallback.CompressEventBatches(ctx, chunks)
 	}
 
@@ -218,6 +243,7 @@ func (p *LLMIntelligenceProvider) SummarizeTopicBatches(ctx context.Context, top
 	prompt := buildSummarizeTopicBatchesPrompt(topics)
 	raw, err := chatComplete(ctx, prompt)
 	if err != nil {
+		p.logFallback("summarize_topic_batches", "heuristic", err)
 		return p.fallback.SummarizeTopicBatches(ctx, topics)
 	}
 
@@ -227,6 +253,7 @@ func (p *LLMIntelligenceProvider) SummarizeTopicBatches(ctx context.Context, top
 	}
 	parsed, err := parseCompressionResults(raw, requiredIndexes)
 	if err != nil {
+		p.logFallback("summarize_topic_batches", "heuristic", fmt.Errorf("decode llm response: %w", err))
 		return p.fallback.SummarizeTopicBatches(ctx, topics)
 	}
 
@@ -244,11 +271,13 @@ func (p *LLMIntelligenceProvider) ReviewMemories(ctx context.Context, memories [
 	prompt := buildReviewMemoriesPrompt(memories)
 	raw, err := p.reviewChatComplete(ctx, prompt)
 	if err != nil {
+		p.logFallback("review_memories", "empty_result", err)
 		return &core.ReviewResult{}, nil
 	}
 
 	var result core.ReviewResult
 	if err := json.Unmarshal([]byte(trimLLMJSON(raw)), &result); err != nil {
+		p.logFallback("review_memories", "empty_result", fmt.Errorf("decode llm response: %w", err))
 		return &core.ReviewResult{}, nil
 	}
 	if result.Promote == nil {
@@ -271,24 +300,34 @@ func (p *LLMIntelligenceProvider) ReviewMemories(ctx context.Context, memories [
 }
 
 func (p *LLMIntelligenceProvider) ConsolidateNarrative(ctx context.Context, events []core.EventContent, existingMemories []core.MemorySummary) (*core.NarrativeResult, error) {
+	result, _, err := p.ConsolidateNarrativeWithMethod(ctx, events, existingMemories)
+	return result, err
+}
+
+func (p *LLMIntelligenceProvider) ConsolidateNarrativeWithMethod(ctx context.Context, events []core.EventContent, existingMemories []core.MemorySummary) (*core.NarrativeResult, string, error) {
 	if len(events) == 0 {
-		return &core.NarrativeResult{}, nil
+		return &core.NarrativeResult{}, MethodLLM, nil
 	}
 	// ConsolidateNarrative is a compression task → summarizer model (large context, cheap).
 	chatComplete := p.extractChatComplete
 	if chatComplete == nil {
-		return p.fallback.ConsolidateNarrative(ctx, events, existingMemories)
+		result, err := p.fallback.ConsolidateNarrative(ctx, events, existingMemories)
+		return result, MethodHeuristic, err
 	}
 
 	prompt := buildConsolidateNarrativePrompt(events, existingMemories)
 	raw, err := chatComplete(ctx, prompt)
 	if err != nil {
-		return p.fallback.ConsolidateNarrative(ctx, events, existingMemories)
+		p.logFallback("consolidate_narrative", "heuristic", err)
+		result, fallbackErr := p.fallback.ConsolidateNarrative(ctx, events, existingMemories)
+		return result, MethodHeuristic, fallbackErr
 	}
 
 	var result core.NarrativeResult
 	if err := json.Unmarshal([]byte(trimLLMJSON(raw)), &result); err != nil {
-		return p.fallback.ConsolidateNarrative(ctx, events, existingMemories)
+		p.logFallback("consolidate_narrative", "heuristic", fmt.Errorf("decode llm response: %w", err))
+		fallbackResult, fallbackErr := p.fallback.ConsolidateNarrative(ctx, events, existingMemories)
+		return fallbackResult, MethodHeuristic, fallbackErr
 	}
 	if result.KeyDecisions == nil {
 		result.KeyDecisions = []string{}
@@ -296,8 +335,27 @@ func (p *LLMIntelligenceProvider) ConsolidateNarrative(ctx context.Context, even
 	if result.Unresolved == nil {
 		result.Unresolved = []string{}
 	}
+	if result.ResolvedLoops == nil {
+		result.ResolvedLoops = []string{}
+	}
 
-	return &result, nil
+	return &result, MethodLLM, nil
+}
+
+func (p *LLMIntelligenceProvider) logFallback(operation, fallback string, err error) {
+	if err == nil {
+		return
+	}
+	model := ""
+	if p.LLMSummarizer != nil {
+		model = strings.TrimSpace(p.LLMSummarizer.model)
+	}
+	slog.Warn("llm intelligence operation failed, using fallback",
+		"operation", operation,
+		"fallback", fallback,
+		"model", model,
+		"error", err,
+	)
 }
 
 func parseAnalysisResult(raw string) (*core.AnalysisResult, error) {
@@ -552,6 +610,8 @@ Promotion guidance:
 Decay/archive guidance:
 - Decay memories that seem less relevant, less certain, or lower utility over time
 - Archive memories that are stale, superseded by newer information, or purely ephemeral context
+- For open_loop memories, archive items older than 30 days with zero access_count
+- For open_loop memories, archive items whose subject is clearly resolved by a newer decision memory
 
 Merge/contradiction guidance:
 - Merge near-duplicates when one memory can absorb another without losing important nuance
@@ -672,12 +732,15 @@ Return a JSON object with exactly these keys:
   }
 - key_decisions: array of high-impact decisions from the events
 - unresolved: array of unresolved questions or next-step uncertainties
+- resolved_loops: array of existing memory IDs for open_loop items that these events clearly resolved
 
 Rules:
 - Ground outputs in the provided events; do not invent facts
 - Keep summary and episode consistent with each other
 - Both title and tight_description MUST be populated. Title is for humans scanning; tight_description is for machines searching. They serve different purposes.
 - If no clear decisions or unresolved items exist, return empty arrays
+- Only include IDs in resolved_loops when they appear in Existing memories for context with type "open_loop"
+- Do not include open_loop IDs that remain unresolved or only partially addressed
 - Return ONLY the JSON object (no markdown fences or commentary)
 
 Events (chronological):

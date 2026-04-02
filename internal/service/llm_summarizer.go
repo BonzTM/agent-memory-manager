@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -63,6 +64,7 @@ func (s *LLMSummarizer) Summarize(ctx context.Context, text string, maxLen int) 
 
 	result, err := s.chatComplete(ctx, prompt)
 	if err != nil {
+		s.logFallback("summarize", "heuristic", err)
 		return s.fallback.Summarize(ctx, text, maxLen)
 	}
 
@@ -79,11 +81,13 @@ func (s *LLMSummarizer) ExtractMemoryCandidate(ctx context.Context, eventContent
 
 	result, err := s.chatComplete(ctx, prompt)
 	if err != nil {
+		s.logFallback("extract_memory_candidate", "heuristic", err)
 		return s.fallback.ExtractMemoryCandidate(ctx, eventContent)
 	}
 
 	var candidates []core.MemoryCandidate
 	if err := json.Unmarshal([]byte(result), &candidates); err != nil {
+		s.logFallback("extract_memory_candidate", "heuristic", fmt.Errorf("decode llm response: %w", err))
 		return s.fallback.ExtractMemoryCandidate(ctx, eventContent)
 	}
 	return candidates, nil
@@ -95,22 +99,43 @@ const maxEventContentLen = 1200
 // memory candidates across a batch of events, falling back heuristically on
 // failure.
 func (s *LLMSummarizer) ExtractMemoryCandidateBatch(ctx context.Context, eventContents []string) ([]core.MemoryCandidate, error) {
+	candidates, _, err := s.ExtractMemoryCandidateBatchWithMethod(ctx, eventContents)
+	return candidates, err
+}
+
+func (s *LLMSummarizer) ExtractMemoryCandidateBatchWithMethod(ctx context.Context, eventContents []string) ([]core.MemoryCandidate, string, error) {
 	if len(eventContents) == 0 {
-		return nil, nil
+		return nil, MethodLLM, nil
 	}
 
 	prompt := buildMemoryExtractionPrompt(eventContents, true)
 
 	result, err := s.chatComplete(ctx, prompt)
 	if err != nil {
-		return s.fallback.ExtractMemoryCandidateBatch(ctx, eventContents)
+		s.logFallback("extract_memory_candidate_batch", "heuristic", err)
+		candidates, fallbackErr := s.fallback.ExtractMemoryCandidateBatch(ctx, eventContents)
+		return candidates, MethodHeuristic, fallbackErr
 	}
 
 	var candidates []core.MemoryCandidate
 	if err := json.Unmarshal([]byte(result), &candidates); err != nil {
-		return s.fallback.ExtractMemoryCandidateBatch(ctx, eventContents)
+		s.logFallback("extract_memory_candidate_batch", "heuristic", fmt.Errorf("decode llm response: %w", err))
+		fallbackCandidates, fallbackErr := s.fallback.ExtractMemoryCandidateBatch(ctx, eventContents)
+		return fallbackCandidates, MethodHeuristic, fallbackErr
 	}
-	return candidates, nil
+	return candidates, MethodLLM, nil
+}
+
+func (s *LLMSummarizer) logFallback(operation, fallback string, err error) {
+	if err == nil {
+		return
+	}
+	slog.Warn("llm operation failed, using fallback",
+		"operation", operation,
+		"fallback", fallback,
+		"model", strings.TrimSpace(s.model),
+		"error", err,
+	)
 }
 
 func buildMemoryExtractionPrompt(eventContents []string, includeSourceEvents bool) string {
