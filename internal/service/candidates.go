@@ -108,6 +108,10 @@ func (s *AMMService) processMemoryCandidates(ctx context.Context, input candidat
 
 		// Apply LLM scope hint: when the LLM suggests "global" for types
 		// that are inherently cross-project, promote from project to global.
+		// Note: input.sessionID is preserved as provenance (which session
+		// created this memory), not as a scope qualifier. Global memories
+		// with a sessionID are correct — recall only filters by sessionID
+		// when the caller explicitly provides one.
 		if candidate.Scope == "global" && scope == core.ScopeProject {
 			if candidateScopeIsGlobalEligible(candidate.Type) {
 				scope = core.ScopeGlobal

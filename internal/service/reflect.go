@@ -179,6 +179,11 @@ func (s *AMMService) Reflect(ctx context.Context, jobID string) (int, error) {
 		}
 	}
 
+	// Clear reflected_at on retry events so they are re-claimed on the
+	// next Reflect pass via ClaimUnreflectedEvents (WHERE reflected_at IS
+	// NULL). This is safe because the reflect job frontier tracks progress
+	// separately and ClaimUnreflectedEvents does not use a sequence-based
+	// frontier — it relies solely on reflected_at IS NULL.
 	if len(retryEvents) > 0 {
 		if err := s.clearEventsReflected(ctx, dedupeEventsByID(retryEvents)); err != nil {
 			return created, fmt.Errorf("clear reflected events for retry: %w", err)

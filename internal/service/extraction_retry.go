@@ -170,5 +170,6 @@ func summaryNeedsLLMRetry(summary *core.Summary) bool {
 		return false
 	}
 	method := strings.TrimSpace(summary.Metadata[MetaExtractionMethod])
-	return method == MethodHeuristic && currentSummaryFallbackCount(summary) > 0 && currentSummaryFallbackCount(summary) < maxHeuristicFallbackRetries
+	count := currentSummaryFallbackCount(summary)
+	return method == MethodHeuristic && count > 0 && count < maxHeuristicFallbackRetries
 }

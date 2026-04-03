@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Add 60s rate-limit cooldown to CompressHistory.** Prevents expensive plan-building on every cron tick when events constantly accumulate above the minimum threshold. Uses `lastCompletedJobTime` to skip if a compress job completed within the last 60 seconds.
+- **Scope latestLeafSummaryBody by project.** The prior leaf summary passed as context during compression is now scoped by project, preventing cross-project context bleed when multiple projects have leaf summaries.
+- **Reduce false-positive open loop archival.** `openLoopResolutionKeys` now requires a minimum normalized text length of 12 characters, preventing overly broad matches on short common subjects like "database" or "config."
+- **Log warnings for invalid resolved_loops IDs.** `archiveResolvedOpenLoops` now logs `slog.Warn` when the LLM returns a non-existent memory ID or a memory that is not an active open_loop, aiding diagnosis of LLM hallucination.
+- **Cache summaryNeedsLLMRetry fallback count.** `currentSummaryFallbackCount` is now called once instead of twice, avoiding redundant metadata parsing.
+
 ### Changed
 
 - **Enforce atomic open_loop extraction.** The memory extraction prompt now requires each `open_loop` to be a single atomic item. Multi-item open loops (numbered lists, bullet lists, or "also"/"additionally" joining unrelated topics) are explicitly called out as defects. Prevents the extraction LLM from aggregating all unresolved items into a single junk-drawer memory.

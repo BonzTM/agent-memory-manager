@@ -335,11 +335,16 @@ func makeScopedOpenLoopResolutionKey(mem *core.Memory, key string) scopedOpenLoo
 	}
 }
 
+// minOpenLoopResolutionKeyLen is the minimum normalized text length for
+// an open loop resolution key. Short subjects like "database" or "config"
+// match too broadly and cause false-positive archival.
+const minOpenLoopResolutionKeyLen = 12
+
 func openLoopResolutionKeys(subject, tightDescription string) []string {
 	keys := make([]string, 0, 2)
 	for _, value := range []string{subject, tightDescription} {
 		normalized := normalizeMemoryText(value)
-		if normalized == "" {
+		if normalized == "" || len(normalized) < minOpenLoopResolutionKeyLen {
 			continue
 		}
 		alreadyIncluded := false

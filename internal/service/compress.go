@@ -133,6 +133,15 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
+	// Rate-limit gate: skip if a compress job completed recently.
+	// Prevents expensive plan-building on every cron tick when events
+	// constantly accumulate above the minimum threshold.
+	const compressCooldown = 60 * time.Second
+	if lastRun := s.lastCompletedJobTime(ctx, "compress"); !lastRun.IsZero() && time.Since(lastRun) < compressCooldown {
+		slog.Debug("CompressHistory skipped (cooldown)", "last_run", lastRun, "cooldown", compressCooldown)
+		return 0, nil
+	}
+
 	// Minimum-event gate: skip if too few events to form a meaningful batch.
 	minEvents := s.compressMinEvents
 	if minEvents <= 0 {
@@ -191,8 +200,10 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 		})
 	}
 
-	// Fetch the most recent leaf summary for continuity context.
-	priorLeafBody := s.latestLeafSummaryBody(ctx)
+	// Fetch the most recent leaf summary for continuity context, scoped
+	// to the first chunk's project to avoid cross-project context bleed.
+	leafScope, leafProjectID := inferScopeFromEvents(events)
+	priorLeafBody := s.latestLeafSummaryBody(ctx, leafScope, leafProjectID)
 
 	batchResults := make(map[int]core.CompressionResult, len(plans))
 	batchSucceeded := false
@@ -1299,11 +1310,13 @@ func (s *AMMService) archiveResolvedOpenLoops(ctx context.Context, ids []string)
 		mem, err := s.repo.GetMemory(ctx, id)
 		if err != nil {
 			if errors.Is(err, core.ErrNotFound) {
+				slog.Warn("resolved_loops: LLM returned non-existent memory ID", "memory_id", id)
 				continue
 			}
 			return fmt.Errorf("load memory %s: %w", id, err)
 		}
 		if mem == nil || mem.Type != core.MemoryTypeOpenLoop || mem.Status != core.MemoryStatusActive {
+			slog.Warn("resolved_loops: skipping invalid target", "memory_id", id, "type", mem.Type, "status", mem.Status)
 			continue
 		}
 		mem.Status = core.MemoryStatusArchived
@@ -1647,13 +1660,20 @@ func (s *AMMService) latestSessionSummary(ctx context.Context, sessionID string)
 }
 
 // latestLeafSummaryBody returns the body of the most recent leaf summary,
-// or empty string if none exists. Used to provide continuity context to
-// CompressHistory so new leaf summaries don't repeat prior content.
-func (s *AMMService) latestLeafSummaryBody(ctx context.Context) string {
-	summaries, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{
+// or empty string if none exists. When scope and projectID are provided,
+// the query is scoped to avoid bleeding context across projects.
+func (s *AMMService) latestLeafSummaryBody(ctx context.Context, scope core.Scope, projectID string) string {
+	opts := core.ListSummariesOptions{
 		Kind:  "leaf",
 		Limit: 1,
-	})
+	}
+	if scope != "" {
+		opts.Scope = scope
+	}
+	if projectID != "" {
+		opts.ProjectID = projectID
+	}
+	summaries, err := s.repo.ListSummaries(ctx, opts)
 	if err != nil || len(summaries) == 0 {
 		return ""
 	}
