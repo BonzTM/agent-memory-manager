@@ -423,6 +423,7 @@ Return a single JSON object with this exact shape:
       "tight_description": "...",
       "confidence": 0.9,
       "importance": 0.85,
+      "scope": "project",
       "source_events": [1, 3]
     }
   ],

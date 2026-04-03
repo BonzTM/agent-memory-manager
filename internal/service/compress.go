@@ -143,12 +143,17 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 	}
 
 	// Minimum-event gate: skip if too few events to form a meaningful batch.
+	// Clamp against maxEvents so misconfiguration (min > max) cannot
+	// permanently stall compression.
 	minEvents := s.compressMinEvents
 	if minEvents <= 0 {
 		minEvents = s.compressChunkSize * 5
 		if minEvents <= 0 {
 			minEvents = defaultCompressChunkSize * 5
 		}
+	}
+	if minEvents > maxEvents {
+		minEvents = maxEvents
 	}
 	if len(events) < minEvents {
 		slog.Debug("CompressHistory skipped (below minimum)", "events", len(events), "min_events", minEvents)

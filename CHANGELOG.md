@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reduce false-positive open loop archival.** `openLoopResolutionKeys` now requires a minimum normalized text length of 12 characters, preventing overly broad matches on short common subjects like "database" or "config."
 - **Log warnings for invalid resolved_loops IDs.** `archiveResolvedOpenLoops` now logs `slog.Warn` when the LLM returns a non-existent memory ID or a memory that is not an active open_loop, aiding diagnosis of LLM hallucination.
 - **Cache summaryNeedsLLMRetry fallback count.** `currentSummaryFallbackCount` is now called once instead of twice, avoiding redundant metadata parsing.
+- **Clamp compress_min_events against compress_max_events.** Prevents misconfiguration where `compress_min_events > compress_max_events` permanently stalls compression by ensuring the minimum never exceeds the query limit.
+- **Add scope field to AnalyzeEvents example JSON.** The `buildAnalyzeEventsPrompt` example now includes the `scope` field so LLMs following the example literally will emit scope hints on the primary analysis path, not just the batch extraction path.
 
 ### Changed
 
