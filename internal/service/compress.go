@@ -1471,9 +1471,14 @@ func buildExtractionInput(result *core.NarrativeResult, openLoops []core.Memory)
 	if len(openLoops) > 0 {
 		b.WriteString("\n\nActive open loops from prior sessions (close if resolved, don't re-create):\n")
 		for _, ol := range openLoops {
-			b.WriteString("- ")
-			b.WriteString(ol.TightDescription)
-			b.WriteByte('\n')
+			fmt.Fprintf(&b, "- [%s] %s\n", ol.ID, ol.TightDescription)
+			if body := strings.TrimSpace(ol.Body); body != "" {
+				const maxOpenLoopBodyLen = 500
+				if len(body) > maxOpenLoopBodyLen {
+					body = body[:maxOpenLoopBodyLen] + "..."
+				}
+				fmt.Fprintf(&b, "  Context: %s\n", body)
+			}
 		}
 	}
 	return b.String()
