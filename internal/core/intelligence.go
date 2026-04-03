@@ -1,6 +1,9 @@
 package core
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 type IntelligenceProvider interface {
 	Summarizer
@@ -110,14 +113,58 @@ type MemorySummary struct {
 }
 
 type NarrativeResult struct {
-	Summary       string            `json:"summary"`
-	Title         string            `json:"title"`
-	TightDesc     string            `json:"tight_description"`
-	Episode       *EpisodeCandidate `json:"episode,omitempty"`
-	KeyDecisions  []string          `json:"key_decisions,omitempty"`
-	Unresolved    []string          `json:"unresolved,omitempty"`
-	ResolvedLoops []string          `json:"resolved_loops,omitempty"`
+	Summary       string               `json:"summary"`
+	Title         string               `json:"title"`
+	TightDesc     string               `json:"tight_description"`
+	Episode       *EpisodeCandidate    `json:"episode,omitempty"`
+	KeyDecisions  []NarrativeDecision  `json:"key_decisions,omitempty"`
+	Unresolved    []NarrativeUnresolved `json:"unresolved,omitempty"`
+	ResolvedLoops []string             `json:"resolved_loops,omitempty"`
 }
+
+// NarrativeDecision is a structured key decision with importance metadata.
+// Supports flexible JSON unmarshaling: accepts both a plain string
+// ("some decision") and a structured object ({"decision": "...", ...}).
+type NarrativeDecision struct {
+	Decision   string `json:"decision"`
+	Importance string `json:"importance,omitempty"` // "high", "medium", "low"
+	Source     string `json:"source,omitempty"`     // "explicit user direction", "assistant inference", etc.
+}
+
+func (d *NarrativeDecision) UnmarshalJSON(data []byte) error {
+	// Try string first (backward compat).
+	var s string
+	if json.Unmarshal(data, &s) == nil {
+		d.Decision = s
+		return nil
+	}
+	// Structured object.
+	type alias NarrativeDecision
+	return json.Unmarshal(data, (*alias)(d))
+}
+
+func (d NarrativeDecision) String() string { return d.Decision }
+
+// NarrativeUnresolved is a structured unresolved item with importance metadata.
+// Supports flexible JSON unmarshaling: accepts both a plain string and a
+// structured object ({"item": "...", ...}).
+type NarrativeUnresolved struct {
+	Item       string `json:"item"`
+	Importance string `json:"importance,omitempty"` // "high", "medium", "low"
+	Blocking   bool   `json:"blocking,omitempty"`
+}
+
+func (u *NarrativeUnresolved) UnmarshalJSON(data []byte) error {
+	var s string
+	if json.Unmarshal(data, &s) == nil {
+		u.Item = s
+		return nil
+	}
+	type alias NarrativeUnresolved
+	return json.Unmarshal(data, (*alias)(u))
+}
+
+func (u NarrativeUnresolved) String() string { return u.Item }
 
 type EpisodeCandidate struct {
 	Title        string   `json:"title"`

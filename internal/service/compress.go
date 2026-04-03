@@ -1482,7 +1482,13 @@ func buildExtractionInput(result *core.NarrativeResult, openLoops []core.Memory)
 		b.WriteString("\n\nKey decisions made in this session:\n")
 		for _, d := range result.KeyDecisions {
 			b.WriteString("- ")
-			b.WriteString(d)
+			b.WriteString(d.Decision)
+			if d.Importance != "" {
+				fmt.Fprintf(&b, " [importance: %s]", d.Importance)
+			}
+			if d.Source != "" {
+				fmt.Fprintf(&b, " (source: %s)", d.Source)
+			}
 			b.WriteByte('\n')
 		}
 	}
@@ -1490,7 +1496,13 @@ func buildExtractionInput(result *core.NarrativeResult, openLoops []core.Memory)
 		b.WriteString("\n\nUnresolved items from this session:\n")
 		for _, u := range result.Unresolved {
 			b.WriteString("- ")
-			b.WriteString(u)
+			b.WriteString(u.Item)
+			if u.Importance != "" {
+				fmt.Fprintf(&b, " [importance: %s]", u.Importance)
+			}
+			if u.Blocking {
+				b.WriteString(" [BLOCKING]")
+			}
 			b.WriteByte('\n')
 		}
 	}

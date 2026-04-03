@@ -330,10 +330,10 @@ func (p *LLMIntelligenceProvider) ConsolidateNarrativeWithMethod(ctx context.Con
 		return fallbackResult, MethodHeuristic, fallbackErr
 	}
 	if result.KeyDecisions == nil {
-		result.KeyDecisions = []string{}
+		result.KeyDecisions = []core.NarrativeDecision{}
 	}
 	if result.Unresolved == nil {
-		result.Unresolved = []string{}
+		result.Unresolved = []core.NarrativeUnresolved{}
 	}
 	if result.ResolvedLoops == nil {
 		result.ResolvedLoops = []string{}
@@ -754,8 +754,8 @@ Return a JSON object with exactly these keys:
     outcomes: array of outcomes/results,
     unresolved: array of open questions/open loops
   }
-- key_decisions: array of high-impact decisions from the events
-- unresolved: array of unresolved questions or next-step uncertainties
+- key_decisions: array of objects, each with: "decision" (what was decided), "importance" ("high", "medium", or "low"), and optionally "source" ("explicit user direction", "assistant inference", "team consensus", etc.)
+- unresolved: array of objects, each with: "item" (what is unresolved), "importance" ("high", "medium", or "low"), and optionally "blocking" (true if this blocks other work)
 - resolved_loops: array of existing memory IDs for open_loop items that these events clearly resolved
 
 Rules:
