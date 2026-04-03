@@ -37,6 +37,21 @@ func importanceForCandidate(candidate core.MemoryCandidate) float64 {
 	}
 }
 
+// candidateScopeIsGlobalEligible returns true for memory types that are
+// inherently cross-project and may legitimately be promoted to global scope
+// when the LLM extraction suggests "global".
+func candidateScopeIsGlobalEligible(memoryType core.MemoryType) bool {
+	switch memoryType {
+	case core.MemoryTypePreference,
+		core.MemoryTypeIdentity,
+		core.MemoryTypeConstraint,
+		core.MemoryTypeProcedure:
+		return true
+	default:
+		return false
+	}
+}
+
 func shouldUpgradeDuplicateContent(existing *core.Memory, candidate core.Memory, extractionMethod string) bool {
 	if existing == nil {
 		return false

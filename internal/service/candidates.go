@@ -90,7 +90,7 @@ func (s *AMMService) processMemoryCandidates(ctx context.Context, input candidat
 		var sourceContent string
 
 		if input.scopeOverride != nil {
-			// ConsolidateSessions path: scope already known.
+			// ConsolidateSessions path: scope already known from events.
 			scope = *input.scopeOverride
 			projectID = input.projectOverride
 			sourceEventIDs = eventIDsFromEvents(input.sourceEvents)
@@ -104,6 +104,15 @@ func (s *AMMService) processMemoryCandidates(ctx context.Context, input candidat
 			scope, projectID = inferScopeFromEvents(candidateEvents)
 			sourceEventIDs = eventIDsFromEvents(candidateEvents)
 			sourceContent = joinEventContent(candidateEvents)
+		}
+
+		// Apply LLM scope hint: when the LLM suggests "global" for types
+		// that are inherently cross-project, promote from project to global.
+		if candidate.Scope == "global" && scope == core.ScopeProject {
+			if candidateScopeIsGlobalEligible(candidate.Type) {
+				scope = core.ScopeGlobal
+				projectID = ""
+			}
 		}
 
 		if len(sourceEventIDs) == 0 {

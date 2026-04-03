@@ -133,10 +133,10 @@ func TestLLMSummarizer_ExtractPromptIncludesDecisionGuidance(t *testing.T) {
 		`Most events contain nothing worth remembering`,
 		// Field quality
 		`MUST go beyond tight_description`,
-		`Calibrate: 0.95 = explicitly stated by user`,
+		`Calibrate using these examples: user explicitly says`,
 		// Type guidance
 		`decision: a settled architectural or design choice`,
-		`open_loop: an unresolved question or blocked work`,
+		`open_loop: a SINGLE unresolved question or blocked work`,
 		`constraint: a hard requirement or boundary`,
 		`procedure: a non-obvious multi-step workflow`,
 		`incident: a notable failure or surprise`,
@@ -351,7 +351,7 @@ func TestLLMSummarizer_ExtractBatchPromptIncludesDecisionGuidance(t *testing.T) 
 		`Deduplicate across events`,
 		`decision: a settled architectural or design choice`,
 		`source_events: array of event numbers (1-indexed) this memory was derived from`,
-		`open_loop: an unresolved question`,
+		`open_loop: a SINGLE unresolved question`,
 		`FILTERING`,
 		`Return [] for most inputs`,
 	} {

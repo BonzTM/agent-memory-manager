@@ -20,5 +20,6 @@ type MemoryCandidate struct {
 	TightDescription string     `json:"tight_description"`
 	Confidence       float64    `json:"confidence"`
 	Importance       *float64   `json:"importance,omitempty"`
+	Scope            string     `json:"scope,omitempty"`
 	SourceEventNums  []int      `json:"source_events,omitempty"`
 }
