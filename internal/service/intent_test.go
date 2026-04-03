@@ -91,6 +91,64 @@ func TestClassifyRecallIntent(t *testing.T) {
 			wantOK:   true,
 		},
 
+		// Open loop / pending work patterns
+		{
+			name:     "what's pending",
+			query:    "what's pending right now?",
+			wantMode: core.RecallModeFacts,
+			wantOK:   true,
+		},
+		{
+			name:     "what's open",
+			query:    "what's open that I should know about?",
+			wantMode: core.RecallModeFacts,
+			wantOK:   true,
+		},
+		{
+			name:     "open loop",
+			query:    "are there any open loop items?",
+			wantMode: core.RecallModeFacts,
+			wantOK:   true,
+		},
+		{
+			name:     "unresolved",
+			query:    "what's still unresolved from last session?",
+			wantMode: core.RecallModeFacts,
+			wantOK:   true,
+		},
+		{
+			name:     "outstanding issues",
+			query:    "any outstanding issues I should know about?",
+			wantMode: core.RecallModeFacts,
+			wantOK:   true,
+		},
+
+		// Decision-focused patterns
+		{
+			name:     "why did we decide",
+			query:    "why did we choose SQLite over Postgres?",
+			wantMode: core.RecallModeEpisodes,
+			wantOK:   true,
+		},
+		{
+			name:     "what was decided",
+			query:    "what was decided about the API versioning?",
+			wantMode: core.RecallModeEpisodes,
+			wantOK:   true,
+		},
+		{
+			name:     "what did we decide",
+			query:    "what did we decide on the auth approach?",
+			wantMode: core.RecallModeEpisodes,
+			wantOK:   true,
+		},
+		{
+			name:     "decision about",
+			query:    "what's the decision about caching?",
+			wantMode: core.RecallModeEpisodes,
+			wantOK:   true,
+		},
+
 		// No match — should stay hybrid
 		{
 			name:   "generic query",

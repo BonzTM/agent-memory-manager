@@ -30,6 +30,17 @@ func classifyRecallIntent(query string, entities []string) (core.RecallMode, boo
 		return core.RecallModeContradictions, true
 	}
 
+	// Open loop / pending work queries → facts mode (returns all types
+	// including open_loops, unlike active mode which is active_context only).
+	if openLoopQueryPattern.MatchString(q) {
+		return core.RecallModeFacts, true
+	}
+
+	// Decision-focused queries → episodes mode for richer narrative context.
+	if decisionQueryPattern.MatchString(q) {
+		return core.RecallModeEpisodes, true
+	}
+
 	// Entity-focused queries — only when we actually detected entities.
 	if len(entities) > 0 && entityQueryPattern.MatchString(q) {
 		return core.RecallModeEntity, true
@@ -43,6 +54,14 @@ func classifyRecallIntent(query string, entities []string) (core.RecallMode, boo
 
 var contradictionPattern = regexp.MustCompile(
 	`\b(contradict|contradiction|contradictions|contradicting|conflicts?\s+with|conflicting|inconsisten|disagree)`,
+)
+
+var openLoopQueryPattern = regexp.MustCompile(
+	`\b(what.s\s+pending|what.s\s+open|open\s+loop|unresolved|what.s\s+blocked|outstanding\s+(?:issue|item|question|work))`,
+)
+
+var decisionQueryPattern = regexp.MustCompile(
+	`\b(why\s+did\s+we|what\s+was\s+decided|what\s+did\s+we\s+decide|decision\s+(?:about|on|for|regarding)|why\s+was\s+(?:it|that|this)\s+(?:decided|chosen))`,
 )
 
 var entityQueryPattern = regexp.MustCompile(
