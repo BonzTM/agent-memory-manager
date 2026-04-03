@@ -161,6 +161,7 @@ type ExpandRequest struct {
 	Kind            string `json:"kind"`
 	SessionID       string `json:"session_id,omitempty"`
 	DelegationDepth int    `json:"delegation_depth,omitempty"`
+	MaxDepth        int    `json:"max_depth,omitempty"`
 }
 
 // ExpandResponse is the response payload returned by expand.

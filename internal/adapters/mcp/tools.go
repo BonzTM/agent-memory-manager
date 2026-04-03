@@ -122,6 +122,7 @@ var toolRegistry = []toolEntry{
 				Kind            string `json:"kind"`
 				SessionID       string `json:"session_id,omitempty"`
 				DelegationDepth int    `json:"delegation_depth,omitempty"`
+				MaxDepth        int    `json:"max_depth,omitempty"`
 			}
 			if err := json.Unmarshal(args, &req); err != nil {
 				return nil, invalidToolArgs(err)
@@ -132,7 +133,10 @@ var toolRegistry = []toolEntry{
 			if req.DelegationDepth < 0 {
 				return nil, invalidToolArgs(fmt.Errorf("delegation_depth must be non-negative"))
 			}
-			return svc.Expand(ctx, req.ID, req.Kind, core.ExpandOptions{SessionID: req.SessionID, DelegationDepth: req.DelegationDepth})
+			if req.MaxDepth < 0 || req.MaxDepth > 5 {
+				return nil, invalidToolArgs(fmt.Errorf("max_depth must be between 0 and 5"))
+			}
+			return svc.Expand(ctx, req.ID, req.Kind, core.ExpandOptions{SessionID: req.SessionID, DelegationDepth: req.DelegationDepth, MaxDepth: req.MaxDepth})
 		},
 	},
 	{

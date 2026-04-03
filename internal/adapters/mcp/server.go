@@ -267,6 +267,12 @@ func expandSchema() map[string]interface{} {
 				"minimum":     0,
 				"description": "Current delegation depth for recursion control",
 			},
+			"max_depth": map[string]interface{}{
+				"type":        "integer",
+				"minimum":     0,
+				"maximum":     5,
+				"description": "Recursively expand child summaries up to this many levels deep (0 = no recursion, default; 1 = expand children one level; max 5)",
+			},
 		},
 		"required": []string{"id"},
 	}

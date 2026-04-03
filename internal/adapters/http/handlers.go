@@ -324,17 +324,24 @@ func (s *Server) handleExpand(w nethttp.ResponseWriter, r *nethttp.Request) {
 		writeError(w, nethttp.StatusBadRequest, "validation_error", "delegation_depth must be an integer")
 		return
 	}
+	maxDepth, err := parseIntParam(r, "max_depth", 0)
+	if err != nil {
+		slog.Warn("validation failed", "handler", "handleExpand", "error", err)
+		writeError(w, nethttp.StatusBadRequest, "validation_error", "max_depth must be an integer")
+		return
+	}
 	if err := v1.ValidateExpand(&v1.ExpandRequest{
 		ID:              id,
 		Kind:            kind,
 		SessionID:       sessionID,
 		DelegationDepth: delegationDepth,
+		MaxDepth:        maxDepth,
 	}); err != nil {
 		slog.Warn("validation failed", "handler", "handleExpand", "error", err)
 		writeError(w, nethttp.StatusBadRequest, "validation_error", err.Error())
 		return
 	}
-	result, err := s.svc.Expand(r.Context(), id, kind, core.ExpandOptions{SessionID: sessionID, DelegationDepth: delegationDepth})
+	result, err := s.svc.Expand(r.Context(), id, kind, core.ExpandOptions{SessionID: sessionID, DelegationDepth: delegationDepth, MaxDepth: maxDepth})
 	if err != nil {
 		slog.Error("handler error", "handler", "handleExpand", "error", err)
 		writeServiceError(w, err)

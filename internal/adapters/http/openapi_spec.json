@@ -710,6 +710,9 @@
           },
           {
             "$ref": "#/components/parameters/DelegationDepthQuery"
+          },
+          {
+            "$ref": "#/components/parameters/MaxDepthQuery"
           }
         ],
         "responses": {
@@ -2029,6 +2032,17 @@
           "minimum": 0
         }
       },
+      "MaxDepthQuery": {
+        "name": "max_depth",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "description": "Recursively expand child summaries up to N levels deep (0 = no recursion, default; 1 = expand children one level; max 5)"
+      },
       "EntityIDQuery": {
         "name": "entity_id",
         "in": "query",
@@ -2966,6 +2980,13 @@
             "items": {
               "$ref": "#/components/schemas/Summary"
             }
+          },
+          "expanded_children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExpandResult"
+            },
+            "description": "Recursively expanded child summaries, populated when max_depth > 0"
           }
         }
       },
@@ -2974,6 +2995,12 @@
         "properties": {
           "session_id": {
             "type": "string"
+          },
+          "max_depth": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5,
+            "description": "Recursively expand child summaries up to N levels deep (0 = no recursion, default; 1 = expand children one level; max 5)"
           }
         }
       },

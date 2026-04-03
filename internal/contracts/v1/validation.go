@@ -242,6 +242,9 @@ func ValidateExpand(req *ExpandRequest) error {
 	if req.DelegationDepth < 0 {
 		return fmt.Errorf("delegation_depth must be non-negative")
 	}
+	if req.MaxDepth < 0 || req.MaxDepth > 5 {
+		return fmt.Errorf("max_depth must be between 0 and 5")
+	}
 	return nil
 }
 

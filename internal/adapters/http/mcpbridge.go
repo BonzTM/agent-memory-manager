@@ -99,7 +99,14 @@ func registerAllTools(s *mcpserver.MCPServer, svc core.Service) {
 		if err != nil {
 			return nil, err
 		}
-		opts := core.ExpandOptions{SessionID: stringArg(args, "session_id"), DelegationDepth: delegationDepth}
+		maxDepth, err := nonNegativeIntArg(args, "max_depth")
+		if err != nil {
+			return nil, err
+		}
+		if maxDepth > 5 {
+			return nil, fmt.Errorf("max_depth must be between 0 and 5")
+		}
+		opts := core.ExpandOptions{SessionID: stringArg(args, "session_id"), DelegationDepth: delegationDepth, MaxDepth: maxDepth}
 		if opts.DelegationDepth < 0 {
 			return nil, fmt.Errorf("delegation_depth must be non-negative")
 		}
@@ -553,6 +560,7 @@ func toolExpand() mcp.Tool {
 		mcp.WithString("kind", mcp.Description("Item kind: memory, summary, episode (defaults to 'memory' if omitted)")),
 		mcp.WithString("session_id", mcp.Description("Session identifier for relevance feedback")),
 		mcp.WithNumber("delegation_depth", mcp.Description("Current delegation depth for recursion control")),
+		mcp.WithNumber("max_depth", mcp.Description("Recursively expand child summaries up to this many levels deep (0 = no recursion, default; 1 = expand children one level; max 5)")),
 	)
 }
 

@@ -433,13 +433,14 @@ Expand an item to full detail, including linked claims, events, and children.
     "id":   {"type": "string", "description": "Item ID to expand"},
     "kind": {"type": "string", "description": "Item kind: memory, summary, episode (defaults to memory when omitted)"},
     "session_id": {"type": "string", "description": "Session identifier for relevance feedback"},
-    "delegation_depth": {"type": "integer", "description": "Max recursive delegation depth for linked content"}
+    "delegation_depth": {"type": "integer", "description": "Max recursive delegation depth for linked content"},
+    "max_depth": {"type": "integer", "minimum": 0, "maximum": 5, "description": "Recursively expand child summaries up to N levels deep (0 = no recursion, default; 1 = expand children one level; max 5)"}
   },
   "required": ["id"]
 }
 ```
 
-When `kind` is omitted, the server defaults to `memory`.
+When `kind` is omitted, the server defaults to `memory`. When `max_depth` is >0, each child summary is itself expanded recursively, populating `expanded_children` in the response.
 
 **Example:**
 

@@ -264,3 +264,85 @@ func TestExpandSummary_ShowsChildren(t *testing.T) {
 		t.Fatalf("expected expanded child event %s, got %+v", evt.ID, expanded.Events)
 	}
 }
+
+func TestExpandSummary_RecursiveMaxDepth(t *testing.T) {
+	svc, repo := testServiceAndRepo(t)
+	ctx := context.Background()
+
+	// Build a 3-level DAG: grandparent → parent → leaf (with event).
+	grandparent := testSummary(t, "sum_gp_recurse", "topic", 2, "topic")
+	parent := testSummary(t, "sum_p_recurse", "session", 1, "")
+	leaf := testSummary(t, "sum_leaf_recurse", "leaf", 0, "")
+	evt := testEvent(t, "evt_recurse_leaf")
+
+	for _, s := range []*core.Summary{grandparent, parent, leaf} {
+		if err := repo.InsertSummary(ctx, s); err != nil {
+			t.Fatalf("insert summary %s: %v", s.ID, err)
+		}
+	}
+	if err := repo.InsertEvent(ctx, evt); err != nil {
+		t.Fatalf("insert event: %v", err)
+	}
+
+	// grandparent → parent
+	if err := repo.InsertSummaryEdge(ctx, &core.SummaryEdge{ParentSummaryID: grandparent.ID, ChildKind: "summary", ChildID: parent.ID, EdgeOrder: 0}); err != nil {
+		t.Fatalf("insert edge gp→p: %v", err)
+	}
+	// parent → leaf
+	if err := repo.InsertSummaryEdge(ctx, &core.SummaryEdge{ParentSummaryID: parent.ID, ChildKind: "summary", ChildID: leaf.ID, EdgeOrder: 0}); err != nil {
+		t.Fatalf("insert edge p→leaf: %v", err)
+	}
+	// parent → event
+	if err := repo.InsertSummaryEdge(ctx, &core.SummaryEdge{ParentSummaryID: parent.ID, ChildKind: "event", ChildID: evt.ID, EdgeOrder: 1}); err != nil {
+		t.Fatalf("insert edge p→evt: %v", err)
+	}
+
+	// MaxDepth=0 should NOT populate ExpandedChildren.
+	res0, err := svc.Expand(ctx, grandparent.ID, "summary", core.ExpandOptions{MaxDepth: 0})
+	if err != nil {
+		t.Fatalf("expand depth 0: %v", err)
+	}
+	if len(res0.Children) != 1 {
+		t.Fatalf("expected 1 child, got %d", len(res0.Children))
+	}
+	if len(res0.ExpandedChildren) != 0 {
+		t.Fatalf("expected no expanded children at depth 0, got %d", len(res0.ExpandedChildren))
+	}
+
+	// MaxDepth=1 should expand one level (parent gets its children).
+	res1, err := svc.Expand(ctx, grandparent.ID, "summary", core.ExpandOptions{MaxDepth: 1})
+	if err != nil {
+		t.Fatalf("expand depth 1: %v", err)
+	}
+	if len(res1.ExpandedChildren) != 1 {
+		t.Fatalf("expected 1 expanded child, got %d", len(res1.ExpandedChildren))
+	}
+	ec := res1.ExpandedChildren[0]
+	if ec.Summary == nil || ec.Summary.ID != parent.ID {
+		t.Fatalf("expected expanded child to be parent summary")
+	}
+	// Parent's children (leaf) should be in flat Children, but NOT recursively expanded.
+	if len(ec.Children) != 1 || ec.Children[0].ID != leaf.ID {
+		t.Fatalf("expected parent's child to be leaf")
+	}
+	if len(ec.ExpandedChildren) != 0 {
+		t.Fatalf("expected no deeper expansion at depth 1, got %d", len(ec.ExpandedChildren))
+	}
+
+	// MaxDepth=2 should expand two levels (grandparent → parent → leaf).
+	res2, err := svc.Expand(ctx, grandparent.ID, "summary", core.ExpandOptions{MaxDepth: 2})
+	if err != nil {
+		t.Fatalf("expand depth 2: %v", err)
+	}
+	if len(res2.ExpandedChildren) != 1 {
+		t.Fatalf("expected 1 expanded child, got %d", len(res2.ExpandedChildren))
+	}
+	ec2 := res2.ExpandedChildren[0]
+	if len(ec2.ExpandedChildren) != 1 {
+		t.Fatalf("expected 1 nested expanded child, got %d", len(ec2.ExpandedChildren))
+	}
+	leaf2 := ec2.ExpandedChildren[0]
+	if leaf2.Summary == nil || leaf2.Summary.ID != leaf.ID {
+		t.Fatalf("expected deepest expansion to be leaf summary")
+	}
+}

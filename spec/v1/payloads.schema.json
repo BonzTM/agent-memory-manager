@@ -100,6 +100,11 @@
         "delegation_depth": {
           "type": "integer"
         },
+        "max_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
         "id": {
           "type": "string"
         },

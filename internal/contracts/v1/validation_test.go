@@ -159,6 +159,8 @@ func TestValidateExpand(t *testing.T) {
 		{name: "missing id", req: &ExpandRequest{Kind: "memory"}, contains: "id is required"},
 		{name: "invalid kind", req: &ExpandRequest{ID: "x", Kind: "entity"}, contains: "invalid kind"},
 		{name: "negative delegation depth", req: &ExpandRequest{ID: "x", Kind: "memory", DelegationDepth: -1}, contains: "delegation_depth must be non-negative"},
+		{name: "negative max depth", req: &ExpandRequest{ID: "x", Kind: "summary", MaxDepth: -1}, contains: "max_depth must be between 0 and 5"},
+		{name: "max depth too large", req: &ExpandRequest{ID: "x", Kind: "summary", MaxDepth: 6}, contains: "max_depth must be between 0 and 5"},
 	}
 
 	for _, tt := range tests {

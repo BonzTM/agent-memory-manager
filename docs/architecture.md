@@ -129,7 +129,7 @@ Recall uses a weighted multi-signal formula to rank results:
 ### Find, Describe, Expand
 1. **Find** (`recall`): Returns a thin list of scored IDs and summaries.
 2. **Describe** (`describe`): Returns metadata for one or more items.
-3. **Expand** (`expand`): Returns the full record, claims, and provenance links.
+3. **Expand** (`expand`): Returns the full record, claims, and provenance links. Supports recursive expansion via `max_depth` (0–5) to traverse the summary DAG in a single call.
 
 ---
 

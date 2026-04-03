@@ -222,6 +222,7 @@ Fetch full details (claims, source events, children) for a memory, summary, or e
 **Query Parameters**
 - `kind`: `memory`, `summary`, or `episode`.
 - `delegation_depth`: (Optional) Max recursive delegation depth for linked content.
+- `max_depth`: (Optional) Recursively expand child summaries up to N levels deep (0–5, default 0). When >0, populates `expanded_children` in the response.
 
 **Errors**
 - `403 EXPANSION_RECURSION_BLOCKED`: Expansion depth limit reached.

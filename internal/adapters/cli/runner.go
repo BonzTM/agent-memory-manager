@@ -529,13 +529,26 @@ func runExpand(args []string) error {
 		}
 		delegationDepth = parsed
 	}
+	maxDepth := 0
+	if raw := strings.TrimSpace(flags["max-depth"]); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || parsed < 0 || parsed > 5 {
+			if parseErr == nil {
+				parseErr = fmt.Errorf("max-depth must be an integer between 0 and 5")
+			}
+			logCLIError("cli expand failed", parseErr, "max_depth", raw)
+			fail("expand", "VALIDATION_ERROR", "max-depth must be an integer between 0 and 5")
+			return fmt.Errorf("max-depth must be an integer between 0 and 5")
+		}
+		maxDepth = parsed
+	}
 	if kind == "" {
 		kind = "memory"
 	}
 	slog.Debug("cli expand start", "id", pos[0], "kind", kind)
 
 	ctx := context.Background()
-	result, err := svc.Expand(ctx, pos[0], kind, core.ExpandOptions{SessionID: flags["session-id"], DelegationDepth: delegationDepth})
+	result, err := svc.Expand(ctx, pos[0], kind, core.ExpandOptions{SessionID: flags["session-id"], DelegationDepth: delegationDepth, MaxDepth: maxDepth})
 	if err != nil {
 		logCLIError("cli expand failed", err, "id", pos[0], "kind", kind)
 		if errors.Is(err, core.ErrExpansionRecursionBlocked) {

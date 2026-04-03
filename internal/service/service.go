@@ -695,6 +695,24 @@ func (s *AMMService) Expand(ctx context.Context, id string, kind string, opts co
 			}
 		}
 
+		// Recursively expand child summaries when max_depth > 0.
+		if opts.MaxDepth > 0 && len(result.Children) > 0 {
+			expanded := make([]core.ExpandResult, 0, len(result.Children))
+			childOpts := core.ExpandOptions{
+				SessionID:       opts.SessionID,
+				DelegationDepth: opts.DelegationDepth,
+				MaxDepth:        opts.MaxDepth - 1,
+			}
+			for _, child := range result.Children {
+				if childResult, cerr := s.Expand(ctx, child.ID, "summary", childOpts); cerr == nil {
+					expanded = append(expanded, *childResult)
+				}
+			}
+			if len(expanded) > 0 {
+				result.ExpandedChildren = expanded
+			}
+		}
+
 		// Also include events from SourceSpan if no edges found.
 		if len(result.Events) == 0 && len(sum.SourceSpan.EventIDs) > 0 {
 			events := make([]core.Event, 0, len(sum.SourceSpan.EventIDs))

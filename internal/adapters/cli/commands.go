@@ -286,6 +286,7 @@ func runEnvelopeExpand(ctx context.Context, svc core.Service, payload json.RawMe
 		Kind            string `json:"kind"`
 		SessionID       string `json:"session_id,omitempty"`
 		DelegationDepth int    `json:"delegation_depth,omitempty"`
+		MaxDepth        int    `json:"max_depth,omitempty"`
 	}
 	if err := json.Unmarshal(payload, &req); err != nil {
 		fail("run", "PARSE_ERROR", err.Error())
@@ -294,7 +295,11 @@ func runEnvelopeExpand(ctx context.Context, svc core.Service, payload json.RawMe
 	if req.Kind == "" {
 		req.Kind = "memory"
 	}
-	result, err := svc.Expand(ctx, req.ID, req.Kind, core.ExpandOptions{SessionID: req.SessionID, DelegationDepth: req.DelegationDepth})
+	if req.MaxDepth < 0 || req.MaxDepth > 5 {
+		fail("run", "VALIDATION_ERROR", "max_depth must be between 0 and 5")
+		return fmt.Errorf("max_depth must be between 0 and 5")
+	}
+	result, err := svc.Expand(ctx, req.ID, req.Kind, core.ExpandOptions{SessionID: req.SessionID, DelegationDepth: req.DelegationDepth, MaxDepth: req.MaxDepth})
 	if err != nil {
 		if errors.Is(err, core.ErrExpansionRecursionBlocked) {
 			fail("run", "EXPANSION_RECURSION_BLOCKED", err.Error())

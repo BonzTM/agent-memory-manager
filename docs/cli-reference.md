@@ -380,7 +380,7 @@ amm describe mem_xyz789 ep_abc123
 Expand a single item to its full detail, including linked claims, events, and children.
 
 ```
-amm expand <id> [--kind <kind>] [--session-id <id>] [--delegation-depth <n>]
+amm expand <id> [--kind <kind>] [--session-id <id>] [--delegation-depth <n>] [--max-depth <n>]
 ```
 
 | Flag | Default | Description |
@@ -388,6 +388,7 @@ amm expand <id> [--kind <kind>] [--session-id <id>] [--delegation-depth <n>]
 | `--kind` | Auto-inferred from ID prefix | Item kind: `memory`, `summary`, or `episode` |
 | `--session-id` | | Session identifier used for expand-time relevance feedback attribution |
 | `--delegation-depth` | `0` | Max recursive delegation depth for linked content |
+| `--max-depth` | `0` | Recursively expand child summaries up to N levels deep (0–5). When >0, each child summary is itself expanded, populating `expanded_children` in the response. |
 
 The kind is inferred automatically from the ID prefix:
 

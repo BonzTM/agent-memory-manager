@@ -319,17 +319,19 @@ type RecallRecord struct {
 
 // ExpandResult contains the full expansion of a memory, summary, or episode.
 type ExpandResult struct {
-	Memory   *Memory   `json:"memory,omitempty"`
-	Summary  *Summary  `json:"summary,omitempty"`
-	Episode  *Episode  `json:"episode,omitempty"`
-	Claims   []Claim   `json:"claims,omitempty"`
-	Events   []Event   `json:"events,omitempty"`
-	Children []Summary `json:"children,omitempty"`
+	Memory           *Memory        `json:"memory,omitempty"`
+	Summary          *Summary       `json:"summary,omitempty"`
+	Episode          *Episode       `json:"episode,omitempty"`
+	Claims           []Claim        `json:"claims,omitempty"`
+	Events           []Event        `json:"events,omitempty"`
+	Children         []Summary      `json:"children,omitempty"`
+	ExpandedChildren []ExpandResult `json:"expanded_children,omitempty"`
 }
 
 type ExpandOptions struct {
 	SessionID       string `json:"session_id,omitempty"`
 	DelegationDepth int    `json:"delegation_depth,omitempty"`
+	MaxDepth        int    `json:"max_depth,omitempty"`
 }
 
 type GrepOptions struct {
