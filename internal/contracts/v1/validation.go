@@ -88,6 +88,7 @@ var (
 		"purge_relevance_feedback": true,
 		"vacuum_analyze":           true,
 		"update_ranking_weights":   true,
+		"build_entity_briefs":     true,
 	}
 
 	validPolicyPatternTypes = map[string]bool{

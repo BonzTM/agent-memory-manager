@@ -219,6 +219,12 @@ func TestValidateRunJob(t *testing.T) {
 		"cross_project_transfer",
 		"archive_session_traces",
 		"update_ranking_weights",
+		"build_entity_briefs",
+		"purge_old_events",
+		"purge_old_jobs",
+		"expire_retrieval_cache",
+		"purge_relevance_feedback",
+		"vacuum_analyze",
 	}
 	for _, kind := range validKinds {
 		if err := ValidateRunJob(&RunJobRequest{Kind: kind}); err != nil {

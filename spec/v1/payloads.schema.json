@@ -100,11 +100,6 @@
         "delegation_depth": {
           "type": "integer"
         },
-        "max_depth": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 5
-        },
         "id": {
           "type": "string"
         },
@@ -115,6 +110,9 @@
             "summary",
             "episode"
           ]
+        },
+        "max_depth": {
+          "type": "integer"
         },
         "session_id": {
           "type": "string"
@@ -779,6 +777,12 @@
         "confidence": {
           "type": "number"
         },
+        "conflicts_with": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "id": {
           "type": "string"
         },
@@ -805,12 +809,6 @@
         },
         "type": {
           "type": "string"
-        },
-        "conflicts_with": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
         }
       }
     },
@@ -824,18 +822,27 @@
         "mode": {
           "type": "string"
         },
-        "routed_from": {
-          "type": "string"
-        },
         "query_time_ms": {
           "type": "integer"
+        },
+        "routed_from": {
+          "type": "string"
         }
       }
     },
     "RecallRequest": {
       "type": "object",
+      "required": [
+        "query"
+      ],
       "properties": {
+        "after": {
+          "type": "string"
+        },
         "agent_id": {
+          "type": "string"
+        },
+        "before": {
           "type": "string"
         },
         "entity_ids": {
@@ -870,26 +877,12 @@
           "type": "string"
         },
         "query": {
-          "type": "string",
-          "description": "Search query. Required for all modes except sessions."
+          "type": "string"
         },
         "session_id": {
           "type": "string"
-        },
-        "after": {
-          "type": "string",
-          "format": "date-time",
-          "description": "RFC3339 timestamp \u2014 filter results to after this time"
-        },
-        "before": {
-          "type": "string",
-          "format": "date-time",
-          "description": "RFC3339 timestamp \u2014 filter results to before this time"
         }
-      },
-      "required": [
-        "query"
-      ]
+      }
     },
     "RecallResponse": {
       "type": "object",
@@ -1138,7 +1131,8 @@
             "expire_retrieval_cache",
             "purge_relevance_feedback",
             "vacuum_analyze",
-            "update_ranking_weights"
+            "update_ranking_weights",
+            "build_entity_briefs"
           ]
         }
       }
@@ -1272,6 +1266,9 @@
             "archived",
             "retracted"
           ]
+        },
+        "subject": {
+          "type": "string"
         },
         "tags": {
           "type": "array",
