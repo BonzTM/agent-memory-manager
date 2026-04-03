@@ -447,7 +447,7 @@ The baseline runner follows a 6-phase structure to ensure clean dependencies:
 1. **Phase 1: Reflection** — `reflect` extracts candidates from events.
 2. **Phase 2: Initial Indexing** — `rebuild_indexes` builds embeddings so downstream jobs can use semantic scoring.
 3. **Phase 3: Compression** — `compress_history`, `consolidate_sessions`, `build_topic_summaries`, `rebuild_indexes` structure the raw history and rebuild embeddings for downstream phases.
-4. **Phase 4: Linking** — `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `form_episodes` build the knowledge graph.
+4. **Phase 4: Linking** — `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `build_entity_briefs`, `form_episodes` build the knowledge graph.
 5. **Phase 5: Quality** — `detect_contradictions`, `decay_stale_memory`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces` refine the store.
 6. **Phase 6: Finalization** — `rebuild_indexes` (catches items from phases 3-5), `cleanup_recall_history`, `update_ranking_weights` finalize the cycle.
 7. **Phase 7: DB Trim and Compaction** — `purge_old_events`, `purge_old_jobs`, `expire_retrieval_cache`, `purge_relevance_feedback`, `vacuum_analyze` to reclaim space and optimize the database.
@@ -477,7 +477,8 @@ If you prefer individual cron entries, you must stagger them so they do not fire
 20 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run extract_claims >/dev/null 2>&1
 25 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run enrich_memories >/dev/null 2>&1
 30 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run rebuild_entity_graph >/dev/null 2>&1
-35 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run form_episodes >/dev/null 2>&1
+35 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run build_entity_briefs >/dev/null 2>&1
+40 * * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run form_episodes >/dev/null 2>&1
 
 # Run dedupe/lifecycle/value-transfer jobs on a slower cadence
 0 2 * * * AMM_DB_PATH=$HOME/.amm/amm.db /usr/local/bin/amm jobs run merge_duplicates >/dev/null 2>&1

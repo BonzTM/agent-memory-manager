@@ -125,7 +125,7 @@ done
 
 log_phase "Phase 4: Dedup, enrich, and link"
 for job in merge_duplicates extract_claims enrich_memories \
-           rebuild_entity_graph; do
+           rebuild_entity_graph build_entity_briefs; do
   run_job "$job"
 done
 

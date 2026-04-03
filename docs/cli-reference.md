@@ -872,12 +872,12 @@ Do not combine a positional job kind with `--reprocess` or `--reprocess-all`.
 1. `reflect` (Phase 1: Extraction)
 2. `rebuild_indexes` (Phase 2: Initial embedding)
 3. `compress_history`, `consolidate_sessions`, `build_topic_summaries`, `rebuild_indexes` (Phase 3: Compression)
-4. `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `form_episodes` (Phase 4: Linking)
+4. `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `build_entity_briefs`, `form_episodes` (Phase 4: Linking)
 5. `detect_contradictions`, `decay_stale_memory`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces` (Phase 5: Quality)
 6. `rebuild_indexes`, `cleanup_recall_history`, `update_ranking_weights` (Phase 6: Finalization)
 7. `purge_old_events`, `purge_old_jobs`, `expire_retrieval_cache`, `purge_relevance_feedback`, `vacuum_analyze` (Phase 7: DB trim and compaction)
 
-**Available job kinds (25):**
+**Available job kinds (26):**
 
 | Kind | Description |
 |---|---|
@@ -897,6 +897,7 @@ Do not combine a positional job kind with `--reprocess` or `--reprocess-all`.
 | `lifecycle_review` | LLM-powered batch review for decay/promote/contradict |
 | `cross_project_transfer` | Detect and promote cross-project memories to global |
 | `rebuild_entity_graph` | Rebuild pre-computed entity neighborhoods |
+| `build_entity_briefs` | Generate per-entity synthesis briefings for entities with 3+ linked memories |
 | `archive_session_traces` | Archive low-salience session-scoped memories |
 | `update_ranking_weights` | Update scoring weights from relevance feedback |
 | `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM. Uses endgame pipeline logic (triage, entity linking, processing ledger). |

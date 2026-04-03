@@ -79,8 +79,9 @@ The service runs a multi-stage enrichment pipeline (orchestrated via `internal/s
 5. **enrich_memories** — links entities and relationships to memories
 6. **extract_claims** — extracts factual claims from memories
 7. **form_episodes** — creates episode records from narrative results
-8. **lifecycle_review** — promotes, decays, archives, or merges memories based on access patterns
-9. **detect_contradictions** — identifies contradictions between memories
+8. **build_entity_briefs** — generates per-entity synthesis summaries for entities with 3+ linked memories
+9. **lifecycle_review** — promotes, decays, archives, or merges memories based on access patterns and retention tiers
+10. **detect_contradictions** — identifies contradictions between memories
 
 Pipeline behavior is tunable via config file (loaded by `internal/runtime/config.go`) or environment variables. See the env var mapping comment block in `config.go` for the full list.
 

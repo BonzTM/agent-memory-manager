@@ -76,7 +76,7 @@ spec:
                   done
 
                   log "── Phase 4: Dedup, enrich, and link ──"
-                  for JOB in merge_duplicates extract_claims enrich_memories rebuild_entity_graph form_episodes; do
+                  for JOB in merge_duplicates extract_claims enrich_memories rebuild_entity_graph build_entity_briefs form_episodes; do
                     run_job $JOB
                   done
 

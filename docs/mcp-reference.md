@@ -1125,7 +1125,7 @@ Run a maintenance job.
 }
 ```
 
-**Available job kinds (25):**
+**Available job kinds (26):**
 
 | Kind | Description |
 |---|---|
@@ -1145,6 +1145,7 @@ Run a maintenance job.
 | `lifecycle_review` | LLM-powered batch review for decay/promote/contradict |
 | `cross_project_transfer` | Detect and promote cross-project memories to global |
 | `rebuild_entity_graph` | Rebuild pre-computed entity neighborhoods |
+| `build_entity_briefs` | Generate per-entity synthesis briefings for entities with 3+ linked memories |
 | `archive_session_traces` | Archive low-salience session-scoped memories |
 | `update_ranking_weights` | Update scoring weights from relevance feedback |
 | `reprocess` | Batch re-extract memories from events using LLM; skips events already processed by LLM. Uses endgame pipeline logic (triage, entity linking, processing ledger). |
