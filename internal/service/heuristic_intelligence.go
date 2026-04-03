@@ -256,12 +256,14 @@ func (h *HeuristicIntelligenceProvider) ConsolidateNarrative(ctx context.Context
 		bodyBuilder.WriteString(evt.Content)
 	}
 
-	body, err := h.Summarize(ctx, bodyBuilder.String(), sessionBodyMaxChars)
+	// Use escalation (normal → aggressive → deterministic truncation)
+	// instead of raw Summarize, which is plain truncation.
+	body, err := summarizeWithEscalation(ctx, h.HeuristicSummarizer, bodyBuilder.String(), sessionBodyMaxChars, defaultEscalationDeterministicMaxChars)
 	if err != nil {
 		return nil, err
 	}
 
-	tight, err := h.Summarize(ctx, body, 100)
+	tight, err := summarizeWithEscalation(ctx, h.HeuristicSummarizer, body, 100, 100)
 	if err != nil {
 		return nil, err
 	}
