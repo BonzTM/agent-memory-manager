@@ -66,6 +66,13 @@ func (s *AMMService) processMemoryCandidates(ctx context.Context, input candidat
 		if !ok {
 			continue
 		}
+		// Cap confidence for narrative-sourced memories: the two-hop pipeline
+		// (events → narrative → extraction) has inherent information loss,
+		// so LLM-assigned confidence above 0.90 is overconfident.
+		if input.sourceSystem == "consolidate_sessions" && candidate.Confidence > 0.90 {
+			candidate.Confidence = 0.90
+		}
+
 		if !passesIntakeQualityGates(candidate, s.minConfidenceForCreation, s.minImportanceForCreation) {
 			slog.Debug("candidate rejected by intake quality gate",
 				"confidence", candidate.Confidence,
