@@ -1593,6 +1593,32 @@ func (r *SQLiteRepository) CountMemoryEntityLinksBatch(ctx context.Context, enti
 	return counts, nil
 }
 
+func (r *SQLiteRepository) ListMemoriesByEntityID(ctx context.Context, entityID string, limit int) ([]core.Memory, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := "SELECT " + prefixCols("m", memoryCols) + `
+		FROM memories m
+		JOIN memory_entities me ON me.memory_id = m.id
+		WHERE me.entity_id = ? AND m.status = 'active'
+		ORDER BY m.importance DESC, m.created_at DESC
+		LIMIT ?`
+	rows, err := r.QueryContext(ctx, query, entityID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var memories []core.Memory
+	for rows.Next() {
+		m, err := r.scanMemory(rows)
+		if err != nil {
+			return nil, err
+		}
+		memories = append(memories, *m)
+	}
+	return memories, rows.Err()
+}
+
 func (r *SQLiteRepository) CountActiveMemories(ctx context.Context) (int64, error) {
 	row := r.QueryRowContext(ctx, `SELECT COUNT(*) FROM memories WHERE status = 'active'`)
 	var count int64

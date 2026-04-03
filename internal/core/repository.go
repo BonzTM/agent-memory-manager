@@ -99,6 +99,8 @@ type Repository interface {
 	// CountMemoryEntityLinks returns how many memory links an entity has.
 	CountMemoryEntityLinks(ctx context.Context, entityID string) (int64, error)
 	CountMemoryEntityLinksBatch(ctx context.Context, entityIDs []string) (map[string]int64, error)
+	// ListMemoriesByEntityID returns active memories linked to an entity.
+	ListMemoriesByEntityID(ctx context.Context, entityID string, limit int) ([]Memory, error)
 	// CountActiveMemories returns the number of active memories.
 	CountActiveMemories(ctx context.Context) (int64, error)
 

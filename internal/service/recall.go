@@ -750,13 +750,21 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 	}
 	entityItems := make([]core.RecallItem, 0, len(entities))
 	for i, ent := range entities {
-		entityItems = append(entityItems, core.RecallItem{
+		item := core.RecallItem{
 			ID:               ent.ID,
 			Kind:             "entity",
 			Type:             ent.Type,
 			Score:            positionScore(i),
 			TightDescription: ent.Description,
-		})
+		}
+		// Attach entity brief body if one exists, giving richer context.
+		if brief := s.findEntityBrief(ctx, ent.ID); brief != nil {
+			item.TightDescription = brief.TightDescription
+			if item.Type == "" {
+				item.Type = ent.Type
+			}
+		}
+		entityItems = append(entityItems, item)
 	}
 
 	items = append(items, entityItems...)

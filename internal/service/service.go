@@ -859,6 +859,12 @@ func (s *AMMService) RunJob(ctx context.Context, kind string) (*core.Job, error)
 		if jobErr == nil {
 			job.Result = map[string]string{"action": "enrich_memories", "memories_enriched": fmt.Sprintf("%d", count)}
 		}
+	case "build_entity_briefs":
+		count, err := s.BuildEntityBriefs(ctx)
+		jobErr = err
+		if jobErr == nil {
+			job.Result = map[string]string{"action": "build_entity_briefs", "briefs_created": fmt.Sprintf("%d", count)}
+		}
 	case "rebuild_entity_graph":
 		jobErr = s.repo.RebuildEntityGraphProjection(ctx)
 		if jobErr == nil {

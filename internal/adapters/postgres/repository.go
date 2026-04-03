@@ -1397,6 +1397,36 @@ func (r *Repository) CountMemoryEntityLinksBatch(ctx context.Context, entityIDs 
 	return out, nil
 }
 
+func (r *Repository) ListMemoriesByEntityID(ctx context.Context, entityID string, limit int) ([]core.Memory, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT m.id, m.type, m.scope, COALESCE(m.project_id,''), COALESCE(m.session_id,''), COALESCE(m.agent_id,''),
+			COALESCE(m.subject,''), m.body, m.tight_description, m.confidence, m.importance, m.privacy_level, m.status,
+			m.observed_at, m.created_at, m.updated_at, m.valid_from, m.valid_to, m.last_confirmed_at,
+			COALESCE(m.supersedes,''), COALESCE(m.superseded_by,''), m.superseded_at,
+			m.source_event_ids, m.source_summary_ids, m.source_artifact_ids, m.tags, m.metadata_json
+		FROM memories m
+		JOIN memory_entities me ON me.memory_id = m.id
+		WHERE me.entity_id = $1 AND m.status = 'active'
+		ORDER BY m.importance DESC, m.created_at DESC
+		LIMIT $2`, entityID, limit)
+	if err != nil {
+		return nil, wrapErr("list memories by entity", err)
+	}
+	defer rows.Close()
+	var memories []core.Memory
+	for rows.Next() {
+		m, err := r.scanMemory(rows)
+		if err != nil {
+			return nil, wrapErr("list memories by entity scan", err)
+		}
+		memories = append(memories, *m)
+	}
+	return memories, rows.Err()
+}
+
 func (r *Repository) InsertProject(ctx context.Context, project *core.Project) error {
 	if project.ID == "" {
 		project.ID = core.GenerateID("prj_")
