@@ -104,6 +104,7 @@ HERMES_ENABLE_PROJECT_PLUGINS=true hermes
 - calls AMM ambient recall for the current turn using either the local CLI or `POST /v1/recall`
 - renders a thin `amm ambient recall:` block and returns it as hook `context`
 - ingests the final assistant response as `message_assistant` in `post_llm_call`
+- optionally mirrors successful Hermes `memory` tool writes into AMM durable memories from `post_tool_call`
 
 The plugin resolves `project_id` like this:
 
@@ -120,12 +121,23 @@ Recommended environment:
 - `AMM_PROJECT_ID`
 - `AMM_HERMES_RECALL_LIMIT` to override the default recall block length (`5`)
 
+Optional curated-memory parity settings:
+
+- `AMM_HERMES_SYNC_CURATED_MEMORY=true` enables mirroring successful Hermes `memory` tool writes into AMM durable memories
+- `AMM_HERMES_MEMORY_SCOPE` sets the AMM scope for Hermes `target="memory"` entries (`project` by default, falls back to `global` when no project can be resolved)
+- `AMM_HERMES_USER_SCOPE` sets the AMM scope for Hermes `target="user"` entries (`global` by default)
+- `AMM_HERMES_MEMORY_TYPE` sets the AMM memory type for Hermes `target="memory"` entries (`fact` by default)
+- `AMM_HERMES_USER_TYPE` sets the AMM memory type for Hermes `target="user"` entries (`preference` by default)
+- `AMM_HERMES_STATE_DIR` overrides the plugin state directory (defaults to `~/.hermes/state/amm-memory`)
+
 Important:
 
 - Do **not** also wire `on-user-message.sh` or `on-assistant-message.sh` for the same Hermes hot path when this plugin is enabled. That will duplicate `message_user` / `message_assistant` events.
 - The repo-shipped plugin intentionally focuses on the hot path. It does **not** run maintenance jobs automatically.
 - The current Hermes tool-hook API exposes `task_id`, not `session_id`, so this repo keeps raw tool-event capture as an optional helper-script path instead of pretending the plugin has better correlation than Hermes currently provides.
-- When `AMM_API_URL` is set, the plugin uses the AMM REST API endpoints `POST /v1/events` and `POST /v1/recall`. It does not need to act as an MCP client for the hot path.
+- When `AMM_API_URL` is set, the plugin uses the AMM REST API endpoints `POST /v1/events`, `POST /v1/recall`, and, when curated-memory parity is enabled, the durable memory endpoints under `/v1/memories`.
+- Curated-memory parity mirrors **future successful Hermes `memory` tool writes**. It keeps a local AMM-ID map and failure queue under the plugin state directory so updates and deletes can target the correct AMM memory IDs.
+- If you enable curated-memory parity on an instance that already has existing Hermes curated memory, plan a one-time backfill or accept that only new successful writes will be mirrored automatically.
 
 ## 2.5. Optional Helper Scripts
 
