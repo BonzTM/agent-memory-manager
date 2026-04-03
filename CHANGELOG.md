@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- **Add entity synthesis briefings as enrichment job.** New `build_entity_briefs` job generates per-entity synthesis summaries for entities with 3+ linked memories. Gathers all linked memories, produces a coherent briefing via LLM (current state, key decisions, relationships, open questions), and stores as a summary with `Kind: "entity_brief"`. Existing briefs are replaced when re-run. Entity recall now surfaces brief descriptions for richer context. New `ListMemoriesByEntityID` repository method added to both SQLite and Postgres adapters.
+- **Add entity synthesis briefings as enrichment job.** New `build_entity_briefs` job generates per-entity synthesis summaries for entities with 3+ linked memories. Gathers all linked memories, produces a coherent briefing via LLM (current state, key decisions, relationships, open questions), and stores as a summary with `Kind: "entity_brief"`. Incremental: skips entities whose brief is already up to date (no new linked memories since the brief was last generated). Tracks extraction metadata (`extraction_method`, `extraction_quality`, `fallback_count`) so heuristic fallback briefs are retried when LLM becomes available. Entity recall now surfaces brief descriptions for richer context. New `ListMemoriesByEntityID` repository method added to both SQLite and Postgres adapters.
 
 ### Fixed
 
