@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Enforce atomic open_loop extraction.** The memory extraction prompt now requires each `open_loop` to be a single atomic item. Multi-item open loops (numbered lists, bullet lists, or "also"/"additionally" joining unrelated topics) are explicitly called out as defects. Prevents the extraction LLM from aggregating all unresolved items into a single junk-drawer memory.
+- **Pass full open_loop context to extraction input.** `buildExtractionInput` now includes the memory ID and full body (capped at 500 chars) for each active open loop from prior sessions, not just the tight description. Gives the extraction LLM enough context to close, update, or avoid re-creating existing open loops.
+- **Add LLM scope hints for extracted memories.** The extraction prompt now asks the LLM to suggest `project` or `global` scope for each memory. When the LLM suggests `global` for inherently cross-project types (preference, identity, constraint, procedure), the candidate pipeline promotes from project to global scope. Addresses memories being incorrectly scoped when source events lack `project_id`.
+- **Strengthen generic knowledge filter.** The extraction prompt now explicitly skips general programming practices, widely-known tool usage patterns, and standard workflow conventions. Only project-specific twists, gotchas, or non-obvious applications of general practices are extracted.
+- **Improve confidence calibration in extraction.** Replaced abstract calibration buckets with concrete examples (user explicitly states → 0.95, assistant concludes → 0.85, one-off choice → 0.75, tool inference → 0.60). Flags batches where every item is 0.9+ as a red flag.
+- **Add role-aware extraction weighting.** For preference, constraint, and procedure types, user statements are weighted as stronger evidence than assistant observations. Decision and fact types treat both sources equally.
 - **Replace compress_history 24h cooldown with event-count threshold.** `CompressHistory` no longer uses a time-based cooldown gate. Instead it skips when fewer than `compress_min_events` events are pending past the frontier (default: `compress_chunk_size * 5`, i.e. 50 events). Configurable via `compress_min_events` in config.json or `AMM_COMPRESS_MIN_EVENTS` env var.
 
 ## [1.3.2] - 2026-04-02
