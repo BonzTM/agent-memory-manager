@@ -603,15 +603,22 @@ func buildReviewMemoriesPrompt(memories []core.MemoryReview) string {
 
 For each memory, decide whether to promote, decay, archive, merge, or mark contradictions.
 
+Retention tiers — use the memory type to guide your decision:
+- DURABLE (preference, constraint, identity, relationship): bias toward promote. Never decay without explicit conflict or retraction. These represent stable user intent or identity and should persist.
+- STANDARD (decision, fact, procedure): normal promote/decay cycle. Promote if frequently accessed and still relevant. Decay if stale or superseded.
+- EPHEMERAL (open_loop, assumption, incident): bias toward archive after 30 days without access. These capture transient state and should not persist indefinitely.
+
 Promotion guidance:
 - Promote memories that encode durable, reusable knowledge and are frequently recalled (high access_count)
 - Promote memories with high confidence that are still relevant and broadly useful
+- Strongly prefer promoting DURABLE-tier types over EPHEMERAL-tier types
 
 Decay/archive guidance:
 - Decay memories that seem less relevant, less certain, or lower utility over time
 - Archive memories that are stale, superseded by newer information, or purely ephemeral context
 - For open_loop memories, archive items older than 30 days with zero access_count
 - For open_loop memories, archive items whose subject is clearly resolved by a newer decision memory
+- For assumption memories, archive when the assumption has been confirmed (becomes a fact) or refuted
 
 Merge/contradiction guidance:
 - Merge near-duplicates when one memory can absorb another without losing important nuance
@@ -692,7 +699,7 @@ func buildSummarizeTopicBatchesPrompt(topics []core.TopicChunk) string {
 		block.WriteByte('\n')
 	}
 
-	return `Merge each topic group into one coherent topic summary.
+	return `Merge each topic group into one coherent topic summary. This is the highest level of summarization — be ruthlessly concise.
 
 Return ONLY a JSON array of objects with this exact shape:
 [
@@ -702,8 +709,11 @@ Return ONLY a JSON array of objects with this exact shape:
 Rules:
 - Include exactly one object per input topic index
 - Preserve each topic index in the output object
-- body must be <= 2000 characters and synthesize recurring themes
+- body must be <= 2000 characters and capture only what matters long-term
 - tight_description must be <= 100 characters and optimized for retrieval
+- Only stable facts, active decisions, and unresolved items should survive
+- Drop per-session details, timestamps, specific tool outputs, and intermediate steps
+- Ask yourself: "What would I need to know cold about this topic?" — if the answer is nothing, return minimal output
 - Do not include markdown fences or prose
 
 Topics:
