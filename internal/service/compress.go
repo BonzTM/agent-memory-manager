@@ -191,6 +191,9 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 		})
 	}
 
+	// Fetch the most recent leaf summary for continuity context.
+	priorLeafBody := s.latestLeafSummaryBody(ctx)
+
 	batchResults := make(map[int]core.CompressionResult, len(plans))
 	batchSucceeded := false
 	if s.intelligence != nil && len(plans) > 0 {
@@ -202,11 +205,16 @@ func (s *AMMService) CompressHistory(ctx context.Context) (int, error) {
 			}
 
 			chunks := make([]core.EventChunk, 0, end-start)
-			for _, plan := range plans[start:end] {
-				chunks = append(chunks, core.EventChunk{
+			for i, plan := range plans[start:end] {
+				chunk := core.EventChunk{
 					Index:    plan.index,
 					Contents: plan.contents,
-				})
+				}
+				// Inject prior context into the first chunk of the first batch only.
+				if start == 0 && i == 0 && priorLeafBody != "" {
+					chunk.PreviousContext = priorLeafBody
+				}
+				chunks = append(chunks, chunk)
 			}
 
 			results, err := s.intelligence.CompressEventBatches(ctx, chunks)
@@ -1636,6 +1644,20 @@ func (s *AMMService) latestSessionSummary(ctx context.Context, sessionID string)
 		}
 	}
 	return latest
+}
+
+// latestLeafSummaryBody returns the body of the most recent leaf summary,
+// or empty string if none exists. Used to provide continuity context to
+// CompressHistory so new leaf summaries don't repeat prior content.
+func (s *AMMService) latestLeafSummaryBody(ctx context.Context) string {
+	summaries, err := s.repo.ListSummaries(ctx, core.ListSummariesOptions{
+		Kind:  "leaf",
+		Limit: 1,
+	})
+	if err != nil || len(summaries) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(summaries[0].Body)
 }
 
 // markEventsReflected sets reflected_at on events that haven't been reflected yet.

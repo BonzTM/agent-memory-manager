@@ -31,8 +31,9 @@ type EventContent struct {
 }
 
 type EventChunk struct {
-	Index    int
-	Contents []string
+	Index           int
+	Contents        []string
+	PreviousContext string // optional: prior summary body to avoid repeating
 }
 
 type TopicChunk struct {

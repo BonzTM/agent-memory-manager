@@ -642,6 +642,15 @@ Memories:
 }
 
 func buildCompressEventBatchesPrompt(chunks []core.EventChunk) string {
+	// Collect previous context from the first chunk if present.
+	var previousContext string
+	for _, chunk := range chunks {
+		if chunk.PreviousContext != "" {
+			previousContext = chunk.PreviousContext
+			break
+		}
+	}
+
 	var block strings.Builder
 	for i, chunk := range chunks {
 		index := chunk.Index
@@ -659,6 +668,11 @@ func buildCompressEventBatchesPrompt(chunks []core.EventChunk) string {
 		block.WriteByte('\n')
 	}
 
+	var contextSection string
+	if previousContext != "" {
+		contextSection = "\nThe following was already captured in a prior summary. Do not repeat this information — focus on what is new.\n\nPrevious summary:\n" + previousContext + "\n\n"
+	}
+
 	return `Summarize each event chunk into one concise memory summary.
 
 Return ONLY a JSON array of objects with this exact shape:
@@ -672,8 +686,7 @@ Rules:
 - body must be <= 1000 characters and capture key actions/decisions
 - tight_description must be <= 100 characters and be retrieval-friendly
 - Do not include markdown fences or prose
-
-Chunks:
+` + contextSection + `Chunks:
 ` + block.String()
 }
 
