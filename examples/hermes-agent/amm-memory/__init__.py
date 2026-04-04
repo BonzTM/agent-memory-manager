@@ -31,6 +31,7 @@ _DEFAULT_AMM_BIN = "/usr/local/bin/amm"
 _DEFAULT_RECALL_LIMIT = 5
 _SOURCE_SYSTEM = "hermes-agent"
 _MAX_TIGHT_DESCRIPTION = 120
+_MAX_QUEUE_LINES = 500
 
 
 def _now_rfc3339() -> str:
@@ -305,13 +306,26 @@ def _save_sync_state(state: dict[str, Any]) -> None:
 def _append_sync_queue(operation: dict[str, Any]) -> None:
     path = _queue_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(operation, ensure_ascii=False, sort_keys=True) + "\n")
+    line = json.dumps(operation, ensure_ascii=False, sort_keys=True)
+    lines: list[str] = []
+    if path.exists():
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+    lines.append(line)
+    if len(lines) > _MAX_QUEUE_LINES:
+        lines = lines[-_MAX_QUEUE_LINES:]
+    _atomic_write(path, "\n".join(lines) + "\n")
 
 
-def _fingerprint(target: str, content: str) -> str:
+def _record_fingerprint(target: str, content: str, scope: str, project_id: str) -> str:
     digest = hashlib.sha256()
     digest.update(target.encode("utf-8"))
+    digest.update(b"\n")
+    digest.update(scope.encode("utf-8"))
+    digest.update(b"\n")
+    digest.update((project_id if scope == "project" else "").encode("utf-8"))
     digest.update(b"\n")
     digest.update(content.encode("utf-8"))
     return digest.hexdigest()
@@ -418,7 +432,7 @@ def _update_memory(memory_id: str, target: str, content: str, project_id: str) -
 
     if _use_http_api():
         result = _request_json("PATCH", f"/memories/{memory_id}", payload, timeout=10)
-        return bool(result)
+        return bool(result) and int(result.get("status", 0)) < 400
 
     command = [
         "memory",
@@ -445,14 +459,60 @@ def _forget_memory(memory_id: str) -> bool:
     return bool(_run_amm(["forget", memory_id], timeout=10))
 
 
-def _record_index(records: list[dict[str, Any]], target: str, old_text: str) -> int | None:
-    matches = [
-        idx for idx, record in enumerate(records)
-        if record.get("target") == target and old_text in record.get("content", "")
+def _record_index(
+    records: list[dict[str, Any]],
+    target: str,
+    old_text: str,
+    scope: str,
+    project_id: str,
+) -> int | None:
+    normalized_old_text = _normalize_text(old_text)
+    target_matches = [
+        (idx, record)
+        for idx, record in enumerate(records)
+        if record.get("target") == target
     ]
-    if len(matches) != 1:
+    scoped_matches = [
+        (idx, record)
+        for idx, record in target_matches
+        if record.get("scope") == scope
+        and (scope != "project" or record.get("project_id", "") == project_id)
+    ]
+
+    def _exact(matches: list[tuple[int, dict[str, Any]]]) -> list[int]:
+        return [
+            idx for idx, record in matches
+            if _normalize_text(str(record.get("content", ""))) == normalized_old_text
+        ]
+
+    def _substring(matches: list[tuple[int, dict[str, Any]]]) -> list[int]:
+        return [
+            idx for idx, record in matches
+            if normalized_old_text and normalized_old_text in _normalize_text(str(record.get("content", "")))
+        ]
+
+    exact_matches = _exact(scoped_matches)
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    if len(exact_matches) > 1:
         return None
-    return matches[0]
+
+    fallback_exact_matches = _exact(target_matches)
+    if len(fallback_exact_matches) == 1:
+        return fallback_exact_matches[0]
+    if len(fallback_exact_matches) > 1:
+        return None
+
+    substring_matches = _substring(scoped_matches)
+    if len(substring_matches) == 1:
+        return substring_matches[0]
+    if len(substring_matches) > 1:
+        return None
+
+    fallback_substring_matches = _substring(target_matches)
+    if len(fallback_substring_matches) == 1:
+        return fallback_substring_matches[0]
+    return None
 
 
 def _queue_failed_sync(action: str, target: str, project_id: str, details: dict[str, Any], error: str) -> None:
@@ -490,6 +550,8 @@ def _sync_curated_memory(args: dict[str, Any], result: Any) -> None:
 
     platform = str(args.get("platform", "cli") or "cli")
     project_id = _resolve_project_id(platform)
+    scope = _curated_scope(target, project_id)
+    effective_project_id = project_id if scope == "project" else ""
     state = _load_sync_state()
     records = [record for record in state.get("records", []) if isinstance(record, dict)]
 
@@ -497,20 +559,21 @@ def _sync_curated_memory(args: dict[str, Any], result: Any) -> None:
         content = _normalize_text(_stringify_content(args.get("content", "")))
         if not content:
             return
-        fingerprint = _fingerprint(target, content)
+        fingerprint = _record_fingerprint(target, content, scope, effective_project_id)
         if any(record.get("fingerprint") == fingerprint for record in records):
             return
         memory_id = _remember_memory(target, content, project_id)
         if not memory_id:
-            _queue_failed_sync(action, target, project_id, {"content": content}, "create_failed")
+            _queue_failed_sync(action, target, project_id, {"content": content, "scope": scope}, "create_failed")
             return
         records.append(
             {
                 "target": target,
+                "scope": scope,
                 "content": content,
                 "fingerprint": fingerprint,
                 "amm_memory_id": memory_id,
-                "project_id": project_id,
+                "project_id": effective_project_id,
                 "updated_at": _now_rfc3339(),
             }
         )
@@ -522,9 +585,11 @@ def _sync_curated_memory(args: dict[str, Any], result: Any) -> None:
     if not old_text:
         return
 
-    record_idx = _record_index(records, target, old_text)
+    record_idx = _record_index(records, target, old_text, scope, effective_project_id)
     if record_idx is None:
-        details = {"old_text": old_text}
+        details = {"old_text": old_text, "scope": scope}
+        if effective_project_id:
+            details["project_id"] = effective_project_id
         if action == "replace":
             details["content"] = _normalize_text(_stringify_content(args.get("content", "")))
         _queue_failed_sync(action, target, project_id, details, "record_not_found_or_ambiguous")
@@ -560,9 +625,10 @@ def _sync_curated_memory(args: dict[str, Any], result: Any) -> None:
 
     records[record_idx] = {
         **record,
+        "scope": scope,
         "content": new_content,
-        "fingerprint": _fingerprint(target, new_content),
-        "project_id": project_id,
+        "fingerprint": _record_fingerprint(target, new_content, scope, effective_project_id),
+        "project_id": effective_project_id,
         "updated_at": _now_rfc3339(),
     }
     state["records"] = records
