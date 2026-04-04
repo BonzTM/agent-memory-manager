@@ -27,14 +27,14 @@ Recall → Expand → Act → Remember
 
 ## Supported Runtimes
 
-| Runtime | Integration | Memory Slot |
-|---------|------------|-------------|
-| [Claude Code](docs/agent-onboarding.md) | Hooks + MCP sidecar | — |
-| [Codex](docs/codex-integration.md) | Hooks | — |
-| [OpenCode](docs/opencode-integration.md) | Native plugin + MCP sidecar | Native tools |
-| [OpenClaw](docs/openclaw-integration.md) | Native plugin + MCP sidecar | — |
-| [Hermes](docs/hermes-agent-integration.md) | Memory provider or Python hook plugin | External provider |
-| Any HTTP client | [HTTP API](docs/http-api-reference.md) | — |
+| Runtime | Integration | Guide |
+|---------|------------|-------|
+| Claude Code | MCP + CLI hooks | [Claude Code Integration](docs/claude-code-integration.md) |
+| Codex | MCP + CLI hooks | [Codex Integration](docs/codex-integration.md) |
+| OpenCode | MCP + native plugin | [OpenCode Integration](docs/opencode-integration.md) |
+| OpenClaw | MCP + native plugin | [OpenClaw Integration](docs/openclaw-integration.md) |
+| Hermes | MCP + memory provider or hook plugin | [Hermes Integration](docs/hermes-agent-integration.md) |
+| Any HTTP client | REST API / MCP-over-HTTP | [HTTP API Reference](docs/http-api-reference.md) |
 
 ## Quick Start
 

@@ -2,8 +2,9 @@
 
 This is a step-by-step guide designed to be handed to an AI agent so it can set up amm for its user with minimal human intervention.
 
-Use Steps 1-2 for every runtime. After that, choose the runtime-specific path that matches the user's host. This repo still ships the richest end-to-end reference hooks for Claude Code, but the operating model is intentionally cross-runtime:
+Use Steps 1-2 for every runtime. After that, choose the runtime-specific integration guide:
 
+- [Claude Code Integration](claude-code-integration.md)
 - [Codex Integration](codex-integration.md)
 - [Hermes-Agent Integration](hermes-agent-integration.md)
 - [OpenClaw Integration](openclaw-integration.md)
