@@ -33,7 +33,7 @@ Recall → Expand → Act → Remember
 | [Codex](docs/codex-integration.md) | Hooks | — |
 | [OpenCode](docs/opencode-integration.md) | Native plugin + MCP sidecar | Native tools |
 | [OpenClaw](docs/openclaw-integration.md) | Native plugin + MCP sidecar | — |
-| [Hermes](docs/hermes-agent-integration.md) | Python plugin | — |
+| [Hermes](docs/hermes-agent-integration.md) | Memory provider or Python hook plugin | External provider |
 | Any HTTP client | [HTTP API](docs/http-api-reference.md) | — |
 
 ## Quick Start
@@ -44,7 +44,7 @@ AMM_DB_PATH=~/.amm/amm.db ./amm init
 
 # 2. Configure LLM (optional but recommended)
 export AMM_SUMMARIZER_ENDPOINT=https://api.openai.com/v1
-export AMM_SUMMARIZER_API_KEY=sk-...
+export AMM_SUMMARIZER_API_KEY=***
 
 # 3. Add recommended ingestion policies
 amm policy-add --pattern-type kind --pattern "tool_call" --mode ignore --match-mode exact --priority 100
@@ -159,3 +159,4 @@ Full reference: [Configuration Documentation](docs/configuration.md)
 ## License
 
 MIT. See [LICENSE](LICENSE) for details.
+

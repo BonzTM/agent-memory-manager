@@ -1,6 +1,6 @@
 # Hermes-Agent Integration Guide
 
-Hermes and AMM now fit together cleanly as an MCP + local-plugin pattern, with optional helper scripts for shell-driven capture and warm-path maintenance. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md).
+Hermes and AMM now fit together in two clean shapes: the newer external memory-provider architecture, and the older MCP + hook-plugin pattern kept for backwards compatibility. Optional helper scripts still cover shell-driven capture and warm-path maintenance. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md).
 
 - **Hermes-Agent** owns the runtime, plugin loading, hooks, scheduling, and agent behavior.
 - **AMM** owns durable history, recall, summaries, and maintenance jobs.
@@ -8,7 +8,8 @@ Hermes and AMM now fit together cleanly as an MCP + local-plugin pattern, with o
 That keeps the integration contract simple:
 
 - register `amm-mcp` if you want explicit AMM tools inside Hermes
-- install the repo-shipped Hermes plugin example for per-turn ambient recall injection and user/assistant capture
+- on newer Hermes builds, install the repo-shipped AMM memory-provider example and set `memory.provider: amm`
+- on older Hermes builds, use the repo-shipped hook plugin example for per-turn ambient recall injection and user/assistant capture
 - use the optional helper scripts only when you want shell-hook wiring, raw tool event capture, or a separate session-end runner
 - keep maintenance jobs external as `amm jobs run <kind>` calls against the same database
 
@@ -22,9 +23,9 @@ The plugin's hot-path transport is independent from the explicit MCP tool transp
 Use Hermes and AMM in four layers:
 
 1. **MCP** for explicit agent-controlled memory access (via stdio or HTTP)
-2. **Local plugin** for transparent per-turn ambient recall injection plus `message_user` / `message_assistant` capture
-3. **Optional helper scripts** for shell-based bridging or explicit raw tool capture
-4. **Cron or scheduled jobs** for reflection, compression, and heavier maintenance
+2. **Memory provider** on newer Hermes builds for transparent ambient recall, turn sync, and built-in memory mirroring
+3. **Legacy hook plugin** only when you still need the older plugin API
+4. **Optional helper scripts / scheduled jobs** for shell-based bridging, explicit raw tool capture, and heavier maintenance
 
 ## 1. Register `amm-mcp`
 
@@ -74,31 +75,61 @@ amm policy-add --pattern-type kind --pattern "tool_result" --mode ignore --match
 
 Without these policies, the extraction pipeline treats raw tool invocation JSON (patch text, shell commands, API payloads) as meaningful content, producing low-quality memories. The meaningful information is already captured in `message_user` and `message_assistant` events. See [Configuration: Ingestion Policies](configuration.md#ingestion-policies) for the full reference.
 
-## 2. Install The Repo-Shipped Hermes Plugin
+## 2. Install The Recommended AMM Memory Provider
 
-Current Hermes releases support directory plugins under `~/.hermes/plugins/<name>/`, and `pre_llm_call` hooks can return a `context` block that Hermes appends to the effective system prompt for the current turn. See the official Hermes [Plugins guide](https://hermes-agent.nousresearch.com/docs/user-guide/features/plugins/), [Hooks guide](https://hermes-agent.nousresearch.com/docs/user-guide/features/hooks/#plugin-hooks), and [`run_agent.py` implementation](https://github.com/NousResearch/hermes-agent/blob/v2026.3.30/run_agent.py).
+Newer Hermes builds expose an external memory-provider architecture. That is the cleaner integration point for AMM because it gives you first-class `prefetch()`, `sync_turn()`, and `on_memory_write()` hooks through Hermes' `MemoryProvider` interface.
 
-This repo ships a Hermes directory plugin example at:
+This repo ships an AMM provider example at:
 
-- [`examples/hermes-agent/amm-memory/plugin.yaml`](../examples/hermes-agent/amm-memory/plugin.yaml)
-- [`examples/hermes-agent/amm-memory/__init__.py`](../examples/hermes-agent/amm-memory/__init__.py)
+- [`examples/hermes-agent/memory/amm/plugin.yaml`](../examples/hermes-agent/memory/amm/plugin.yaml)
+- [`examples/hermes-agent/memory/amm/__init__.py`](../examples/hermes-agent/memory/amm/__init__.py)
+- [`examples/hermes-agent/memory/amm/README.md`](../examples/hermes-agent/memory/amm/README.md)
+
+Set Hermes to use it with:
+
+```yaml
+memory:
+  provider: amm
+```
+
+What the provider does:
+
+- injects AMM ambient recall with `prefetch()`
+- syncs completed turns into AMM with `sync_turn()`
+- mirrors Hermes built-in curated memory into AMM via `on_memory_write()` reconciliation
+- works against either the local `amm` binary or `AMM_API_URL`
+
+Important:
+
+- Hermes' current `on_memory_write(action, target, content)` bridge does not expose `old_text`, and `remove` is not fired through that bridge today.
+- The repo-shipped AMM provider works around that by reconciling Hermes' built-in `MEMORY.md` / `USER.md` files against a local snapshot, then applying add/remove deltas to AMM durable memories.
+- Because of that Hermes limitation, remove propagation is caught on session-end reconciliation instead of immediate callback parity.
+
+## 2.5. Legacy Hook Plugin (Fallback)
+
+Older Hermes plugin installs still support the hook-based directory plugin under `~/.hermes/plugins/<name>/`, and `pre_llm_call` hooks can return a `context` block that Hermes appends to the effective system prompt for the current turn. See the official Hermes [Plugins guide](https://hermes-agent.nousresearch.com/docs/user-guide/features/plugins/), [Hooks guide](https://hermes-agent.nousresearch.com/docs/user-guide/features/hooks/#plugin-hooks), and [`run_agent.py` implementation](https://github.com/NousResearch/hermes-agent/blob/v2026.3.30/run_agent.py).
+
+This repo still ships the legacy Hermes directory plugin example at:
+
+- [`examples/hermes-agent/amm-legacy/plugin.yaml`](../examples/hermes-agent/amm-legacy/plugin.yaml)
+- [`examples/hermes-agent/amm-legacy/__init__.py`](../examples/hermes-agent/amm-legacy/__init__.py)
 
 Install it globally:
 
 ```bash
 mkdir -p ~/.hermes/plugins
-cp -R examples/hermes-agent/amm-memory ~/.hermes/plugins/amm-memory
+cp -R examples/hermes-agent/amm-legacy ~/.hermes/plugins/amm-legacy
 ```
 
 Or install it project-locally:
 
 ```bash
 mkdir -p ./.hermes/plugins
-cp -R examples/hermes-agent/amm-memory ./.hermes/plugins/amm-memory
+cp -R examples/hermes-agent/amm-legacy ./.hermes/plugins/amm-legacy
 HERMES_ENABLE_PROJECT_PLUGINS=true hermes
 ```
 
-### What the plugin does
+### What the legacy plugin does
 
 - ingests the current user turn as `message_user` in `pre_llm_call`
 - calls AMM ambient recall for the current turn using either the local CLI or `POST /v1/recall`
@@ -133,7 +164,7 @@ Optional curated-memory parity settings:
 - `AMM_HERMES_USER_SCOPE` sets the AMM scope for Hermes `target="user"` entries (`global` by default)
 - `AMM_HERMES_MEMORY_TYPE` sets the AMM memory type for Hermes `target="memory"` entries (`fact` by default)
 - `AMM_HERMES_USER_TYPE` sets the AMM memory type for Hermes `target="user"` entries (`preference` by default)
-- `AMM_HERMES_STATE_DIR` overrides the plugin state directory (defaults to `~/.hermes/state/amm-memory`)
+- `AMM_HERMES_STATE_DIR` overrides the plugin state directory (defaults to `~/.hermes/state/amm-legacy`)
 
 Important:
 
@@ -144,7 +175,7 @@ Important:
 - Curated-memory parity mirrors **future successful Hermes `memory` tool writes**. It keeps a local AMM-ID map and failure queue under the plugin state directory so updates and deletes can target the correct AMM memory IDs.
 - If you enable curated-memory parity on an instance that already has existing Hermes curated memory, plan a one-time backfill or accept that only new successful writes will be mirrored automatically.
 
-## 2.5. Optional Helper Scripts
+## 2.6. Optional Helper Scripts
 
 The repo still ships shell helpers for users who prefer hook-handler wiring or need behaviors outside the plugin's hot path:
 
@@ -215,9 +246,11 @@ If you want a Hermes-oriented instruction block, use something like this:
 
 - `amm-mcp` starts successfully with the configured `AMM_DB_PATH`
 - Hermes can see and call the `amm` MCP server
-- `python3 -m py_compile examples/hermes-agent/amm-memory/__init__.py` succeeds
-- `hermes plugins list` shows `amm-memory` as loaded after installation
+- `python3 -m py_compile examples/hermes-agent/memory/amm/__init__.py` succeeds on newer-provider installs
+- `python3 -m py_compile examples/hermes-agent/amm-legacy/__init__.py` succeeds on legacy-hook installs
+- Hermes is configured with `memory.provider: amm` when using the new provider shape
 - a sample Hermes turn produces `message_user` and `message_assistant` events in AMM history
+- if `AMM_HERMES_SYNC_CURATED_MEMORY=true`, a successful built-in Hermes memory write creates mirrored AMM durable memory on the configured path
 - if `AMM_API_URL` is set, the same sample Hermes turn succeeds against the AMM HTTP server without the local `amm` binary on PATH
 - if you use the optional tool helper, `examples/hermes-agent/on-tool-use.sh` accepts a sample JSON payload
 - `examples/hermes-agent/on-session-end.sh` can run without shell errors
@@ -228,3 +261,4 @@ If you want a Hermes-oriented instruction block, use something like this:
 - a built-in AMM scheduler
 - a one-size-fits-all Hermes config tree
 - automatic maintenance execution without an external trigger
+

@@ -1,6 +1,6 @@
 # Hermes-Agent Example
 
-This directory contains the repo-shipped Hermes plugin example plus optional helper scripts for using AMM with Hermes-Agent.
+This directory contains both Hermes integration shapes shipped by the repo — the newer memory-provider example, the legacy hook plugin example, and optional helper scripts for using AMM with Hermes-Agent.
 
 ## Prerequisites
 
@@ -10,22 +10,33 @@ This directory contains the repo-shipped Hermes plugin example plus optional hel
 
 ## Files
 
-- `amm-memory/` — Hermes directory plugin that ingests `message_user` / `message_assistant` and injects ambient recall every turn through `pre_llm_call`
+- `memory/amm/` — Hermes external memory-provider example for newer Hermes builds
+- `amm-legacy/` — legacy Hermes hook plugin for older builds or fallback installs
 - `on-user-message.sh` — optional shell helper that ingests `message_user` and prints ambient recall hints
 - `on-assistant-message.sh` — optional shell helper that ingests `message_assistant`
 - `on-tool-use.sh` — optional shell helper that ingests `tool_call` and `tool_result`
 - `on-session-end.sh` — optional warm-path maintenance runner
 
-## Install The Plugin
+## Install The Recommended Provider
 
-Hermes loads directory plugins from `~/.hermes/plugins/<name>/`. Install the repo-shipped plugin example like this:
+For Hermes builds with the external memory-provider architecture, use the AMM provider example and set `memory.provider: amm` in `config.yaml`.
+
+Repo files:
+
+- `examples/hermes-agent/memory/amm/plugin.yaml`
+- `examples/hermes-agent/memory/amm/__init__.py`
+- `examples/hermes-agent/memory/amm/README.md`
+
+## Install The Legacy Hook Plugin
+
+If your Hermes build does not expose the newer memory-provider architecture yet, install the legacy hook plugin instead:
 
 ```bash
 mkdir -p ~/.hermes/plugins
-cp -R examples/hermes-agent/amm-memory ~/.hermes/plugins/amm-memory
+cp -R examples/hermes-agent/amm-legacy ~/.hermes/plugins/amm-legacy
 ```
 
-For a project-local install instead, copy the same directory to `./.hermes/plugins/amm-memory` and start Hermes with `HERMES_ENABLE_PROJECT_PLUGINS=true`.
+For a project-local install instead, copy the same directory to `./.hermes/plugins/amm-legacy` and start Hermes with `HERMES_ENABLE_PROJECT_PLUGINS=true`.
 
 Recommended environment:
 
@@ -63,10 +74,10 @@ Pass these values from your Hermes hook handler when available:
 ## Verify
 
 ```bash
-python3 -m py_compile examples/hermes-agent/amm-memory/__init__.py
+python3 -m py_compile examples/hermes-agent/amm-legacy/__init__.py
 ```
 
-Then, after copying the plugin into `~/.hermes/plugins/amm-memory`, start Hermes and confirm the plugin is loaded:
+Then, after copying the plugin into `~/.hermes/plugins/amm-legacy`, start Hermes and confirm the plugin is loaded:
 
 ```bash
 hermes plugins list
@@ -86,3 +97,4 @@ AMM_DB_PATH=~/.amm/amm.db /usr/local/bin/amm history --limit 5
 ```
 
 For the runtime contract and MCP options, see [`../../docs/hermes-agent-integration.md`](../../docs/hermes-agent-integration.md).
+

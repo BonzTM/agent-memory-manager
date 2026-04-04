@@ -178,7 +178,7 @@ replace_once(
     f'"version": "{version}"',
 )
 replace_once(
-    root / "examples/hermes-agent/amm-memory/plugin.yaml",
+    root / "examples/hermes-agent/amm-legacy/plugin.yaml",
     r"(?m)^version: \d+\.\d+\.\d+$",
     f"version: {version}",
 )
@@ -193,10 +193,11 @@ print("- docs/mcp-reference.md")
 print("- deploy/helm/amm/README.md")
 print("- examples/api-mode/opencode/amm-http-plugin.ts")
 print("- examples/openclaw/package.json")
-print("- examples/hermes-agent/amm-memory/plugin.yaml")
+print("- examples/hermes-agent/amm-legacy/plugin.yaml")
 print()
 print("Still manual:")
 print(f"- fill the new CHANGELOG.md section for {version} if it was empty")
 print(f"- create docs/release-notes/RELEASE_NOTES_{version}.md if you publish versioned release notes")
 print(f"- publish the GitHub release/tag as plain semver: {version}")
 PY
+

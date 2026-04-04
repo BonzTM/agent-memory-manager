@@ -20,7 +20,7 @@ _AMM_PROJECT_ID = "AMM_PROJECT_ID"
 _AMM_CURATED_PROJECT_ID = "AMM_HERMES_CURATED_PROJECT_ID"
 _AMM_RECALL_LIMIT = "AMM_HERMES_RECALL_LIMIT"
 _AMM_API_URL = "AMM_API_URL"
-_AMM_API_KEY = "AMM_API_KEY"
+_AMM_API_KEY="***"
 
 _AMM_SYNC_CURATED_MEMORY = "AMM_HERMES_SYNC_CURATED_MEMORY"
 _AMM_SYNC_STATE_DIR = "AMM_HERMES_STATE_DIR"
@@ -148,7 +148,7 @@ def _run_amm(command: list[str], stdin: str | None = None, timeout: int = 10) ->
 
 def _http_headers() -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
-    api_key = os.environ.get(_AMM_API_KEY, "").strip()
+    api_key=os.env...KEY, "").strip()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     return headers
@@ -264,7 +264,7 @@ def _state_dir() -> Path:
     raw = os.environ.get(_AMM_SYNC_STATE_DIR, "").strip()
     if raw:
         return Path(raw).expanduser()
-    return _hermes_home() / "state" / "amm-memory"
+    return _hermes_home() / "state" / "amm-legacy"
 
 
 def _map_path() -> Path:
@@ -761,3 +761,4 @@ def register(ctx: Any) -> None:
     ctx.register_hook("pre_llm_call", _pre_llm_call)
     ctx.register_hook("post_llm_call", _post_llm_call)
     ctx.register_hook("post_tool_call", _post_tool_call)
+
