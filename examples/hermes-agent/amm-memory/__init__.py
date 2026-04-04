@@ -432,7 +432,7 @@ def _update_memory(memory_id: str, target: str, content: str, project_id: str) -
 
     if _use_http_api():
         result = _request_json("PATCH", f"/memories/{memory_id}", payload, timeout=10)
-        return bool(result)
+        return bool(result) and int(result.get("status", 0)) < 400
 
     command = [
         "memory",
@@ -467,29 +467,51 @@ def _record_index(
     project_id: str,
 ) -> int | None:
     normalized_old_text = _normalize_text(old_text)
-    scoped_matches = [
+    target_matches = [
         (idx, record)
         for idx, record in enumerate(records)
         if record.get("target") == target
-        and record.get("scope") == scope
+    ]
+    scoped_matches = [
+        (idx, record)
+        for idx, record in target_matches
+        if record.get("scope") == scope
         and (scope != "project" or record.get("project_id", "") == project_id)
     ]
 
-    exact_matches = [
-        idx for idx, record in scoped_matches
-        if _normalize_text(str(record.get("content", ""))) == normalized_old_text
-    ]
+    def _exact(matches: list[tuple[int, dict[str, Any]]]) -> list[int]:
+        return [
+            idx for idx, record in matches
+            if _normalize_text(str(record.get("content", ""))) == normalized_old_text
+        ]
+
+    def _substring(matches: list[tuple[int, dict[str, Any]]]) -> list[int]:
+        return [
+            idx for idx, record in matches
+            if normalized_old_text and normalized_old_text in _normalize_text(str(record.get("content", "")))
+        ]
+
+    exact_matches = _exact(scoped_matches)
     if len(exact_matches) == 1:
         return exact_matches[0]
     if len(exact_matches) > 1:
         return None
 
-    substring_matches = [
-        idx for idx, record in scoped_matches
-        if normalized_old_text and normalized_old_text in _normalize_text(str(record.get("content", "")))
-    ]
+    fallback_exact_matches = _exact(target_matches)
+    if len(fallback_exact_matches) == 1:
+        return fallback_exact_matches[0]
+    if len(fallback_exact_matches) > 1:
+        return None
+
+    substring_matches = _substring(scoped_matches)
     if len(substring_matches) == 1:
         return substring_matches[0]
+    if len(substring_matches) > 1:
+        return None
+
+    fallback_substring_matches = _substring(target_matches)
+    if len(fallback_substring_matches) == 1:
+        return fallback_substring_matches[0]
     return None
 
 
