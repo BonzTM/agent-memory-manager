@@ -1,0 +1,6 @@
+name: amm
+version: 1.3.3
+description: "AMM memory provider for Hermes — ambient recall, turn sync, and curated memory mirroring."
+hooks:
+  - on_memory_write
+  - on_session_end

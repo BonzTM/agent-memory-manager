@@ -33,7 +33,7 @@ Recall → Expand → Act → Remember
 | [Codex](docs/codex-integration.md) | Hooks | — |
 | [OpenCode](docs/opencode-integration.md) | Native plugin + MCP sidecar | Native tools |
 | [OpenClaw](docs/openclaw-integration.md) | Native plugin + MCP sidecar | — |
-| [Hermes](docs/hermes-agent-integration.md) | Python plugin | — |
+| [Hermes](docs/hermes-agent-integration.md) | Memory provider or Python hook plugin | External provider |
 | Any HTTP client | [HTTP API](docs/http-api-reference.md) | — |
 
 ## Quick Start
