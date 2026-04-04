@@ -80,7 +80,6 @@ const (
 	defaultEscalationDeterministicMaxChars = 2048
 	defaultSessionIdleTimeout              = 15 * time.Minute
 	defaultSummarizerContextWindow         = 128000 // tokens
-	defaultCompressMinEvents               = 0 // 0 → chunkSize * 5
 )
 
 type compressEventChunkPlan struct {

@@ -113,9 +113,11 @@ func (s *AMMService) BuildEntityBriefs(ctx context.Context) (int, error) {
 		}
 
 		tightDesc := fmt.Sprintf("Entity brief: %s", entity.CanonicalName)
-		if tight, err := s.intelligence.Summarize(ctx, body, 100); err == nil {
-			if cleaned := strings.TrimSpace(tight); cleaned != "" && len(cleaned) <= 120 {
-				tightDesc = cleaned
+		if s.intelligence != nil {
+			if tight, err := s.intelligence.Summarize(ctx, body, 100); err == nil {
+				if cleaned := strings.TrimSpace(tight); cleaned != "" && len(cleaned) <= 120 {
+					tightDesc = cleaned
+				}
 			}
 		}
 

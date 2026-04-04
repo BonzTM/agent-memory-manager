@@ -760,9 +760,6 @@ func (s *AMMService) recallEntity(ctx context.Context, query string, opts core.R
 		// Attach entity brief body if one exists, giving richer context.
 		if brief := s.findEntityBrief(ctx, ent.ID); brief != nil {
 			item.TightDescription = brief.TightDescription
-			if item.Type == "" {
-				item.Type = ent.Type
-			}
 		}
 		entityItems = append(entityItems, item)
 	}
