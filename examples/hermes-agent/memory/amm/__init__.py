@@ -89,7 +89,31 @@ class AMMMemoryProvider(MemoryProvider):
         }
 
     def system_prompt_block(self) -> str:
-        return ""
+        if not self._active:
+            return ""
+        curated_project = self._resolve_curated_project_id(self._platform)
+        project_hint = ""
+        if curated_project:
+            project_hint = (
+                f"\nWhen saving your own memories (preferences, decisions, lessons), "
+                f"pass `project_id: \"{curated_project}\"` to amm_remember so they are "
+                f"scoped to your memory space rather than the general store."
+            )
+        return (
+            "## Long-term memory (AMM)\n"
+            "You have two memory tiers:\n"
+            "- **Built-in memory** (MEMORY.md/USER.md): small, always visible. "
+            "Keep only high-frequency context here — active preferences, current constraints, "
+            "things you need on every turn.\n"
+            "- **AMM** (via amm_recall/amm_remember MCP tools): unlimited durable memory. "
+            "Relevant AMM memories are automatically surfaced each turn. "
+            "Use amm_remember for detailed decisions, procedures, project context, and "
+            "anything too large for built-in memory. Use amm_recall for targeted search "
+            "when you need specific history.\n"
+            "When built-in memory is full, save detail to AMM rather than compressing "
+            "or discarding entries. Let built-in memory stay lean."
+            + project_hint
+        )
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         if not self._active or not query.strip():
