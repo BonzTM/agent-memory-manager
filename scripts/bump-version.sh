@@ -77,12 +77,6 @@ def update_openapi_version(path: pathlib.Path) -> None:
 def bump_chart_metadata(path: pathlib.Path) -> None:
     content = read(path)
 
-    chart_match = re.search(r"(?m)^version: (\d+)\.(\d+)\.(\d+)$", content)
-    if not chart_match:
-        raise SystemExit(f"could not find chart version in {path}")
-    major, minor, patch = map(int, chart_match.groups())
-    next_chart_version = f"{major}.{minor}.{patch + 1}"
-
     updated, app_count = re.subn(
         r'(?m)^appVersion: ".*"$',
         f'appVersion: "{version}"',
@@ -94,7 +88,7 @@ def bump_chart_metadata(path: pathlib.Path) -> None:
 
     updated, chart_count = re.subn(
         r"(?m)^version: \d+\.\d+\.\d+$",
-        f"version: {next_chart_version}",
+        f"version: {version}",
         updated,
         count=1,
     )
