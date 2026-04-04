@@ -8,6 +8,18 @@ This guide shows how to use AMM with Codex without pretending AMM owns the Codex
 
 That means you do **not** need an amm daemon inside Codex to get value. Hooks improve the hot path, but the workers are still just external binary calls.
 
+## Responsibility Split
+
+| Concern | Codex owns | amm owns |
+|---|---|---|
+| Runtime lifecycle | hook registration, prompt execution, transcript management | none |
+| Memory storage | none | SQLite database, canonical memory/history records |
+| Ambient recall injection | `UserPromptSubmit` hook execution | ambient recall query and result rendering |
+| Explicit memory tools | MCP subprocess management, tool exposure | `amm-mcp` implementation |
+| Event capture | hook firing and payload delivery | event ingestion |
+| Transcript import | exposing `transcript_path` at `Stop` | parsing and ingesting assistant/tool history |
+| Maintenance | deciding when jobs run (external schedule) | executing `reflect`, `compress_history`, and other jobs |
+
 ## Recommended Shape
 
 Use four pieces together:
@@ -206,6 +218,16 @@ Codex hook payloads expose `session_id` and optional `transcript_path`, and `Use
 - if transcript import yields no assistant message, `Stop` falls back to `last_assistant_message`
 
 Codex does not need a dedicated tool lifecycle hook for this pattern: richer tool history is captured from local stop-time transcript parsing.
+
+## Configuration
+
+Environment variables configure the hook scripts' transport and capture behavior:
+
+| Env Variable | Default | Description |
+|-------------|---------|-------------|
+| `AMM_BIN` | `/usr/local/bin/amm` | Path to local `amm` binary |
+| `AMM_DB_PATH` | `~/.amm/amm.db` | SQLite database path |
+| `AMM_PROJECT_ID` | unset | Stable project identifier for scoped recall |
 
 ## Verification Checklist
 

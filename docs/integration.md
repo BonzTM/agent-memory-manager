@@ -46,7 +46,7 @@ For runtimes that support lifecycle hooks (e.g., shell scripts triggered on user
 
 | Runtime | Integration Pattern | Guide |
 |---------|---------------------|-------|
-| Claude Code | MCP + CLI Hooks | [Agent Onboarding](agent-onboarding.md#step-3-configure-for-claude-code-full-reference-path) |
+| Claude Code | MCP + CLI Hooks | [Claude Code Integration](claude-code-integration.md) |
 | Codex | MCP + CLI Hooks | [Codex Integration](codex-integration.md) |
 | OpenCode | MCP + Local Plugin | [OpenCode Integration](opencode-integration.md) |
 | OpenClaw | MCP + Native Plugin | [OpenClaw Integration](openclaw-integration.md) |

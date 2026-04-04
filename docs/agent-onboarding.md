@@ -205,13 +205,13 @@ After Steps 1-2, pick the path that matches the user's host:
 
 | Runtime | Start here | What you get |
 |---|---|---|
-| Claude Code | Continue below with Steps 3-7 | Full MCP + public hook reference implementation |
+| Claude Code | [Claude Code Integration](claude-code-integration.md) | MCP + CLI hooks + session-end maintenance |
 | Codex | [Codex Integration](codex-integration.md) | MCP + Codex hooks + transcript-aware closeout |
 | OpenCode | [OpenCode Integration](opencode-integration.md) | MCP + local plugin glue + explicit recall |
 | OpenClaw | [OpenClaw Integration](openclaw-integration.md) | MCP + native plugin + ambient recall injection |
 | Hermes-Agent | [Hermes-Agent Integration](hermes-agent-integration.md) | MCP + local plugin + optional helper scripts |
 
-The Claude sections below remain the most detailed copy-paste walkthrough, but they are no longer the only mental model.
+Every runtime now has its own dedicated integration guide. The Claude Code steps below are kept for backwards compatibility — the canonical reference is [Claude Code Integration](claude-code-integration.md).
 
 ---
 

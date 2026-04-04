@@ -44,3 +44,5 @@ Replace placeholder paths such as `/home/you/.amm/amm.db` with your real paths b
 - tool results from `tool.execute.after` (`tool_result`)
 
 Use amm's MCP surface for explicit recall and remember operations while this plugin handles the stable glue.
+
+For the complete integration guide, configuration reference, and operational patterns, see [`../../docs/opencode-integration.md`](../../docs/opencode-integration.md).

@@ -43,4 +43,6 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | AMM_DB_PATH=
 
 Expected: `amm status` reports `initialized: true`, and `amm-mcp` returns `serverInfo.name: "amm-mcp"`.
 
-For the full runtime walkthrough, see [`../../docs/agent-onboarding.md`](../../docs/agent-onboarding.md).
+For the full integration guide, configuration reference, and operational patterns, see [`../../docs/claude-code-integration.md`](../../docs/claude-code-integration.md).
+
+For general setup (database init, LLM config, worker scheduling), see [`../../docs/agent-onboarding.md`](../../docs/agent-onboarding.md).

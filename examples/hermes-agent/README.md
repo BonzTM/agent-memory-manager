@@ -35,12 +35,7 @@ memory:
   provider: amm
 ```
 
-Configure the transport with env vars:
-
-- **Local binary mode**: `AMM_BIN` (default `/usr/local/bin/amm`) + `AMM_DB_PATH`
-- **HTTP API mode**: `AMM_API_URL` + optionally `AMM_API_KEY`
-
-To enable curated-memory mirroring, set `AMM_HERMES_SYNC_CURATED_MEMORY=true`. See [`memory/amm/README.md`](memory/amm/README.md) for all env vars.
+Configure transport and behavior via environment variables. See the [Configuration table](../../docs/hermes-agent-integration.md#configuration) in the integration guide for all env vars and defaults.
 
 ## Install The Legacy Hook Plugin
 
@@ -53,21 +48,12 @@ cp -R examples/hermes-agent/amm-legacy ~/.hermes/plugins/amm-legacy
 
 For a project-local install instead, copy the same directory to `./.hermes/plugins/amm-legacy` and start Hermes with `HERMES_ENABLE_PROJECT_PLUGINS=true`.
 
-Recommended environment:
-
-- `AMM_BIN` for local-binary mode
-- `AMM_DB_PATH` for local-binary mode
-- `AMM_API_URL` to switch the plugin from local-binary mode to HTTP API mode
-- `AMM_API_KEY` when the AMM HTTP server requires bearer auth
-- `AMM_PROJECT_ID` for a stable general plugin project identifier, especially outside CLI sessions
-- `AMM_HERMES_CURATED_PROJECT_ID` when you want curated-memory parity writes pinned to a specific AMM project without changing the plugin's general project resolution
-- `AMM_HERMES_RECALL_LIMIT` to override the default ambient recall block length (`5`)
+See the [Configuration table](../../docs/hermes-agent-integration.md#configuration) in the integration guide for all env vars and defaults.
 
 Important:
 
-- Do not wire `on-user-message.sh` or `on-assistant-message.sh` for the same Hermes hot path when the plugin is enabled. That will duplicate `message_user` / `message_assistant` events.
-- The plugin is intentionally hot-path only. It does not run maintenance jobs automatically.
-- When `AMM_API_URL` is set, the plugin uses the REST API (`/v1/events` and `/v1/recall`) instead of the local `amm` binary.
+- Do not wire `on-user-message.sh` or `on-assistant-message.sh` for the same Hermes hot path when the plugin is enabled — that duplicates events.
+- The plugin is hot-path only. It does not run maintenance jobs.
 
 ## Install Optional Helper Scripts
 

@@ -8,6 +8,16 @@ The supported integration boundary is:
 - **a local OpenCode plugin** for runtime glue (`shell.env`, message/tool capture, session lifecycle markers)
 - **external amm workers** for heavier maintenance jobs
 
+## Responsibility Split
+
+| Concern | OpenCode owns | amm owns |
+|---|---|---|
+| Runtime lifecycle | plugin loading, event dispatch, shell env injection | none |
+| Memory storage | none | SQLite database, canonical memory/history records |
+| Explicit memory tools | MCP subprocess management, tool exposure | `amm-mcp` implementation |
+| Event capture | plugin event firing and payload delivery | event ingestion |
+| Maintenance | deciding when jobs run (external schedule) | executing `reflect`, `compress_history`, and other jobs |
+
 ## Repo-shipped example
 
 See [`examples/opencode/`](../examples/opencode/):
@@ -110,14 +120,29 @@ If the repo also uses ACM, ACM owns task workflow and AMM owns durable memory.
 - Do not assume amm runs its own scheduler. Maintenance jobs run externally via `amm jobs run <kind>`.
 ```
 
-## What this repo ships today
+## Configuration
 
-- a real OpenCode MCP config example
-- a real OpenCode local plugin example
-- message + tool-call + tool-result capture into AMM event kinds (`message_user`, `message_assistant`, `tool_call`, `tool_result`)
-- global install guidance that mirrors the same pattern we dogfood locally
+Environment variables configure the plugin's transport and capture behavior:
 
-## Current limits
+| Env Variable | Default | Description |
+|-------------|---------|-------------|
+| `AMM_BIN` | `/usr/local/bin/amm` | Path to local `amm` binary |
+| `AMM_DB_PATH` | `~/.amm/amm.db` | SQLite database path |
+| `AMM_PROJECT_ID` | unset | Stable project identifier (injected via `shell.env`) |
+| `AMM_SESSION_ID` | unset | Session identifier (injected via `shell.env` from OpenCode) |
 
-- capture quality depends on OpenCode event payload shape and availability in your build
-- a native OpenCode amm npm package is not published independently of this repo
+## Verification Checklist
+
+- `amm-mcp` starts successfully with the configured `AMM_DB_PATH`
+- OpenCode can see and call the `amm` MCP server
+- the `amm.js` plugin loads without errors (`~/.config/opencode/plugins/` or `.opencode/plugins/`)
+- a sample conversation produces `message_user` and `message_assistant` events in `amm history --limit 5`
+- `tool_call` and `tool_result` events appear when tools are invoked
+- `shell.env` injects `AMM_BIN`, `AMM_DB_PATH`, `AMM_PROJECT_ID`, and `AMM_SESSION_ID`
+- scheduled worker runs via `run-workers.sh` complete without errors
+
+## What This Repo Does Not Promise
+
+- a built-in amm scheduler or daemon
+- a native OpenCode amm npm package published independently of this repo
+- automatic maintenance without an external trigger
