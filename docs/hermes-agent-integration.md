@@ -18,6 +18,18 @@ The plugin's hot-path transport is independent from the explicit MCP tool transp
 - **Binary mode**: plugin calls the local `amm` binary, and Hermes can talk to `amm-mcp` over stdio
 - **API mode**: plugin calls the AMM REST API via `AMM_API_URL`, and Hermes can talk to `/v1/mcp` over MCP-over-HTTP
 
+## Responsibility Split
+
+| Concern | Hermes owns | amm owns |
+|---|---|---|
+| Runtime lifecycle | plugin loading, hooks, scheduling | none |
+| Memory storage | none | SQLite database, canonical memory/history records |
+| Ambient recall injection | `prefetch()` / `pre_llm_call` hook execution | ambient recall query and result rendering |
+| Explicit memory tools | MCP subprocess management, tool exposure | `amm-mcp` implementation |
+| Event capture | hook firing and payload delivery | event ingestion |
+| Curated memory bridge | `on_memory_write()` / `post_tool_call` firing | durable memory CRUD |
+| Maintenance | deciding when jobs run (external schedule) | executing `reflect`, `compress_history`, and other jobs |
+
 ## Recommended Shape
 
 Use Hermes and AMM in four layers:
@@ -148,23 +160,7 @@ Curated-memory parity resolves its project override like this:
 - use `AMM_HERMES_CURATED_PROJECT_ID` when set
 - otherwise, fall back to the general plugin `project_id` resolution above
 
-Recommended environment:
-
-- `AMM_BIN` for local-binary mode
-- `AMM_DB_PATH` for local-binary mode
-- `AMM_API_URL` to switch the plugin into REST mode against `amm-http`
-- `AMM_API_KEY` when the HTTP server requires bearer auth
-- `AMM_HERMES_CURATED_PROJECT_ID` for curated-memory parity only when you want mirrored Hermes memories pinned to a specific AMM project without changing the plugin's general project resolution
-- `AMM_HERMES_RECALL_LIMIT` to override the default recall block length (`5`)
-
-Optional curated-memory parity settings:
-
-- `AMM_HERMES_SYNC_CURATED_MEMORY=true` enables mirroring successful Hermes `memory` tool writes into AMM durable memories
-- `AMM_HERMES_MEMORY_SCOPE` sets the AMM scope for Hermes `target="memory"` entries (`project` by default, falls back to `global` when no project can be resolved)
-- `AMM_HERMES_USER_SCOPE` sets the AMM scope for Hermes `target="user"` entries (`global` by default)
-- `AMM_HERMES_MEMORY_TYPE` sets the AMM memory type for Hermes `target="memory"` entries (`fact` by default)
-- `AMM_HERMES_USER_TYPE` sets the AMM memory type for Hermes `target="user"` entries (`preference` by default)
-- `AMM_HERMES_STATE_DIR` overrides the plugin state directory (defaults to `~/.hermes/state/amm-legacy`)
+See the [Configuration](#configuration) table for all environment variables and defaults.
 
 Important:
 
@@ -198,6 +194,26 @@ To keep the helper scripts runtime-neutral, pass the following values from your 
 - stdin JSON for `on-tool-use.sh` with `tool_name`, `tool_input`, `tool_output`, `call_id`, and `status`
 
 That keeps the AMM scripts reusable even if your Hermes hook wiring changes over time.
+
+## Configuration
+
+Environment variables configure both the memory provider and the legacy plugin. Plugin config (`plugin.yaml` context) takes precedence over environment variables where applicable:
+
+| Env Variable | Default | Description |
+|-------------|---------|-------------|
+| `AMM_BIN` | `amm` | Path to local `amm` binary |
+| `AMM_DB_PATH` | `~/.amm/amm.db` | SQLite database path |
+| `AMM_API_URL` | unset | HTTP API base URL (enables REST mode) |
+| `AMM_API_KEY` | unset | Bearer token for HTTP API |
+| `AMM_PROJECT_ID` | unset | Stable project identifier (falls back to CWD-based derivation) |
+| `AMM_HERMES_RECALL_LIMIT` | `5` | Max recall items per turn |
+| `AMM_HERMES_SYNC_CURATED_MEMORY` | `false` | Enable curated memory mirroring |
+| `AMM_HERMES_CURATED_PROJECT_ID` | `AMM_PROJECT_ID` | Override project ID for curated memory writes |
+| `AMM_HERMES_MEMORY_SCOPE` | `project` | AMM scope for `target="memory"` entries |
+| `AMM_HERMES_USER_SCOPE` | `global` | AMM scope for `target="user"` entries |
+| `AMM_HERMES_MEMORY_TYPE` | `fact` | AMM memory type for `target="memory"` entries |
+| `AMM_HERMES_USER_TYPE` | `preference` | AMM memory type for `target="user"` entries |
+| `AMM_HERMES_STATE_DIR` | `~/.hermes/state/amm-legacy` | Directory for sync state files |
 
 ## 3. Keep Background Workers External
 
