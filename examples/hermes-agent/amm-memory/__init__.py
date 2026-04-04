@@ -16,6 +16,7 @@ from urllib import request as urlrequest
 _AMM_BIN = "AMM_BIN"
 _AMM_DB_PATH = "AMM_DB_PATH"
 _AMM_PROJECT_ID = "AMM_PROJECT_ID"
+_AMM_CURATED_PROJECT_ID = "AMM_HERMES_CURATED_PROJECT_ID"
 _AMM_RECALL_LIMIT = "AMM_HERMES_RECALL_LIMIT"
 _AMM_API_URL = "AMM_API_URL"
 _AMM_API_KEY = "AMM_API_KEY"
@@ -112,6 +113,13 @@ def _resolve_project_id(platform: str) -> str:
         return Path(cwd).expanduser().resolve().name
     except OSError:
         return Path(cwd).expanduser().name
+
+
+def _resolve_curated_project_id(platform: str) -> str:
+    explicit = os.environ.get(_AMM_CURATED_PROJECT_ID, "").strip()
+    if explicit:
+        return explicit
+    return _resolve_project_id(platform)
 
 
 def _run_amm(command: list[str], stdin: str | None = None, timeout: int = 10) -> dict[str, Any]:
@@ -549,7 +557,7 @@ def _sync_curated_memory(args: dict[str, Any], result: Any) -> None:
         return
 
     platform = str(args.get("platform", "cli") or "cli")
-    project_id = _resolve_project_id(platform)
+    project_id = _resolve_curated_project_id(platform)
     scope = _curated_scope(target, project_id)
     effective_project_id = project_id if scope == "project" else ""
     state = _load_sync_state()

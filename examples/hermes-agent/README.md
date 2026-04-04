@@ -33,7 +33,8 @@ Recommended environment:
 - `AMM_DB_PATH` for local-binary mode
 - `AMM_API_URL` to switch the plugin from local-binary mode to HTTP API mode
 - `AMM_API_KEY` when the AMM HTTP server requires bearer auth
-- `AMM_PROJECT_ID` for a stable scoped project identifier, especially outside CLI sessions
+- `AMM_PROJECT_ID` for a stable general plugin project identifier, especially outside CLI sessions
+- `AMM_HERMES_CURATED_PROJECT_ID` when you want curated-memory parity writes pinned to a specific AMM project without changing the plugin's general project resolution
 - `AMM_HERMES_RECALL_LIMIT` to override the default ambient recall block length (`5`)
 
 Important:
