@@ -113,7 +113,11 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Upgrade npm for trusted publisher support
-        run: npm install -g npm@latest
+        run: |
+          if ! npm install -g npm@latest 2>/dev/null; then
+            echo "Pre-installed npm broken, bootstrapping via npx"
+            npx -y npm@latest install -g npm@latest
+          fi
 
       - name: Set version from tag
         working-directory: examples/openclaw
