@@ -11,14 +11,15 @@ Install this provider under Hermes as `plugins/memory/amm/` and select it with `
 - mirrors Hermes built-in curated memory files into AMM durable memories
 - uses either the local `amm` binary or the AMM HTTP API via `AMM_API_URL`
 
-## Important limits
+## Curated memory sync
 
-Hermes' current `on_memory_write(action, target, content)` bridge does **not** expose `old_text` for replace or any callback for remove. This provider works around that by reconciling the current built-in `MEMORY.md` / `USER.md` file contents against an in-memory snapshot:
+Hermes' `on_memory_write(action, target, content)` bridge does **not** expose `old_text`. This provider handles all three actions immediately when fired:
 
-- `add` and `replace` are reconciled immediately after the bridge fires
-- `remove` is reconciled on `on_session_end()`
+- **`add`** — creates a new AMM memory, deduped by fingerprint
+- **`replace`** — diffs the curated file against the sync state to find the disappeared entry, then PATCHes the existing AMM memory in place (preserving ID, access history, confidence, and entity links). Falls back to creating a new memory if the old entry can't be matched.
+- **`remove`** — matches the removed content against sync state records and deletes the corresponding AMM memory
 
-That means curated-memory parity is much cleaner than the old `post_tool_call` scraping path, but remove propagation still depends on Hermes firing a real session-end lifecycle.
+A full snapshot reconciliation still runs on `on_session_end()` as a safety net to catch anything the per-action sync missed.
 
 ## Install
 

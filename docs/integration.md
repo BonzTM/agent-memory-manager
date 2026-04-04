@@ -116,6 +116,12 @@ AMM protects against recursive expansion loops with a depth guard.
 - Guard behavior: expand fails with `EXPANSION_RECURSION_BLOCKED` when
   `delegation_depth >= AMM_MAX_EXPAND_DEPTH` and depth is non-zero.
 
+### Recursive child expansion with `max_depth`
+
+Expand also supports a `max_depth` parameter (0–5) for recursively expanding child summaries in a single call. At `max_depth=0` (default), only the immediate children are returned. At `max_depth=N`, each child summary is itself expanded with `max_depth=N-1`, populating an `expanded_children` field on the result. This is a per-request parameter — there is no env var to set a default.
+
+`max_depth` and `delegation_depth` are independent: `max_depth` controls how deep a single expand call traverses the summary tree, while `delegation_depth` guards against agent-to-agent recursion loops.
+
 ### Runtime responsibility
 
 If your runtime delegates `expand` calls, it must pass `delegation_depth` and increment it on nested delegation.

@@ -19,13 +19,28 @@ This directory contains both Hermes integration shapes shipped by the repo — t
 
 ## Install The Recommended Provider
 
-For Hermes builds with the external memory-provider architecture, use the AMM provider example and set `memory.provider: amm` in `config.yaml`.
+For Hermes builds with the external memory-provider architecture (v0.7.0+), install the AMM provider and set `memory.provider: amm` in `config.yaml`.
 
-Repo files:
+```bash
+# Vendor into Hermes' plugin tree
+mkdir -p ~/.hermes/plugins/memory/amm
+cp examples/hermes-agent/memory/amm/plugin.yaml ~/.hermes/plugins/memory/amm/
+cp examples/hermes-agent/memory/amm/__init__.py ~/.hermes/plugins/memory/amm/
+```
 
-- `examples/hermes-agent/memory/amm/plugin.yaml`
-- `examples/hermes-agent/memory/amm/__init__.py`
-- `examples/hermes-agent/memory/amm/README.md`
+Then in your Hermes `config.yaml`:
+
+```yaml
+memory:
+  provider: amm
+```
+
+Configure the transport with env vars:
+
+- **Local binary mode**: `AMM_BIN` (default `/usr/local/bin/amm`) + `AMM_DB_PATH`
+- **HTTP API mode**: `AMM_API_URL` + optionally `AMM_API_KEY`
+
+To enable curated-memory mirroring, set `AMM_HERMES_SYNC_CURATED_MEMORY=true`. See [`memory/amm/README.md`](memory/amm/README.md) for all env vars.
 
 ## Install The Legacy Hook Plugin
 
@@ -74,10 +89,12 @@ Pass these values from your Hermes hook handler when available:
 ## Verify
 
 ```bash
+# Check both plugins compile
+python3 -m py_compile examples/hermes-agent/memory/amm/__init__.py
 python3 -m py_compile examples/hermes-agent/amm-legacy/__init__.py
 ```
 
-Then, after copying the plugin into `~/.hermes/plugins/amm-legacy`, start Hermes and confirm the plugin is loaded:
+After installing either plugin, start Hermes and confirm it loads:
 
 ```bash
 hermes plugins list

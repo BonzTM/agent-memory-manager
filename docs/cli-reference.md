@@ -34,6 +34,7 @@ On failure the envelope goes to stderr with `"ok": false` and an `"error"` objec
 | `AMM_DB_PATH` | Path to the SQLite database file | `~/.amm/amm.db` |
 | `AMM_COMPRESS_CHUNK_SIZE` | Max events per history chunk | `10` |
 | `AMM_COMPRESS_MAX_EVENTS` | Max events per session summary | `200` |
+| `AMM_COMPRESS_MIN_EVENTS` | Minimum pending events to trigger compression | `compress_chunk_size * 5` |
 | `AMM_COMPRESS_BATCH_SIZE` | Max summaries per LLM call | `15` |
 | `AMM_TOPIC_BATCH_SIZE` | Max topic summaries per LLM call | `15` |
 | `AMM_EMBEDDING_BATCH_SIZE` | Max items per embedding API call | `64` |
@@ -873,7 +874,7 @@ Do not combine a positional job kind with `--reprocess` or `--reprocess-all`.
 1. `reflect` (Phase 1: Extraction)
 2. `rebuild_indexes` (Phase 2: Initial embedding)
 3. `compress_history`, `consolidate_sessions`, `build_topic_summaries`, `rebuild_indexes` (Phase 3: Compression)
-4. `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `build_entity_briefs`, `form_episodes` (Phase 4: Linking)
+4. `merge_duplicates`, `extract_claims`, `enrich_memories`, `rebuild_entity_graph`, `build_entity_briefs` (Phase 4: Linking)
 5. `detect_contradictions`, `decay_stale_memory`, `lifecycle_review`, `cross_project_transfer`, `archive_session_traces` (Phase 5: Quality)
 6. `rebuild_indexes`, `cleanup_recall_history`, `update_ranking_weights` (Phase 6: Finalization)
 7. `purge_old_events`, `purge_old_jobs`, `expire_retrieval_cache`, `purge_relevance_feedback`, `vacuum_analyze` (Phase 7: DB trim and compaction)

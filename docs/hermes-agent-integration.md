@@ -101,9 +101,9 @@ What the provider does:
 
 Important:
 
-- Hermes' current `on_memory_write(action, target, content)` bridge does not expose `old_text`, and `remove` is not fired through that bridge today.
-- The repo-shipped AMM provider works around that by reconciling Hermes' built-in `MEMORY.md` / `USER.md` files against a local snapshot, then applying add/remove deltas to AMM durable memories.
-- Because of that Hermes limitation, remove propagation is caught on session-end reconciliation instead of immediate callback parity.
+- Hermes' `on_memory_write(action, target, content)` bridge fires for `add`, `replace`, and `remove` but does not expose `old_text`.
+- The repo-shipped AMM provider handles all three actions immediately: `add` creates a new memory, `replace` diffs the curated file to find the old entry and PATCHes the AMM memory in place (preserving ID, access history, and entity links), and `remove` matches content against the sync state to delete the corresponding AMM memory.
+- A full snapshot reconciliation still runs on `on_session_end()` as a safety net.
 
 ## 2.5. Legacy Hook Plugin (Fallback)
 
@@ -224,7 +224,7 @@ Use a hot/warm/cold split:
 - **Warm path**: a real session-end hook, wrapper script, or periodic Hermes task runs the repo-shipped warm-path sequence serially via `examples/hermes-agent/on-session-end.sh`
 - **Cold path**: scheduled jobs run the broader maintenance sequence through the shared runner or explicitly staggered entries
 
-The repo-shipped session-end sequence runs `reflect`, `compress_history`, `consolidate_sessions`, `form_episodes`, `enrich_memories`, `rebuild_entity_graph`, and `lifecycle_review`.
+The repo-shipped session-end sequence runs `reflect`, `compress_history`, `consolidate_sessions`, `enrich_memories`, `rebuild_entity_graph`, and `lifecycle_review`.
 
 That gives you immediate context injection without forcing the heavy jobs into the interactive loop.
 

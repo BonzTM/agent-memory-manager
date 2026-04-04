@@ -35,7 +35,7 @@ _AMM_PROJECT_ID = "AMM_PROJECT_ID"
 _AMM_CURATED_PROJECT_ID = "AMM_HERMES_CURATED_PROJECT_ID"
 _AMM_RECALL_LIMIT = "AMM_HERMES_RECALL_LIMIT"
 _AMM_API_URL = "AMM_API_URL"
-_AMM_API_KEY="***"
+_AMM_API_KEY = "AMM_API_KEY"
 
 _AMM_SYNC_CURATED_MEMORY = "AMM_HERMES_SYNC_CURATED_MEMORY"
 _AMM_SYNC_STATE_DIR = "AMM_HERMES_STATE_DIR"
@@ -170,11 +170,30 @@ class AMMMemoryProvider(MemoryProvider):
             return
         if not self._env_bool(_AMM_SYNC_CURATED_MEMORY, default=False):
             return
-        if action not in {"add", "replace"}:
+        if action not in {"add", "replace", "remove"}:
             return
         if target not in {"memory", "user"}:
             return
-        self._reconcile_curated_target(target)
+
+        project_id = self._resolve_curated_project_id(self._platform)
+        scope = self._curated_scope(target, project_id)
+        effective_project_id = project_id if scope == "project" else ""
+        normalized = self._normalize_text(content)
+
+        if action == "remove" and normalized:
+            self._sync_remove(target, normalized, project_id)
+            self._snapshot[target] = self._read_curated_entries(target)
+            return
+
+        if action == "replace" and normalized:
+            self._sync_replace(target, normalized, project_id, scope, effective_project_id)
+            self._snapshot[target] = self._read_curated_entries(target)
+            return
+
+        if action == "add" and normalized:
+            self._sync_add(target, normalized, project_id, scope, effective_project_id)
+            self._snapshot[target] = self._read_curated_entries(target)
+            return
 
     def on_session_end(self, messages: List[Dict[str, Any]]) -> None:
         if not self._active:
@@ -211,7 +230,7 @@ class AMMMemoryProvider(MemoryProvider):
 
     def _http_headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
-        api_key=os.env...KEY, "").strip()
+        api_key = os.environ.get(_AMM_API_KEY, "").strip()
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         return headers
@@ -508,6 +527,109 @@ class AMMMemoryProvider(MemoryProvider):
         if self._use_http_api():
             return self._status_code_lt_400(self._request_json("DELETE", f"/memories/{memory_id}", timeout=10))
         return bool(self._run_amm(["forget", memory_id], timeout=10))
+
+    def _update_memory(self, memory_id: str, target: str, content: str, project_id: str) -> bool:
+        scope = self._curated_scope(target, project_id)
+        payload = {
+            "body": content,
+            "tight_description": self._tight_description(content),
+            "type": self._curated_type(target),
+            "scope": scope,
+            "status": "active",
+        }
+        if self._use_http_api():
+            return self._status_code_lt_400(self._request_json("PATCH", f"/memories/{memory_id}", payload, timeout=10))
+        command = [
+            "memory", "update", memory_id,
+            "--body", payload["body"],
+            "--tight", payload["tight_description"],
+            "--type", payload["type"],
+            "--scope", payload["scope"],
+            "--status", payload["status"],
+        ]
+        return bool(self._run_amm(command, timeout=10))
+
+    def _find_record_by_content(self, records: List[Dict[str, Any]], target: str, normalized_content: str) -> int:
+        """Return the index of a single matching record, or -1 if none or ambiguous."""
+        matches = [
+            idx for idx, record in enumerate(records)
+            if record.get("target") == target and self._normalize_text(str(record.get("content", ""))) == normalized_content
+        ]
+        return matches[0] if len(matches) == 1 else -1
+
+    def _find_disappeared_record(self, records: List[Dict[str, Any]], target: str) -> int:
+        """Find the single record whose content no longer appears in the curated file. Returns -1 if none or ambiguous."""
+        current_entries = set(self._read_curated_entries(target))
+        matches = [
+            idx for idx, record in enumerate(records)
+            if record.get("target") == target and self._normalize_text(str(record.get("content", ""))) not in current_entries
+        ]
+        return matches[0] if len(matches) == 1 else -1
+
+    def _sync_remove(self, target: str, normalized_content: str, project_id: str) -> None:
+        state = self._load_sync_state()
+        records = [r for r in state.get("records", []) if isinstance(r, dict)]
+        idx = self._find_record_by_content(records, target, normalized_content)
+        if idx < 0:
+            return
+        record = records[idx]
+        memory_id = str(record.get("amm_memory_id", "")).strip()
+        if not memory_id:
+            self._queue_failed_sync("remove", target, project_id, {"content": normalized_content}, "missing_memory_id")
+            return
+        if not self._forget_memory(memory_id):
+            self._queue_failed_sync("remove", target, project_id, {"content": normalized_content, "amm_memory_id": memory_id}, "delete_failed")
+            return
+        records.pop(idx)
+        state["records"] = records
+        self._save_sync_state(state)
+
+    def _sync_replace(self, target: str, new_content: str, project_id: str, scope: str, effective_project_id: str) -> None:
+        state = self._load_sync_state()
+        records = [r for r in state.get("records", []) if isinstance(r, dict)]
+        # The old entry is the one whose content no longer appears in the curated file.
+        idx = self._find_disappeared_record(records, target)
+        if idx >= 0:
+            record = records[idx]
+            memory_id = str(record.get("amm_memory_id", "")).strip()
+            if memory_id and self._update_memory(memory_id, target, new_content, project_id):
+                records[idx] = {
+                    **record,
+                    "scope": scope,
+                    "content": new_content,
+                    "fingerprint": self._record_fingerprint(target, new_content, scope, effective_project_id),
+                    "project_id": effective_project_id,
+                    "updated_at": self._now_rfc3339(),
+                }
+                state["records"] = records
+                self._save_sync_state(state)
+                return
+            if memory_id:
+                self._queue_failed_sync("replace", target, project_id, {"content": new_content, "amm_memory_id": memory_id}, "update_failed")
+        # Fall back to add if we couldn't find or update the old record.
+        self._sync_add(target, new_content, project_id, scope, effective_project_id)
+
+    def _sync_add(self, target: str, normalized_content: str, project_id: str, scope: str, effective_project_id: str) -> None:
+        state = self._load_sync_state()
+        records = [r for r in state.get("records", []) if isinstance(r, dict)]
+        fingerprint = self._record_fingerprint(target, normalized_content, scope, effective_project_id)
+        if any(r.get("fingerprint") == fingerprint for r in records):
+            return
+        memory_id = self._remember_memory(target, normalized_content, project_id)
+        if not memory_id:
+            self._queue_failed_sync("add", target, project_id, {"content": normalized_content, "scope": scope}, "create_failed")
+            return
+        records.append({
+            "target": target,
+            "scope": scope,
+            "content": normalized_content,
+            "fingerprint": fingerprint,
+            "amm_memory_id": memory_id,
+            "project_id": effective_project_id,
+            "updated_at": self._now_rfc3339(),
+        })
+        state["records"] = records
+        self._save_sync_state(state)
 
     def _curated_file_path(self, target: str) -> Path:
         memories_dir = self._hermes_home / "memories"

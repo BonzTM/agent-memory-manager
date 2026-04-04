@@ -91,6 +91,7 @@ Set `AMM_SUMMARIZER_ENDPOINT` and `AMM_SUMMARIZER_API_KEY` to enable LLM-backed 
 | `AMM_REFLECT_LLM_BATCH_SIZE` | Number of claimed reflect events sent to each LLM analysis call | `20` |
 | `AMM_COMPRESS_CHUNK_SIZE` | Events per chunk for history compression | `10` |
 | `AMM_COMPRESS_MAX_EVENTS` | Maximum events to compress per job run | `200` |
+| `AMM_COMPRESS_MIN_EVENTS` | Minimum pending events required to trigger compression. Replaces the previous 24h cooldown. | `compress_chunk_size * 5` (i.e. `50`) |
 | `AMM_COMPRESS_BATCH_SIZE` | Number of chunks per LLM compress batch | `15` |
 | `AMM_TOPIC_BATCH_SIZE` | Number of topic groups per LLM summarize batch | `15` |
 | `AMM_LIFECYCLE_REVIEW_BATCH_SIZE` | Number of memories per lifecycle review batch | `50` |
@@ -197,6 +198,7 @@ Full reference — all supported keys shown with their defaults:
     "lifecycle_review_batch_size": 50,
     "compress_chunk_size": 10,
     "compress_max_events": 200,
+    "compress_min_events": 50,
     "compress_batch_size": 15,
     "topic_batch_size": 15,
     "embedding_batch_size": 64,
@@ -280,6 +282,7 @@ reflect_llm_batch_size = 20
 lifecycle_review_batch_size = 50
 compress_chunk_size = 10
 compress_max_events = 200
+compress_min_events = 50
 compress_batch_size = 15
 topic_batch_size = 15
 embedding_batch_size = 64
@@ -407,6 +410,8 @@ amm policy-add --pattern-type session --pattern "debug-session-123" --mode read_
 ---
 
 ## Compression Behaviour
+
+Compression triggers when at least `compress_min_events` events are pending past the compression frontier (`AMM_COMPRESS_MIN_EVENTS`, default: `compress_chunk_size * 5`, i.e. 50). A 60-second rate-limit cooldown prevents back-to-back runs on rapid cron ticks. `compress_min_events` is clamped against `compress_max_events` so misconfiguration cannot permanently stall compression.
 
 The compression pipeline uses three-level escalation to guarantee convergence. All body
 summarization calls follow this fallback chain:
