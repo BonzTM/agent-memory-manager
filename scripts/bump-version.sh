@@ -182,6 +182,11 @@ replace_once(
     r"(?m)^version: \d+\.\d+\.\d+$",
     f"version: {version}",
 )
+replace_once(
+    root / "examples/hermes-agent/memory/amm/plugin.yaml",
+    r"(?m)^version: \d+\.\d+\.\d+$",
+    f"version: {version}",
+)
 
 print(f"Bumped repo release surfaces to {version}")
 print("Updated:")
@@ -194,6 +199,7 @@ print("- deploy/helm/amm/README.md")
 print("- examples/api-mode/opencode/amm-http-plugin.ts")
 print("- examples/openclaw/package.json")
 print("- examples/hermes-agent/amm-legacy/plugin.yaml")
+print("- examples/hermes-agent/memory/amm/plugin.yaml")
 print()
 print("Still manual:")
 print(f"- fill the new CHANGELOG.md section for {version} if it was empty")

@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-04-04
+
 ### Added
 
 - **Recursive multi-level Expand with `max_depth` parameter.** `Expand()` now accepts `max_depth` (0–5) to recursively expand child summaries. At `max_depth=0` (default), behavior is unchanged. At `max_depth=N`, each child summary is itself expanded with `max_depth=N-1`, populating a new `expanded_children` field on `ExpandResult`. Wired through CLI (`--max-depth`), MCP (`max_depth`), and HTTP (`max_depth` query param). Enables single-call traversal from topic summaries through session summaries down to leaf summaries and raw events.
 - **Entity synthesis briefings as enrichment job.** New `build_entity_briefs` job generates per-entity synthesis summaries for entities with 3+ linked memories. Gathers all linked memories, produces a coherent briefing via LLM (current state, key decisions, relationships, open questions), and stores as a summary with `Kind: "entity_brief"`. Incremental: skips entities whose brief is already up to date (no new linked memories since the brief was last generated). Tracks extraction metadata (`extraction_method`, `extraction_quality`, `fallback_count`) so heuristic fallback briefs are retried when LLM becomes available. Entity recall now surfaces brief descriptions for richer context. New `ListMemoriesByEntityID` repository method added to both SQLite and Postgres adapters.
-- **Optional Hermes curated-memory parity in the repo-shipped legacy plugin.** `examples/hermes-agent/amm-legacy` can now mirror successful Hermes `memory` tool writes into AMM durable memories via `post_tool_call`, with env-driven scope/type configuration plus a local AMM-ID map and retry queue for update/delete targeting.
+- **Hermes external memory-provider example.** New `examples/hermes-agent/memory/amm/` implements the Hermes `memory.provider` interface with ambient recall injection, per-turn event sync, and curated-memory mirroring. Recommended for newer Hermes builds that support `memory.provider: amm` in `config.yaml`.
+- **Optional Hermes curated-memory parity in the legacy hook plugin.** `examples/hermes-agent/amm-legacy` (renamed from `amm-memory`) can now mirror successful Hermes `memory` tool writes into AMM durable memories via `post_tool_call`, with env-driven scope/type configuration plus a local AMM-ID map and retry queue for update/delete targeting. Retained as fallback for older Hermes builds.
 
 ### Fixed
 
@@ -257,7 +260,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background maintenance pipeline with reflect, compression, indexing, contradiction detection, graph rebuild, lifecycle review, and related worker jobs.
 - Helm chart and sidecar deployment artifacts for Kubernetes-based installations.
 
-[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.3.2...HEAD
+[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.4.0...HEAD
+[1.4.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.4.0
 [1.3.2]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.3.2
 [1.3.1]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.3.1
 [1.3.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.3.0
