@@ -3,7 +3,7 @@
   "info": {
     "title": "AMM \u2014 Agent Memory Manager",
     "description": "REST API for the Agent Memory Manager. Provides durable, structured memory for AI agents.",
-    "version": "1.4.0"
+    "version": "1.4.1"
   },
   "tags": [
     {

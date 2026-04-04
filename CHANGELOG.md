@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-04-04
+
+### Fixed
+
+- **Include `curated-sync.ts` in OpenClaw npm package.** `src/curated-sync.ts` was missing from the `files` array in `examples/openclaw/package.json`, causing `Cannot find module './src/curated-sync.ts'` on plugin load when curated memory mirroring was enabled.
+
 ## [1.4.0] - 2026-04-04
 
 ### Added
@@ -268,7 +274,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background maintenance pipeline with reflect, compression, indexing, contradiction detection, graph rebuild, lifecycle review, and related worker jobs.
 - Helm chart and sidecar deployment artifacts for Kubernetes-based installations.
 
-[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.4.0...HEAD
+[unreleased]: https://github.com/bonztm/agent-memory-manager/compare/1.4.1...HEAD
+[1.4.1]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.4.1
 [1.4.0]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.4.0
 [1.3.2]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.3.2
 [1.3.1]: https://github.com/bonztm/agent-memory-manager/releases/tag/1.3.1
