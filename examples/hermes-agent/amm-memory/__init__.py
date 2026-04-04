@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -314,17 +315,22 @@ def _save_sync_state(state: dict[str, Any]) -> None:
 def _append_sync_queue(operation: dict[str, Any]) -> None:
     path = _queue_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
     line = json.dumps(operation, ensure_ascii=False, sort_keys=True)
-    lines: list[str] = []
-    if path.exists():
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            lines = []
-    lines.append(line)
-    if len(lines) > _MAX_QUEUE_LINES:
-        lines = lines[-_MAX_QUEUE_LINES:]
-    _atomic_write(path, "\n".join(lines) + "\n")
+
+    with lock_path.open("a+", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        lines: list[str] = []
+        if path.exists():
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeDecodeError):
+                lines = []
+        lines.append(line)
+        if len(lines) > _MAX_QUEUE_LINES:
+            lines = lines[-_MAX_QUEUE_LINES:]
+        _atomic_write(path, "\n".join(lines) + "\n")
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 def _record_fingerprint(target: str, content: str, scope: str, project_id: str) -> str:
@@ -428,6 +434,15 @@ def _remember_memory(target: str, content: str, project_id: str) -> str:
     return _extract_memory_id(_run_amm(command, timeout=10))
 
 
+def _status_code_lt_400(result: dict[str, Any]) -> bool:
+    if not result:
+        return False
+    try:
+        return int(result.get("status", 0)) < 400
+    except (TypeError, ValueError):
+        return False
+
+
 def _update_memory(memory_id: str, target: str, content: str, project_id: str) -> bool:
     scope = _curated_scope(target, project_id)
     payload = {
@@ -440,7 +455,7 @@ def _update_memory(memory_id: str, target: str, content: str, project_id: str) -
 
     if _use_http_api():
         result = _request_json("PATCH", f"/memories/{memory_id}", payload, timeout=10)
-        return bool(result) and int(result.get("status", 0)) < 400
+        return _status_code_lt_400(result)
 
     command = [
         "memory",
@@ -463,7 +478,7 @@ def _update_memory(memory_id: str, target: str, content: str, project_id: str) -
 def _forget_memory(memory_id: str) -> bool:
     if _use_http_api():
         result = _request_json("DELETE", f"/memories/{memory_id}", timeout=10)
-        return bool(result) and int(result.get("status", 0)) < 400
+        return _status_code_lt_400(result)
     return bool(_run_amm(["forget", memory_id], timeout=10))
 
 
