@@ -105,11 +105,15 @@ class AMMMemoryProvider(MemoryProvider):
             "- **Built-in memory** (MEMORY.md/USER.md): small, always visible. "
             "Keep only high-frequency context here — active preferences, current constraints, "
             "things you need on every turn.\n"
-            "- **AMM** (via amm_recall/amm_remember MCP tools): unlimited durable memory. "
+            "- **AMM** (via MCP tools or CLI): unlimited durable memory. "
             "Relevant AMM memories are automatically surfaced each turn. "
-            "Use amm_remember for detailed decisions, procedures, project context, and "
-            "anything too large for built-in memory. Use amm_recall for targeted search "
+            "Use amm_remember (MCP) or `amm remember` (CLI) for detailed decisions, "
+            "procedures, project context, and anything too large for built-in memory. "
+            "Use amm_recall (MCP) or `amm recall` (CLI) for targeted search "
             "when you need specific history.\n"
+            "When a recalled memory looks relevant but the summary is too thin to act on, "
+            "use amm_expand (MCP) or `amm expand` (CLI) with max_depth 1-2 to get the "
+            "full context — linked entities, related decisions, and child summaries.\n"
             "When built-in memory is full, save detail to AMM rather than compressing "
             "or discarding entries. Let built-in memory stay lean."
             + project_hint
@@ -341,7 +345,7 @@ class AMMMemoryProvider(MemoryProvider):
             items = data.get("items", [])
         if not isinstance(items, list) or not items:
             return ""
-        lines = ["amm ambient recall:"]
+        lines = ["amm ambient memory recall:"]
         for item in items:
             if not isinstance(item, dict):
                 continue

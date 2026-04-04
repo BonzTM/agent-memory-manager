@@ -236,7 +236,7 @@ def _render_recall(recall_result: dict[str, Any]) -> str | None:
     if not items:
         return None
 
-    lines = ["amm ambient recall:"]
+    lines = ["amm ambient memory recall:"]
     for item in items[: _recall_limit()]:
         kind = item.get("kind", "item")
         desc = item.get("tight_description", "")

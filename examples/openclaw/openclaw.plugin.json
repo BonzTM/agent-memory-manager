@@ -33,6 +33,37 @@
         "default": 5,
         "minimum": 1,
         "maximum": 25
+      },
+      "syncCuratedMemory": {
+        "type": "boolean",
+        "description": "Enable curated memory mirroring from MEMORY.md/USER.md to AMM durable memories.",
+        "default": false
+      },
+      "curatedProjectId": {
+        "type": "string",
+        "description": "Override project ID for curated memory writes. Falls back to projectId."
+      },
+      "memoryScope": {
+        "type": "string",
+        "description": "AMM scope for MEMORY.md entries.",
+        "default": "project",
+        "enum": ["global", "project"]
+      },
+      "userScope": {
+        "type": "string",
+        "description": "AMM scope for USER.md entries.",
+        "default": "global",
+        "enum": ["global", "project"]
+      },
+      "memoryType": {
+        "type": "string",
+        "description": "AMM memory type for MEMORY.md entries.",
+        "default": "fact"
+      },
+      "userType": {
+        "type": "string",
+        "description": "AMM memory type for USER.md entries.",
+        "default": "preference"
       }
     }
   }

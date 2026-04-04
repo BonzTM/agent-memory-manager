@@ -70,9 +70,11 @@ See [`examples/openclaw/README.md`](../examples/openclaw/README.md) for all inst
 ## What the Plugin Does
 
 1. **Ambient recall injection** — the `before_prompt_build` hook queries amm and returns a `prependContext` block with relevant memories before the LLM sees the prompt
-2. **Event capture** — plugin-registered hooks capture `message:preprocessed`, `message:sent`, `tool:called`, and `tool:completed` events into amm history
-3. **MCP tools** — `amm-mcp` configured as an MCP server gives agents `amm_recall`, `amm_remember`, `amm_expand`, and 30+ other tools
-4. **Dual transport** — local `amm` binary (default) or HTTP API via `AMM_API_URL`
+2. **Two-tier memory guidance** — system prompt block teaches the agent to use built-in memory (MEMORY.md/USER.md) as a lean scratchpad and AMM (via MCP tools or CLI) as unlimited long-term storage, with `amm_expand` / `amm expand` with `max_depth` for deeper context
+3. **Event capture** — plugin-registered hooks capture `message:preprocessed`, `message:sent`, `tool:called`, and `tool:completed` events into amm history
+4. **Optional curated memory mirroring** — diffs MEMORY.md/USER.md on each `agent_end` and mirrors adds/removes/replacements to AMM durable memories with in-place PATCH for replacements
+5. **MCP tools** — `amm-mcp` configured as an MCP server gives agents `amm_recall`, `amm_remember`, `amm_expand`, and 30+ other tools
+6. **Dual transport** — local `amm` binary (default) or HTTP API via `AMM_API_URL`
 
 The plugin is **hot-path only**. It does not run maintenance jobs.
 
@@ -91,15 +93,17 @@ The plugin is **hot-path only**. It does not run maintenance jobs.
 
 ```text
 examples/openclaw/
-  openclaw.plugin.json          # Native plugin manifest (kind: "memory")
+  openclaw.plugin.json          # Native plugin manifest
   package.json                  # Published as @bonztm/amm on npm
-  index.ts                      # definePluginEntry() — tools + hooks
+  index.ts                      # Plugin entry point — hooks + system prompt
   install.sh                    # One-command local installer
   src/
     config.ts                   # Config resolution (plugin config + env)
     transport.ts                # Dual transport (binary CLI / HTTP API)
+    transport-http.ts           # HTTP-only transport (npm package)
     recall.ts                   # Ambient recall query + rendering
     capture.ts                  # Event normalization + ingestion
+    curated-sync.ts             # Curated memory snapshot + reconciliation
   openclaw.json                 # Example OpenClaw config fragment
 ```
 
@@ -107,11 +111,13 @@ examples/openclaw/
 
 The plugin registers hooks in its `register()` function:
 
-- `before_prompt_build` — extracts the user query, ingests it as a `message_user` event, runs ambient recall, and returns `{ prependContext: "<amm-context>...</amm-context>" }`
+- `before_prompt_build` — builds two-tier memory system prompt, runs ambient recall, and returns `{ prependContext: "<amm-context>...</amm-context>" }`
 - `message:preprocessed` — captures enriched inbound messages
 - `message:sent` — captures outbound assistant messages
 - `tool:called` — captures tool invocations with name and arguments
 - `tool:completed` — captures tool results
+- `before_agent_start` — snapshots MEMORY.md/USER.md for curated memory sync (when enabled)
+- `agent_end` — diffs curated files and mirrors changes to AMM (when enabled)
 
 ### Ambient Recall Flow
 
@@ -204,6 +210,13 @@ Plugin config (`openclaw.json`) takes precedence over environment variables:
 | `apiKey` | `AMM_API_KEY` | unset | Bearer token for HTTP API |
 | `projectId` | `AMM_PROJECT_ID` | unset | Stable project identifier |
 | `recallLimit` | `AMM_OPENCLAW_RECALL_LIMIT` | `5` | Max recall items per turn |
+| `syncCuratedMemory` | `AMM_OPENCLAW_SYNC_CURATED_MEMORY` | `false` | Enable curated memory mirroring |
+| `curatedProjectId` | `AMM_OPENCLAW_CURATED_PROJECT_ID` | `projectId` | Override project ID for curated memory writes |
+| `memoryScope` | `AMM_OPENCLAW_MEMORY_SCOPE` | `project` | AMM scope for MEMORY.md entries |
+| `userScope` | `AMM_OPENCLAW_USER_SCOPE` | `global` | AMM scope for USER.md entries |
+| `memoryType` | `AMM_OPENCLAW_MEMORY_TYPE` | `fact` | AMM memory type for MEMORY.md entries |
+| `userType` | `AMM_OPENCLAW_USER_TYPE` | `preference` | AMM memory type for USER.md entries |
+| `stateDir` | `AMM_OPENCLAW_STATE_DIR` | `~/.openclaw/state/amm-plugin` | Directory for sync state files |
 
 ## Installation
 

@@ -26,12 +26,14 @@ try:
     data = json.load(sys.stdin)
     items = data.get("result", {}).get("items", [])
     if items:
-        print("amm ambient recall:")
+        print("amm ambient memory recall (queried from session context — use amm_expand or `amm expand` with --max-depth 1 on any item ID for full context):")
         for item in items[:5]:
             kind = item.get("kind", "")
             desc = item.get("tight_description", "")
             score = item.get("score", 0)
-            print(f"- [{kind}] {desc} (score: {score:.2f})")
+            item_id = item.get("id", "")
+            id_suffix = f" [{item_id}]" if item_id else ""
+            print(f"- [{kind}] {desc} (score: {score:.2f}){id_suffix}")
 except Exception:
     pass
 ' 2>/dev/null)

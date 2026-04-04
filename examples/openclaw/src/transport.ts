@@ -161,6 +161,88 @@ export async function memoryGet(
   return runAmmJson(config, ["get-memory", memoryId, "--json"]);
 }
 
+/** Create a new memory and return the result (contains id). */
+export async function rememberMemory(
+  config: AmmConfig,
+  payload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (useHttpApi(config)) {
+    return postJson(config, "/memories", payload);
+  }
+  const args = [
+    "remember",
+    "--type", String(payload["type"] ?? "fact"),
+    "--scope", String(payload["scope"] ?? "project"),
+    "--body", String(payload["body"] ?? ""),
+    "--tight", String(payload["tight_description"] ?? ""),
+    "--subject", String(payload["subject"] ?? ""),
+  ];
+  if (payload["project_id"]) args.push("--project", String(payload["project_id"]));
+  return runAmmJson(config, args);
+}
+
+/** Update an existing memory by ID. Returns true on success. */
+export async function updateMemory(
+  config: AmmConfig,
+  memoryId: string,
+  payload: Record<string, unknown>,
+): Promise<boolean> {
+  if (useHttpApi(config)) {
+    const url = `${config.apiUrl}/memories/${encodeURIComponent(memoryId)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(url, {
+        method: "PATCH",
+        headers: httpHeaders(config),
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const args = [
+    "memory", "update", memoryId,
+    "--body", String(payload["body"] ?? ""),
+    "--tight", String(payload["tight_description"] ?? ""),
+    "--type", String(payload["type"] ?? "fact"),
+    "--scope", String(payload["scope"] ?? "project"),
+    "--status", String(payload["status"] ?? "active"),
+  ];
+  const result = runAmm(config, args);
+  return result.ok;
+}
+
+/** Delete a memory by ID. Returns true on success. */
+export async function forgetMemory(
+  config: AmmConfig,
+  memoryId: string,
+): Promise<boolean> {
+  if (useHttpApi(config)) {
+    const url = `${config.apiUrl}/memories/${encodeURIComponent(memoryId)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(url, {
+        method: "DELETE",
+        headers: httpHeaders(config),
+        signal: controller.signal,
+      });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const result = runAmm(config, ["forget", memoryId]);
+  return result.ok;
+}
+
 /** Run ambient recall and return the raw result object. */
 export async function recall(
   config: AmmConfig,

@@ -38,12 +38,14 @@ def render_additional_context(recall_result: dict) -> str | None:
     items = recall_result.get("result", {}).get("items", [])
     if not items:
         return None
-    lines = ["amm ambient recall:"]
+    lines = ["amm ambient memory recall (queried from the user's prompt — use amm_expand or `amm expand` with --max-depth 1 on any item ID for full context):"]
     for item in items[:5]:
         kind = item.get("kind", "item")
         desc = item.get("tight_description", "")
         score = item.get("score", 0)
-        lines.append(f"- [{kind}] {desc} (score: {score:.2f})")
+        item_id = item.get("id", "")
+        id_suffix = f" [{item_id}]" if item_id else ""
+        lines.append(f"- [{kind}] {desc} (score: {score:.2f}){id_suffix}")
     return "\n".join(lines)
 
 

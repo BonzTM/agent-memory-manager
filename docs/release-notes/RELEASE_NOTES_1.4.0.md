@@ -2,7 +2,7 @@
 
 ## Release Summary
 
-amm 1.4.0 is a quality-focused release that significantly tightens the memory extraction pipeline, adds knowledge graph enrichment, and expands the Hermes integration surface. The main themes are: extraction prompts are overhauled for fewer, higher-quality memories with better scope inference and confidence calibration; a new `build_entity_briefs` enrichment job synthesizes per-entity briefings from linked memories; `Expand` supports recursive multi-level traversal via `max_depth`; the compression pipeline replaces its 24h time-based cooldown with a responsive event-count threshold; and Hermes gains a first-class memory-provider example alongside the hardened legacy hook plugin.
+amm 1.4.0 is a quality-focused release that significantly tightens the memory extraction pipeline, adds knowledge graph enrichment, and expands both the Hermes and OpenClaw integration surfaces. The main themes are: extraction prompts are overhauled for fewer, higher-quality memories with better scope inference and confidence calibration; a new `build_entity_briefs` enrichment job synthesizes per-entity briefings from linked memories; `Expand` supports recursive multi-level traversal via `max_depth`; the compression pipeline replaces its 24h time-based cooldown with a responsive event-count threshold; Hermes gains a first-class memory-provider example; and both Hermes and OpenClaw plugins gain curated memory mirroring and two-tier memory system prompt guidance.
 
 ## Added
 
@@ -13,6 +13,10 @@ amm 1.4.0 is a quality-focused release that significantly tightens the memory ex
 - **Hermes external memory-provider example.** New `examples/hermes-agent/memory/amm/` implements the Hermes `memory.provider` interface with ambient recall injection, per-turn event sync, and curated-memory mirroring. Recommended for newer Hermes builds that support `memory.provider: amm` in `config.yaml`.
 
 - **Optional Hermes curated-memory parity in the legacy hook plugin.** `examples/hermes-agent/amm-legacy` (renamed from `amm-memory`) can now mirror successful Hermes `memory` tool writes into AMM durable memories via `post_tool_call`, with env-driven scope/type configuration plus a local AMM-ID map and retry queue for update/delete targeting. Retained as fallback for older Hermes builds.
+
+- **Optional OpenClaw curated-memory mirroring.** The OpenClaw native plugin can now mirror MEMORY.md/USER.md writes to AMM durable memories via `agent_end` diffing. Snapshots curated files at session start, diffs after each turn, and mirrors adds/removes/replacements with in-place PATCH for replacements. Configurable via `syncCuratedMemory`, `curatedProjectId`, scope/type settings, and `stateDir`.
+
+- **Two-tier memory system prompt for Hermes and OpenClaw.** Both plugins now inject system prompt guidance teaching the agent to use built-in memory (MEMORY.md/USER.md) as a lean scratchpad and AMM (via MCP tools or CLI) as unlimited long-term storage, with `amm_expand` / `amm expand` with `max_depth` for deeper context on thin recall items.
 
 ## Fixed
 
@@ -68,6 +72,7 @@ amm 1.4.0 is a quality-focused release that significantly tightens the memory ex
 - `compress_min_events` is a new configuration option (config.json or `AMM_COMPRESS_MIN_EVENTS` env var, default: `compress_chunk_size * 5`). If you previously relied on the 24h cooldown, compression will now trigger more responsively based on pending event count.
 - Extraction prompts have been significantly tightened. Expect fewer memories per session but with higher quality, better scope inference, and more accurate confidence scores. No configuration changes needed.
 - Hermes users on newer builds should migrate from the legacy hook plugin (`amm-legacy/`) to the memory-provider example (`memory/amm/`). Set `memory.provider: amm` in your Hermes `config.yaml`. The legacy plugin continues to work but is no longer the recommended path.
+- OpenClaw users can enable curated-memory mirroring by setting `syncCuratedMemory: true` in plugin config or `AMM_OPENCLAW_SYNC_CURATED_MEMORY=true`. Scopes and memory types are configurable via `memoryScope`, `userScope`, `memoryType`, `userType`. Both Hermes and OpenClaw plugins now automatically inject two-tier memory guidance into the system prompt.
 
 ## Deployment and Distribution
 

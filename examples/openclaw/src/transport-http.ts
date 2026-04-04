@@ -124,3 +124,59 @@ export async function memoryGet(
 ): Promise<Record<string, unknown>> {
   return getJson(config, `/memories/${encodeURIComponent(memoryId)}`);
 }
+
+/** Create a new memory and return the result (contains id). */
+export async function rememberMemory(
+  config: AmmConfig,
+  payload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  return postJson(config, "/memories", payload);
+}
+
+/** Update an existing memory by ID. Returns true on success. */
+export async function updateMemory(
+  config: AmmConfig,
+  memoryId: string,
+  payload: Record<string, unknown>,
+): Promise<boolean> {
+  if (!config.apiUrl) return false;
+  const url = `${config.apiUrl}/memories/${encodeURIComponent(memoryId)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(url, {
+      method: "PATCH",
+      headers: httpHeaders(config),
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Delete a memory by ID. Returns true on success. */
+export async function forgetMemory(
+  config: AmmConfig,
+  memoryId: string,
+): Promise<boolean> {
+  if (!config.apiUrl) return false;
+  const url = `${config.apiUrl}/memories/${encodeURIComponent(memoryId)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(url, {
+      method: "DELETE",
+      headers: httpHeaders(config),
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}

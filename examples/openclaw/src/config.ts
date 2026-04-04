@@ -17,6 +17,20 @@ export interface AmmConfig {
   projectId: string;
   /** Maximum number of recall items to render in the context block. */
   recallLimit: number;
+  /** Enable curated memory mirroring from MEMORY.md/USER.md to AMM. */
+  syncCuratedMemory: boolean;
+  /** Override project ID for curated memory writes. Falls back to projectId. */
+  curatedProjectId: string;
+  /** AMM scope for MEMORY.md entries. */
+  memoryScope: string;
+  /** AMM scope for USER.md entries. */
+  userScope: string;
+  /** AMM memory type for MEMORY.md entries. */
+  memoryType: string;
+  /** AMM memory type for USER.md entries. */
+  userType: string;
+  /** Directory for curated memory sync state files. */
+  stateDir: string;
 }
 
 const DEFAULT_AMM_BIN = "amm";
@@ -43,6 +57,11 @@ function clampRecallLimit(raw: unknown): number {
 export function resolveConfig(pluginConfig?: Record<string, unknown>): AmmConfig {
   const cfg = pluginConfig ?? {};
 
+  const projectId =
+    asString(cfg["projectId"]) ??
+    process.env.AMM_PROJECT_ID ??
+    "";
+
   return {
     ammBin:
       asString(cfg["ammBin"]) ??
@@ -61,13 +80,36 @@ export function resolveConfig(pluginConfig?: Record<string, unknown>): AmmConfig
       asString(cfg["apiKey"]) ??
       process.env.AMM_API_KEY ??
       "",
-    projectId:
-      asString(cfg["projectId"]) ??
-      process.env.AMM_PROJECT_ID ??
-      "",
+    projectId,
     recallLimit: clampRecallLimit(
       cfg["recallLimit"] ?? process.env.AMM_OPENCLAW_RECALL_LIMIT ?? DEFAULT_RECALL_LIMIT,
     ),
+    syncCuratedMemory:
+      envBool(asString(cfg["syncCuratedMemory"]) ?? process.env.AMM_OPENCLAW_SYNC_CURATED_MEMORY),
+    curatedProjectId:
+      asString(cfg["curatedProjectId"]) ??
+      process.env.AMM_OPENCLAW_CURATED_PROJECT_ID ??
+      projectId,
+    memoryScope:
+      asString(cfg["memoryScope"]) ??
+      process.env.AMM_OPENCLAW_MEMORY_SCOPE ??
+      "project",
+    userScope:
+      asString(cfg["userScope"]) ??
+      process.env.AMM_OPENCLAW_USER_SCOPE ??
+      "global",
+    memoryType:
+      asString(cfg["memoryType"]) ??
+      process.env.AMM_OPENCLAW_MEMORY_TYPE ??
+      "fact",
+    userType:
+      asString(cfg["userType"]) ??
+      process.env.AMM_OPENCLAW_USER_TYPE ??
+      "preference",
+    stateDir:
+      asString(cfg["stateDir"]) ??
+      process.env.AMM_OPENCLAW_STATE_DIR ??
+      `${process.env.HOME ?? "~"}/.openclaw/state/amm-plugin`,
   };
 }
 
@@ -78,4 +120,9 @@ export function useHttpApi(config: AmmConfig): boolean {
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function envBool(value: string | undefined | null): boolean {
+  if (!value) return false;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }

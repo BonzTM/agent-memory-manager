@@ -195,7 +195,7 @@ export const AMMMemoryPlugin = async ({ project }) => {
     tool: [
       {
         name: "memory_search",
-        description: "Search durable memories by natural language query. Returns scored results with type, subject, body, and tight_description.",
+        description: "Search durable memories by natural language query. Returns scored results with type, subject, body, and tight_description. Use amm_expand or `amm expand --max-depth 1` on a result ID for full context including linked entities and child summaries.",
         parameters: {
           type: "object",
           properties: {

@@ -39,7 +39,7 @@ export function renderRecall(raw: Record<string, unknown>, limit: number): strin
   const items = extractItems(raw);
   if (items.length === 0) return undefined;
 
-  const lines = ["amm ambient recall:"];
+  const lines = ["amm ambient memory recall:"];
   for (const item of items.slice(0, limit)) {
     const desc = item.tight_description;
     if (!desc) continue;
