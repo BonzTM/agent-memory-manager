@@ -1,6 +1,14 @@
 # Hermes-Agent Integration Guide
 
-Hermes and AMM now fit together in two clean shapes: the newer external memory-provider architecture, and the older MCP + hook-plugin pattern kept for backwards compatibility. Optional helper scripts still cover shell-driven capture and warm-path maintenance. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md).
+Hermes and AMM now fit together in two clean shapes: the newer external memory-provider architecture, and the older MCP + hook-plugin pattern kept for backwards compatibility. Optional helper scripts still cover shell-driven capture and warm-path maintenance.
+
+> **Quick links**
+>
+> - [Example files](../examples/hermes-agent/) — memory provider, legacy plugin, helper scripts
+> - [Agent Onboarding](agent-onboarding.md) — database init, LLM config, worker scheduling
+> - [HTTP API Reference](http-api-reference.md) — REST endpoints for API mode
+> - [MCP Reference](mcp-reference.md) — tool definitions and schemas
+> - [API-mode examples](../examples/api-mode/) — HTTP transport patterns
 
 - **Hermes-Agent** owns the runtime, plugin loading, hooks, scheduling, and agent behavior.
 - **AMM** owns durable history, recall, summaries, and maintenance jobs.

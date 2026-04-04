@@ -2,6 +2,14 @@
 
 AMM (Agent Memory Manager) integrates with agent runtimes through five primary mechanisms. Event capture works without an LLM, but automatic memory extraction from session narratives requires a configured LLM endpoint (`AMM_SUMMARIZER_ENDPOINT`). Without an LLM, use explicit `amm remember` calls for durable memory.
 
+> **Quick links**
+>
+> - [Agent Onboarding](agent-onboarding.md) — step-by-step setup for any runtime
+> - [Claude Code](claude-code-integration.md) | [Codex](codex-integration.md) | [OpenCode](opencode-integration.md) | [OpenClaw](openclaw-integration.md) | [Hermes](hermes-agent-integration.md) — runtime-specific guides
+> - [HTTP API Reference](http-api-reference.md) — REST endpoints
+> - [MCP Reference](mcp-reference.md) — tool definitions and schemas
+> - [Getting Started](getting-started.md) — install from source or release
+
 1. **Hooks**: Automatic capture of interactions (events in, ambient recall out).
 2. **MCP Tools**: Explicit agent-initiated memory management for MCP-compatible runtimes.
 3. **Local Plugins**: Runtime-native plugins that can inject per-turn context and capture events without patching core runtime code.

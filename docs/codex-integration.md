@@ -1,6 +1,16 @@
 # Codex Integration Guide
 
-This guide shows how to use AMM with Codex without pretending AMM owns the Codex runtime. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md). The integration boundary is simple:
+This guide shows how to use AMM with Codex without pretending AMM owns the Codex runtime.
+
+> **Quick links**
+>
+> - [Example files](../examples/codex/) — hook scripts, MCP config, hooks.json
+> - [Agent Onboarding](agent-onboarding.md) — database init, LLM config, worker scheduling
+> - [HTTP API Reference](http-api-reference.md) — REST endpoints for API mode
+> - [MCP Reference](mcp-reference.md) — tool definitions and schemas
+> - [API-mode examples](../examples/api-mode/) — HTTP transport patterns
+
+The integration boundary is simple:
 
 - Codex owns prompt execution, hook registration, and context injection.
 - amm owns durable storage, recall, and maintenance jobs through `amm` and `amm-mcp`.

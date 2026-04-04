@@ -1,6 +1,14 @@
 # OpenClaw Integration Guide
 
-OpenClaw is the runtime; amm is the memory substrate. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md).
+OpenClaw is the runtime; amm is the memory substrate.
+
+> **Quick links**
+>
+> - [Example files](../examples/openclaw/) — plugin source, install script, config fragment
+> - [Agent Onboarding](agent-onboarding.md) — database init, LLM config, worker scheduling
+> - [HTTP API Reference](http-api-reference.md) — REST endpoints for API mode
+> - [MCP Reference](mcp-reference.md) — tool definitions and schemas
+> - [API-mode examples](../examples/api-mode/) — HTTP transport patterns
 
 ## Install
 

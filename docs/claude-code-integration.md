@@ -1,6 +1,14 @@
 # Claude Code Integration Guide
 
-Claude Code is one of several supported runtimes. amm is the memory substrate; Claude Code owns the runtime. For HTTP API mode, see [API-mode examples](../examples/api-mode/) and [HTTP API Reference](http-api-reference.md).
+Claude Code is one of several supported runtimes. amm is the memory substrate; Claude Code owns the runtime.
+
+> **Quick links**
+>
+> - [Example files](../examples/claude-code/) — hook scripts, MCP config, settings.json
+> - [Agent Onboarding](agent-onboarding.md) — database init, LLM config, worker scheduling
+> - [HTTP API Reference](http-api-reference.md) — REST endpoints for API mode
+> - [MCP Reference](mcp-reference.md) — tool definitions and schemas
+> - [API-mode examples](../examples/api-mode/) — HTTP transport patterns
 
 ## Responsibility Split
 
