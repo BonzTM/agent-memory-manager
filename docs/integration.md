@@ -124,7 +124,7 @@ If your runtime delegates `expand` calls, it must pass `delegation_depth` and in
 - First delegated expand call: `delegation_depth = 1`
 - Continue incrementing for each nested delegation hop
 
-The current example integrations (`examples/opencode`, `examples/openclaw`, `examples/codex`, `examples/hermes-agent/amm-memory`) do not issue `expand` calls today. When adding expand usage to those runtimes, include `delegation_depth` from the start.
+The current example integrations (`examples/opencode`, `examples/openclaw`, `examples/codex`, `examples/hermes-agent/amm-legacy`) do not issue `expand` calls today. When adding expand usage to those runtimes, include `delegation_depth` from the start.
 
 ---
 
@@ -143,3 +143,4 @@ When standard vector or keyword recall isn't enough, the `grep` tool searches ra
 - **CLI**: `amm grep "pattern" --session-id <id> --project-id <id> --group-limit <n> --matches-per-group <n>`
 - **MCP**: `amm_grep`
 - **HTTP**: `GET /v1/grep`
+

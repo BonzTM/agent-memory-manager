@@ -111,21 +111,21 @@ Older Hermes plugin installs still support the hook-based directory plugin under
 
 This repo still ships the legacy Hermes directory plugin example at:
 
-- [`examples/hermes-agent/amm-memory/plugin.yaml`](../examples/hermes-agent/amm-memory/plugin.yaml)
-- [`examples/hermes-agent/amm-memory/__init__.py`](../examples/hermes-agent/amm-memory/__init__.py)
+- [`examples/hermes-agent/amm-legacy/plugin.yaml`](../examples/hermes-agent/amm-legacy/plugin.yaml)
+- [`examples/hermes-agent/amm-legacy/__init__.py`](../examples/hermes-agent/amm-legacy/__init__.py)
 
 Install it globally:
 
 ```bash
 mkdir -p ~/.hermes/plugins
-cp -R examples/hermes-agent/amm-memory ~/.hermes/plugins/amm-memory
+cp -R examples/hermes-agent/amm-legacy ~/.hermes/plugins/amm-legacy
 ```
 
 Or install it project-locally:
 
 ```bash
 mkdir -p ./.hermes/plugins
-cp -R examples/hermes-agent/amm-memory ./.hermes/plugins/amm-memory
+cp -R examples/hermes-agent/amm-legacy ./.hermes/plugins/amm-legacy
 HERMES_ENABLE_PROJECT_PLUGINS=true hermes
 ```
 
@@ -164,7 +164,7 @@ Optional curated-memory parity settings:
 - `AMM_HERMES_USER_SCOPE` sets the AMM scope for Hermes `target="user"` entries (`global` by default)
 - `AMM_HERMES_MEMORY_TYPE` sets the AMM memory type for Hermes `target="memory"` entries (`fact` by default)
 - `AMM_HERMES_USER_TYPE` sets the AMM memory type for Hermes `target="user"` entries (`preference` by default)
-- `AMM_HERMES_STATE_DIR` overrides the plugin state directory (defaults to `~/.hermes/state/amm-memory`)
+- `AMM_HERMES_STATE_DIR` overrides the plugin state directory (defaults to `~/.hermes/state/amm-legacy`)
 
 Important:
 
@@ -247,7 +247,7 @@ If you want a Hermes-oriented instruction block, use something like this:
 - `amm-mcp` starts successfully with the configured `AMM_DB_PATH`
 - Hermes can see and call the `amm` MCP server
 - `python3 -m py_compile examples/hermes-agent/memory/amm/__init__.py` succeeds on newer-provider installs
-- `python3 -m py_compile examples/hermes-agent/amm-memory/__init__.py` succeeds on legacy-hook installs
+- `python3 -m py_compile examples/hermes-agent/amm-legacy/__init__.py` succeeds on legacy-hook installs
 - Hermes is configured with `memory.provider: amm` when using the new provider shape
 - a sample Hermes turn produces `message_user` and `message_assistant` events in AMM history
 - if `AMM_HERMES_SYNC_CURATED_MEMORY=true`, a successful built-in Hermes memory write creates mirrored AMM durable memory on the configured path
@@ -261,3 +261,4 @@ If you want a Hermes-oriented instruction block, use something like this:
 - a built-in AMM scheduler
 - a one-size-fits-all Hermes config tree
 - automatic maintenance execution without an external trigger
+

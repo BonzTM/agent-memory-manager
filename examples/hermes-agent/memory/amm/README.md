@@ -44,4 +44,5 @@ Set `memory.provider: amm` in Hermes config, then use env vars as needed:
 
 ## Legacy plugin
 
-For older Hermes builds that do not support memory providers yet, keep using the legacy hook plugin under `examples/hermes-agent/amm-memory/`.
+For older Hermes builds that do not support memory providers yet, keep using the legacy hook plugin under `examples/hermes-agent/amm-legacy/`.
+
