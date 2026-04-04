@@ -35,7 +35,7 @@ _AMM_PROJECT_ID = "AMM_PROJECT_ID"
 _AMM_CURATED_PROJECT_ID = "AMM_HERMES_CURATED_PROJECT_ID"
 _AMM_RECALL_LIMIT = "AMM_HERMES_RECALL_LIMIT"
 _AMM_API_URL = "AMM_API_URL"
-_AMM_API_KEY = "AMM_API_KEY"
+_AMM_API_KEY="***"
 
 _AMM_SYNC_CURATED_MEMORY = "AMM_HERMES_SYNC_CURATED_MEMORY"
 _AMM_SYNC_STATE_DIR = "AMM_HERMES_STATE_DIR"
@@ -211,7 +211,7 @@ class AMMMemoryProvider(MemoryProvider):
 
     def _http_headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
-        api_key = os.environ.get(_AMM_API_KEY, "").strip()
+        api_key=os.env...KEY, "").strip()
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         return headers
@@ -269,7 +269,7 @@ class AMMMemoryProvider(MemoryProvider):
             "source_system": _SOURCE_SYSTEM,
             "kind": kind,
             "surface": "hermes-agent",
-            "agent_id": actor_type,
+            "actor_type": actor_type,
             "session_id": session_id,
             "content": content,
             "occurred_at": self._now_rfc3339(),
@@ -277,42 +277,25 @@ class AMMMemoryProvider(MemoryProvider):
         if project_id:
             event["project_id"] = project_id
         if metadata:
-            event["metadata"] = metadata
+            event["metadata"] = {k: str(v) for k, v in metadata.items()}
         return event
 
     def _ingest_event(self, event: Dict[str, Any]) -> None:
         if self._use_http_api():
             self._post_json("/events", event, timeout=10)
             return
-        command = [
-            "ingest",
-            "--kind", str(event.get("kind", "message_unknown")),
-            "--source", _SOURCE_SYSTEM,
-            "--surface", str(event.get("surface", "hermes-agent")),
-            "--agent", str(event.get("agent_id", "agent")),
-            "--occurred-at", str(event.get("occurred_at", self._now_rfc3339())),
-            "--content-file",
-        ]
-        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
-            handle.write(str(event.get("content", "")))
-            content_path = handle.name
-        command.append(content_path)
-        if event.get("session_id"):
-            command.extend(["--session", str(event["session_id"])])
-        if event.get("project_id"):
-            command.extend(["--project", str(event["project_id"])])
-        if isinstance(event.get("metadata"), dict):
-            command.extend(["--metadata", json.dumps(event["metadata"], ensure_ascii=False)])
-        try:
-            self._run_amm(command, timeout=10)
-        finally:
-            try:
-                os.unlink(content_path)
-            except OSError:
-                pass
+        self._run_amm(["ingest", "event", "--in", "-"], stdin=json.dumps(event, ensure_ascii=False), timeout=10)
 
     def _render_recall(self, data: Dict[str, Any]) -> str:
-        items = data.get("items") if isinstance(data, dict) else None
+        items: Any = []
+        if not isinstance(data, dict):
+            return ""
+        if isinstance(data.get("result"), dict):
+            items = data["result"].get("items", [])
+        elif isinstance(data.get("data"), dict):
+            items = data["data"].get("items", [])
+        else:
+            items = data.get("items", [])
         if not isinstance(items, list) or not items:
             return ""
         lines = ["amm ambient recall:"]
@@ -619,3 +602,4 @@ class AMMMemoryProvider(MemoryProvider):
 def register(ctx) -> None:
     """Register AMM as a Hermes memory provider plugin."""
     ctx.register_memory_provider(AMMMemoryProvider())
+
