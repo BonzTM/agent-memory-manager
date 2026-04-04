@@ -16,7 +16,7 @@ amm 1.4.0 is a quality-focused release that significantly tightens the memory ex
 
 - **Optional OpenClaw curated-memory mirroring.** The OpenClaw native plugin can now mirror MEMORY.md/USER.md writes to AMM durable memories via `agent_end` diffing. Snapshots curated files at session start, diffs after each turn, and mirrors adds/removes/replacements with in-place PATCH for replacements. Configurable via `syncCuratedMemory`, `curatedProjectId`, scope/type settings, and `stateDir`.
 
-- **Two-tier memory system prompt for Hermes and OpenClaw.** Both plugins now inject system prompt guidance teaching the agent to use built-in memory (MEMORY.md/USER.md) as a lean scratchpad and AMM (via MCP tools or CLI) as unlimited long-term storage, with `amm_expand` / `amm expand` with `max_depth` for deeper context on thin recall items.
+- **Two-tier memory system prompt for Hermes provider and OpenClaw.** The Hermes memory-provider example and OpenClaw plugin now inject system prompt guidance teaching the agent to use built-in memory (MEMORY.md/USER.md) as a lean scratchpad and AMM (via MCP tools or CLI) as unlimited long-term storage, with `amm_expand` / `amm expand` with `max_depth` for deeper context on thin recall items. The Hermes legacy hook plugin does not inject system prompt guidance (use the memory-provider example for this feature).
 
 ## Fixed
 
@@ -63,6 +63,8 @@ amm 1.4.0 is a quality-focused release that significantly tightens the memory ex
 - **Add retention tier guidance to lifecycle review.** `buildReviewMemoriesPrompt` now classifies memory types into three retention tiers — durable (preference, constraint, identity, relationship), standard (decision, fact, procedure), and ephemeral (open_loop, assumption, incident) — guiding the LLM to bias promote/decay/archive decisions by tier. Assumptions are now archived when confirmed or refuted.
 
 - **Replace compress_history 24h cooldown with event-count threshold.** `CompressHistory` no longer uses a time-based cooldown gate. Instead it skips when fewer than `compress_min_events` events are pending past the frontier (default: `compress_chunk_size * 5`, i.e. 50 events). Configurable via `compress_min_events` in config.json or `AMM_COMPRESS_MIN_EVENTS` env var.
+
+- **Remove `form_episodes` from default maintenance pipeline.** `form_episodes` is no longer included in Phase 4 of `run-workers.sh` or the Helm CronJob. Narrative episodes from `ConsolidateSessions` are higher quality (as noted in 1.2.0). The job kind still exists for custom pipelines.
 
 - **Legacy Hermes plugin renamed.** `examples/hermes-agent/amm-memory/` renamed to `examples/hermes-agent/amm-legacy/`. The legacy hook plugin is retained as fallback for older Hermes builds that don't support the external memory-provider architecture.
 
