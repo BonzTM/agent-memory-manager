@@ -8,8 +8,8 @@
  * Mirrors the same pattern as the Hermes memory provider plugin.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 import { join, dirname } from "node:path";
 import type { AmmConfig } from "./config.ts";
 import {
@@ -170,6 +170,19 @@ function readCuratedEntries(target: Target): string[] {
 // Sync state persistence
 // ---------------------------------------------------------------------------
 
+function atomicWrite(path: string, content: string): void {
+  const dir = dirname(path);
+  mkdirSync(dir, { recursive: true });
+  const tmpPath = join(dir, `.${randomBytes(8).toString("hex")}.tmp`);
+  try {
+    writeFileSync(tmpPath, content, "utf-8");
+    renameSync(tmpPath, path);
+  } catch (err) {
+    try { unlinkSync(tmpPath); } catch { /* ignore cleanup failure */ }
+    throw err;
+  }
+}
+
 function loadSyncState(config: AmmConfig): SyncState {
   const path = mapPath(config);
   if (!existsSync(path)) return { records: [] };
@@ -183,14 +196,11 @@ function loadSyncState(config: AmmConfig): SyncState {
 }
 
 function saveSyncState(config: AmmConfig, state: SyncState): void {
-  const path = mapPath(config);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(state, null, 2) + "\n", "utf-8");
+  atomicWrite(mapPath(config), JSON.stringify(state, null, 2) + "\n");
 }
 
 function appendSyncQueue(config: AmmConfig, entry: QueueEntry): void {
   const path = queuePath(config);
-  mkdirSync(dirname(path), { recursive: true });
   let lines: string[] = [];
   if (existsSync(path)) {
     try {
@@ -203,7 +213,7 @@ function appendSyncQueue(config: AmmConfig, entry: QueueEntry): void {
   if (lines.length > MAX_QUEUE_LINES) {
     lines = lines.slice(-MAX_QUEUE_LINES);
   }
-  writeFileSync(path, lines.join("\n") + "\n", "utf-8");
+  atomicWrite(path, lines.join("\n") + "\n");
 }
 
 function queueFailedSync(
