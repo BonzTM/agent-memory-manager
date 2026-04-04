@@ -15,7 +15,8 @@
     "src/capture.ts",
     "src/config.ts",
     "src/recall.ts",
-    "src/transport-http.ts"
+    "src/transport-http.ts",
+    "src/curated-sync.ts"
   ],
   "scripts": {
     "install-plugin": "./install.sh"
