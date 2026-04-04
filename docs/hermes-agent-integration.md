@@ -123,14 +123,12 @@ Recommended environment:
 - `AMM_DB_PATH` for local-binary mode
 - `AMM_API_URL` to switch the plugin into REST mode against `amm-http`
 - `AMM_API_KEY` when the HTTP server requires bearer auth
-- `AMM_PROJECT_ID` for general plugin ambient recall and event scoping when you want an explicit project
 - `AMM_HERMES_CURATED_PROJECT_ID` for curated-memory parity only when you want mirrored Hermes memories pinned to a specific AMM project without changing the plugin's general project resolution
 - `AMM_HERMES_RECALL_LIMIT` to override the default recall block length (`5`)
 
 Optional curated-memory parity settings:
 
 - `AMM_HERMES_SYNC_CURATED_MEMORY=true` enables mirroring successful Hermes `memory` tool writes into AMM durable memories
-- `AMM_HERMES_CURATED_PROJECT_ID` pins curated-memory parity to a specific AMM project without affecting the plugin's general ambient recall or event project resolution
 - `AMM_HERMES_MEMORY_SCOPE` sets the AMM scope for Hermes `target="memory"` entries (`project` by default, falls back to `global` when no project can be resolved)
 - `AMM_HERMES_USER_SCOPE` sets the AMM scope for Hermes `target="user"` entries (`global` by default)
 - `AMM_HERMES_MEMORY_TYPE` sets the AMM memory type for Hermes `target="memory"` entries (`fact` by default)
