@@ -42,6 +42,12 @@ amm 1.4.0 is a quality-focused release that significantly tightens the memory ex
 
 - **Add scope field to AnalyzeEvents example JSON.** The `buildAnalyzeEventsPrompt` example now includes the `scope` field so LLMs following the example literally will emit scope hints on the primary analysis path, not just the batch extraction path.
 
+- **Fix `_AMM_API_KEY` in Hermes plugins.** Both plugins had a redacted secret instead of an env var name constant, plus a truncated `os.environ.get` reference. HTTP API auth was broken.
+
+- **Fix Hermes provider `on_memory_write` for all actions.** Now handles `add`, `replace`, and `remove` immediately with in-place PATCH for replace. Session-end reconciliation remains as safety net.
+
+- **Fix `bump-version.sh` Helm chart version drift.** Now sets chart version = app version instead of independently auto-incrementing.
+
 ## Changed
 
 - **Enforce atomic open_loop extraction.** The memory extraction prompt now requires each `open_loop` to be a single atomic item. Multi-item open loops (numbered lists, bullet lists, or "also"/"additionally" joining unrelated topics) are explicitly called out as defects. Prevents the extraction LLM from aggregating all unresolved items into a single junk-drawer memory.
@@ -67,6 +73,8 @@ amm 1.4.0 is a quality-focused release that significantly tightens the memory ex
 - **Remove `form_episodes` from default maintenance pipeline.** `form_episodes` is no longer included in Phase 4 of `run-workers.sh` or the Helm CronJob. Narrative episodes from `ConsolidateSessions` are higher quality (as noted in 1.2.0). The job kind still exists for custom pipelines.
 
 - **Legacy Hermes plugin renamed.** `examples/hermes-agent/amm-memory/` renamed to `examples/hermes-agent/amm-legacy/`. The legacy hook plugin is retained as fallback for older Hermes builds that don't support the external memory-provider architecture.
+
+- **Recall output includes item IDs and expand guidance.** All plugin recall outputs (Claude Code, Codex, OpenCode, Hermes, OpenClaw) now include memory item IDs and a hint to use `amm_expand` / `amm expand` with `max_depth` 1-2 for full context. Header clarifies memories were queried from the user's prompt.
 
 ## Admin/Operations
 

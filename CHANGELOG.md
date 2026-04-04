@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Extend intent classification for open loops and decisions.** `classifyRecallIntent` now routes "what's pending/open/unresolved" queries to facts mode and "why did we decide/what was decided" queries to episodes mode, in addition to the existing contradiction and entity routing.
 - **Clamp compress_min_events against compress_max_events.** Prevents misconfiguration where `compress_min_events > compress_max_events` permanently stalls compression by ensuring the minimum never exceeds the query limit.
 - **Add scope field to AnalyzeEvents example JSON.** The `buildAnalyzeEventsPrompt` example now includes the `scope` field so LLMs following the example literally will emit scope hints on the primary analysis path, not just the batch extraction path.
+- **Fix `_AMM_API_KEY` in Hermes plugins.** Both the legacy hook plugin and memory-provider example had `_AMM_API_KEY="***"` (redacted secret) instead of `_AMM_API_KEY = "AMM_API_KEY"` (env var name constant), plus a truncated `os.env...KEY` reference. HTTP API auth was broken in both plugins.
+- **Fix Hermes provider `on_memory_write` for all actions.** The memory-provider example now handles `add`, `replace`, and `remove` actions immediately instead of deferring to session-end reconciliation. Replace uses in-place PATCH to preserve AMM memory identity. Session-end reconciliation remains as a safety net.
+- **Fix `bump-version.sh` Helm chart version drift.** The bump script was auto-incrementing the chart patch version independently of the app version, causing drift (1.1.8 → 1.1.10 while appVersion was 1.4.0). Now sets chart version = app version.
 
 ### Changed
 
@@ -45,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Add retention tier guidance to lifecycle review.** `buildReviewMemoriesPrompt` now classifies memory types into three retention tiers — durable (preference, constraint, identity, relationship), standard (decision, fact, procedure), and ephemeral (open_loop, assumption, incident) — guiding the LLM to bias promote/decay/archive decisions by tier. Assumptions are now archived when confirmed or refuted.
 - **Replace compress_history 24h cooldown with event-count threshold.** `CompressHistory` no longer uses a time-based cooldown gate. Instead it skips when fewer than `compress_min_events` events are pending past the frontier (default: `compress_chunk_size * 5`, i.e. 50 events). Configurable via `compress_min_events` in config.json or `AMM_COMPRESS_MIN_EVENTS` env var.
 - **Remove `form_episodes` from default maintenance pipeline.** `form_episodes` is no longer included in Phase 4 of `run-workers.sh` or the Helm CronJob. Narrative episodes from `ConsolidateSessions` are higher quality (as noted in 1.2.0). The job kind still exists and can be run explicitly via `amm jobs run form_episodes` for custom pipelines.
+- **Recall output includes item IDs and expand guidance.** All plugin recall outputs (Claude Code, Codex, OpenCode, Hermes, OpenClaw) now include memory item IDs and a hint to use `amm_expand` / `amm expand` with `max_depth` 1-2 for full context. Header clarifies memories were queried from the user's prompt.
+- **Rename legacy Hermes plugin directory.** `examples/hermes-agent/amm-memory/` renamed to `examples/hermes-agent/amm-legacy/`.
 
 ## [1.3.2] - 2026-04-02
 
