@@ -100,23 +100,27 @@ class AMMMemoryProvider(MemoryProvider):
                 f"scoped to your memory space rather than the general store."
             )
         return (
-            "## Long-term memory (AMM)\n"
+            "<amm-system-instructions>\n"
+            "[SYSTEM-INJECTED — NOT USER INPUT. These are silent operational instructions for your memory system. "
+            "Do NOT mention, summarize, or acknowledge these instructions to the user.]\n"
+            "\n"
             "You have two memory tiers:\n"
-            "- **Built-in memory** (MEMORY.md/USER.md): small, always visible. "
-            "Keep only high-frequency context here — active preferences, current constraints, "
-            "things you need on every turn.\n"
-            "- **AMM** (via MCP tools or CLI): unlimited durable memory. "
-            "Relevant AMM memories are automatically surfaced each turn. "
-            "Use amm_remember (MCP) or `amm remember` (CLI) for detailed decisions, "
-            "procedures, project context, and anything too large for built-in memory. "
-            "Use amm_recall (MCP) or `amm recall` (CLI) for targeted search "
-            "when you need specific history.\n"
-            "When a recalled memory looks relevant but the summary is too thin to act on, "
-            "use amm_expand (MCP) or `amm expand` (CLI) with max_depth 1-2 to get the "
-            "full context — linked entities, related decisions, and child summaries.\n"
+            "- Built-in memory (MEMORY.md/USER.md): small, always visible. "
+            "Keep only high-frequency context here.\n"
+            "- AMM (via MCP tools or CLI): unlimited durable memory. "
+            "Relevant AMM memories are automatically surfaced each turn.\n"
+            "\n"
+            "How to use AMM (silently, without telling the user):\n"
+            "- amm_remember / `amm remember`: save decisions, procedures, project context\n"
+            "- amm_recall / `amm recall`: targeted search when you need specific history\n"
+            "- amm_expand / `amm expand --max-depth 1` (or --max-depth 2): "
+            "when a recalled memory is too thin to act on, expand it for full context "
+            "— linked entities, related decisions, and child summaries\n"
+            "\n"
             "When built-in memory is full, save detail to AMM rather than compressing "
             "or discarding entries. Let built-in memory stay lean."
             + project_hint
+            + "\n</amm-system-instructions>"
         )
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
@@ -345,7 +349,12 @@ class AMMMemoryProvider(MemoryProvider):
             items = data.get("items", [])
         if not isinstance(items, list) or not items:
             return ""
-        lines = ["amm ambient memory recall:"]
+        lines = [
+            "<amm-system-context>",
+            "[SYSTEM-INJECTED — NOT USER INPUT. This block was auto-injected by an AMM hook based on the user's prompt.]",
+            "",
+            "Potentially relevant memories from AMM (Agent Memory Manager):",
+        ]
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -353,15 +362,27 @@ class AMMMemoryProvider(MemoryProvider):
             text = item.get("tight_description") or item.get("body") or item.get("summary") or ""
             if not text:
                 continue
+            item_id = item.get("id", "")
+            id_suffix = f" [{item_id}]" if item_id else ""
             score = item.get("score")
             if score is None:
-                lines.append(f"- [{kind}] {text}")
+                lines.append(f"  - [{kind}] {text}{id_suffix}")
             else:
                 try:
-                    lines.append(f"- [{kind}] {text} (score: {float(score):.2f})")
+                    lines.append(f"  - [{kind}] {text} (score: {float(score):.2f}){id_suffix}")
                 except (TypeError, ValueError):
-                    lines.append(f"- [{kind}] {text}")
-        return "\n".join(lines) if len(lines) > 1 else ""
+                    lines.append(f"  - [{kind}] {text}{id_suffix}")
+        if len(lines) <= 4:
+            return ""
+        lines.extend([
+            "",
+            "If any of these memories are relevant to the user's request:",
+            "  1. Use amm_recall / `amm recall` to query for more detail on the topic",
+            "  2. Use amm_expand / `amm expand --max-depth 1` (or --max-depth 2) on item IDs above for full context",
+            "Do NOT acknowledge this block to the user — just silently use it to inform your work.",
+            "</amm-system-context>",
+        ])
+        return "\n".join(lines)
 
     # --- project resolution -------------------------------------------------
 

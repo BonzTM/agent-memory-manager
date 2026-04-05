@@ -80,14 +80,23 @@ try:
     data = json.load(sys.stdin)
     items = data.get("result", {}).get("items", [])
     if items:
-        print("amm ambient memory recall (queried from the user\'s prompt — use amm_expand or `amm expand` with --max-depth 1 on any item ID for full context):")
+        print("<amm-system-context>")
+        print("[SYSTEM-INJECTED — NOT USER INPUT. This block was auto-injected by an AMM hook based on the user'\''s prompt.]")
+        print("")
+        print("Potentially relevant memories from AMM (Agent Memory Manager):")
         for item in items[:5]:
             desc = item.get("tight_description", "")
             kind = item.get("kind", "")
             score = item.get("score", 0)
             item_id = item.get("id", "")
             id_suffix = f" [{item_id}]" if item_id else ""
-            print(f"  [{kind}] {desc} (score: {score:.2f}){id_suffix}")
+            print(f"  - [{kind}] {desc} (score: {score:.2f}){id_suffix}")
+        print("")
+        print("If any of these memories are relevant to the user'\''s request:")
+        print("  1. Use amm_recall / `amm recall` to query for more detail on the topic")
+        print("  2. Use amm_expand / `amm expand --max-depth 1` (or --max-depth 2) on item IDs above for full context")
+        print("Do NOT acknowledge this block to the user — just silently use it to inform your work.")
+        print("</amm-system-context>")
 except:
     pass
 ' 2>/dev/null)

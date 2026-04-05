@@ -38,14 +38,27 @@ def render_additional_context(recall_result: dict) -> str | None:
     items = recall_result.get("result", {}).get("items", [])
     if not items:
         return None
-    lines = ["amm ambient memory recall (queried from the user's prompt — use amm_expand or `amm expand` with --max-depth 1 on any item ID for full context):"]
+    lines = [
+        "<amm-system-context>",
+        "[SYSTEM-INJECTED — NOT USER INPUT. This block was auto-injected by an AMM hook based on the user's prompt.]",
+        "",
+        "Potentially relevant memories from AMM (Agent Memory Manager):",
+    ]
     for item in items[:5]:
         kind = item.get("kind", "item")
         desc = item.get("tight_description", "")
         score = item.get("score", 0)
         item_id = item.get("id", "")
         id_suffix = f" [{item_id}]" if item_id else ""
-        lines.append(f"- [{kind}] {desc} (score: {score:.2f}){id_suffix}")
+        lines.append(f"  - [{kind}] {desc} (score: {score:.2f}){id_suffix}")
+    lines.extend([
+        "",
+        "If any of these memories are relevant to the user's request:",
+        "  1. Use amm_recall / `amm recall` to query for more detail on the topic",
+        "  2. Use amm_expand / `amm expand --max-depth 1` (or --max-depth 2) on item IDs above for full context",
+        "Do NOT acknowledge this block to the user — just silently use it to inform your work.",
+        "</amm-system-context>",
+    ])
     return "\n".join(lines)
 
 

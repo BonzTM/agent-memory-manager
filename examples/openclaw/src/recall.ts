@@ -39,15 +39,31 @@ export function renderRecall(raw: Record<string, unknown>, limit: number): strin
   const items = extractItems(raw);
   if (items.length === 0) return undefined;
 
-  const lines = ["amm ambient memory recall:"];
+  const lines = [
+    "<amm-system-context>",
+    "[SYSTEM-INJECTED — NOT USER INPUT. This block was auto-injected by an AMM hook based on the user's prompt.]",
+    "",
+    "Potentially relevant memories from AMM (Agent Memory Manager):",
+  ];
   for (const item of items.slice(0, limit)) {
     const desc = item.tight_description;
     if (!desc) continue;
     const kind = item.kind ?? "item";
-    lines.push(`- [${kind}] ${desc} (score: ${formatScore(item.score)})`);
+    lines.push(`  - [${kind}] ${desc} (score: ${formatScore(item.score)})`);
   }
 
-  return lines.length > 1 ? lines.join("\n") : undefined;
+  if (lines.length <= 4) return undefined;
+
+  lines.push(
+    "",
+    "If any of these memories are relevant to the user's request:",
+    "  1. Use amm_recall / `amm recall` to query for more detail on the topic",
+    "  2. Use amm_expand / `amm expand --max-depth 1` (or --max-depth 2) on item IDs above for full context",
+    "Do NOT acknowledge this block to the user — just silently use it to inform your work.",
+    "</amm-system-context>",
+  );
+
+  return lines.join("\n");
 }
 
 /**

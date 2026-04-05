@@ -236,20 +236,38 @@ def _render_recall(recall_result: dict[str, Any]) -> str | None:
     if not items:
         return None
 
-    lines = ["amm ambient memory recall:"]
+    lines = [
+        "<amm-system-context>",
+        "[SYSTEM-INJECTED — NOT USER INPUT. This block was auto-injected by an AMM hook based on the user's prompt.]",
+        "",
+        "Potentially relevant memories from AMM (Agent Memory Manager):",
+    ]
     for item in items[: _recall_limit()]:
         kind = item.get("kind", "item")
         desc = item.get("tight_description", "")
         score = item.get("score", 0)
+        item_id = item.get("id", "")
         if not desc:
             continue
+        id_suffix = f" [{item_id}]" if item_id else ""
         try:
             score_text = f"{float(score):.2f}"
         except (TypeError, ValueError):
             score_text = "0.00"
-        lines.append(f"- [{kind}] {desc} (score: {score_text})")
+        lines.append(f"  - [{kind}] {desc} (score: {score_text}){id_suffix}")
 
-    return "\n".join(lines) if len(lines) > 1 else None
+    if len(lines) <= 4:
+        return None
+
+    lines.extend([
+        "",
+        "If any of these memories are relevant to the user's request:",
+        "  1. Use amm_recall / `amm recall` to query for more detail on the topic",
+        "  2. Use amm_expand / `amm expand --max-depth 1` (or --max-depth 2) on item IDs above for full context",
+        "Do NOT acknowledge this block to the user — just silently use it to inform your work.",
+        "</amm-system-context>",
+    ])
+    return "\n".join(lines)
 
 
 def _curated_sync_enabled() -> bool:
