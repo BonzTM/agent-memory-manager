@@ -1,14 +1,14 @@
-# acm-rules.yaml
+# awm-rules.yaml
 # Governance rules for agent-memory-manager (amm).
 # Starter rules + amm-specific rules for a Go, API-first, CLI/MCP-driven project.
 
-version: acm.rules.v1
+version: awm.rules.v1
 rules:
-  # --- Starter rules (from acm init) ---
+  # --- Starter rules (from awm init) ---
 
   - id: rule_startup_context
     summary: Start non-trivial work with context.
-    content: For multi-step, multi-file, or governed work, retrieve context before reading or editing repo files, then follow every hard rule returned in the receipt. Trivial single-file fixes can skip the ACM ceremony.
+    content: For multi-step, multi-file, or governed work, retrieve context before reading or editing repo files, then follow every hard rule returned in the receipt. Trivial single-file fixes can skip the AWM ceremony.
     enforcement: hard
     tags: [startup, context]
 
@@ -20,7 +20,7 @@ rules:
 
   - id: rule_track_multistep_work
     summary: Track multi-step or multi-file work with work.
-    content: Create or update a work plan when the task spans multiple steps, touches multiple files, or may need to survive context compaction. Use verify:tests as the executable verification task when code changes, and add any extra task keys required by .acm/acm-workflows.yaml.
+    content: Create or update a work plan when the task spans multiple steps, touches multiple files, or may need to survive context compaction. Use verify:tests as the executable verification task when code changes, and add any extra task keys required by .awm/awm-workflows.yaml.
     enforcement: hard
     tags: [planning, tracking]
 
@@ -32,13 +32,13 @@ rules:
 
   - id: rule_verify_code_changes
     summary: Run verify before closing code, config, or behavior changes.
-    content: Use repo-defined verify checks that match the changed files and current phase. Do not call done until executable verification has passed or the required completion tasks from .acm/acm-workflows.yaml are satisfied.
+    content: Use repo-defined verify checks that match the changed files and current phase. Do not call done until executable verification has passed or the required completion tasks from .awm/awm-workflows.yaml are satisfied.
     enforcement: hard
     tags: [verification, quality]
 
   - id: rule_done
     summary: Finish non-trivial work with done.
-    content: For work that used the ACM task loop, report every changed file for file-backed work when you know them and give a concise outcome summary. ACM can derive the task delta from the receipt baseline; when that detected delta is empty, the closeout is effectively no-file.
+    content: For work that used the AWM task loop, report every changed file for file-backed work when you know them and give a concise outcome summary. AWM can derive the task delta from the receipt baseline; when that detected delta is empty, the closeout is effectively no-file.
     enforcement: hard
     tags: [completion, audit]
 
@@ -131,13 +131,13 @@ rules:
     summary: Governed multi-step work must use the staged plan contract.
     content: >-
       For governed multi-file or multi-step work in this repo, create a root
-      ACM plan with `kind=feature|maintenance|governance`, explicit scope
+      AWM plan with `kind=feature|maintenance|governance`, explicit scope
       metadata (`objective`, `in_scope`, `out_of_scope`, `constraints`,
       `references`), `stages.spec_outline` / `refined_spec` /
       `implementation_plan`, top-level `stage:*` tasks, and leaf tasks that
       include exact `references` plus explicit `acceptance_criteria`. Use
-      `acm verify` to enforce the schema through
-      `scripts/acm-feature-plan-validate.py`.
+      `awm verify` to enforce the schema through
+      `scripts/awm-feature-plan-validate.py`.
     enforcement: hard
     tags: [planning, workflow, docs]
 

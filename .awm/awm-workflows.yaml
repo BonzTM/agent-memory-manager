@@ -1,10 +1,10 @@
-version: acm.workflows.v1
+version: awm.workflows.v1
 completion:
   required_tasks:
     - key: verify:tests
       select:
         changed_paths_any:
-          - ".acm/**"
+          - ".awm/**"
           - "AGENTS.md"
           - "CLAUDE.md"
           - "CODEX.md"

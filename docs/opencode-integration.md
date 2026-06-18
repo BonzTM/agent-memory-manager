@@ -108,7 +108,7 @@ OpenCode operators should use the same durable-memory loop as every other runtim
 - use the OpenCode plugin only for the stable capture surfaces it really exposes
 - keep heavier AMM jobs outside the OpenCode runtime
 
-If the repo also uses ACM, ACM owns task workflow and AMM owns durable memory.
+If the repo also uses AWM, AWM owns task workflow and AMM owns durable memory.
 
 ## Suggested usage pattern
 

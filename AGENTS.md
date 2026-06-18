@@ -5,7 +5,7 @@ Operating contract for **amm (Agent Memory Manager)** — a Go, API-first, CLI/M
 ## Quick Start
 
 1. Read this file for repo rules, architecture, and change routing.
-2. If your agent runtime provides ACM, see [.acm/AGENTS-ACM.md](.acm/AGENTS-ACM.md) for the enhanced workflow.  If you are unaware or unsure of what ACM is, do not read the file.
+2. If your agent runtime provides AWM, see [.awm/AGENTS-AWM.md](.awm/AGENTS-AWM.md) for the enhanced workflow.  If you are unaware or unsure of what AWM is, do not read the file.
 3. If using Claude, also read [CLAUDE.md](CLAUDE.md).
 
 ## Source Of Truth
@@ -97,7 +97,7 @@ Key config areas: summarizer/LLM settings, batch sizes, pipeline thresholds, emb
 
 - **Go 1.26.1+**
 - **Python 3** — needed for validation scripts in `scripts/`
-- **`.env` file** — copy `.env.example` to `.env` and populate `ACM_*` variables if using ACM workflows
+- **`.env` file** (optional) — copy `.env.example` to `.env` to override local defaults
 
 ## Build & Test
 
@@ -159,4 +159,3 @@ Changes to these areas require extra care — verify thoroughly and flag in PR d
 | Problem | Likely cause | Fix |
 |---------|-------------|-----|
 | Tests fail with "database is locked" | Concurrent test processes sharing a DB file | Use `-count=1` to disable test caching; ensure tests use isolated temp DBs |
-| `acm` commands fail | Missing `.env` or ACM not installed | Check `.env` exists with `ACM_*` vars; run `acm status` to debug |

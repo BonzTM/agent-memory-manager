@@ -4,10 +4,10 @@
 .codex/
 .scratch/
 
-# ACM local state
-.acm/context.db
-.acm/context.db-shm
-.acm/context.db-wal
+# AWM local state
+.awm/context.db
+.awm/context.db-shm
+.awm/context.db-wal
 
 # Secrets
 .env

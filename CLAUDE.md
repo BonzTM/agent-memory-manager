@@ -3,7 +3,7 @@
 Claude companion for amm (Agent Memory Manager). Primary contract is `AGENTS.md`.
 
 - Follow `AGENTS.md` first. If this file conflicts, `AGENTS.md` wins.
-- If ACM is available in your session, also follow [.acm/AGENTS-ACM.md](.acm/AGENTS-ACM.md).
+- If AWM is available in your session, also follow [.awm/AGENTS-AWM.md](.awm/AGENTS-AWM.md).
 
 ## Claude-Specific Notes
 

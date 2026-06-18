@@ -5,4 +5,4 @@ command = "/usr/local/bin/amm-mcp"
 AMM_DB_PATH = "/home/you/.amm/amm.db"
 
 [features]
-codex_hooks = true
+hooks = true

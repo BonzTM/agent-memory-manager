@@ -1,4 +1,4 @@
-version: acm.tests.v1
+version: awm.tests.v1
 
 defaults:
   cwd: .
@@ -6,9 +6,9 @@ defaults:
 
 tests:
   - id: smoke
-    summary: Confirm ACM can load repo-local setup and report current status
+    summary: Confirm AWM can load repo-local setup and report current status
     command:
-      argv: ["acm", "status", "--project-root", "."]
+      argv: ["awm", "status", "--project-root", "."]
     select:
       always_run: true
     expected:
@@ -66,20 +66,20 @@ tests:
     expected:
       exit_code: 0
 
-  - id: acm-feature-plan-help
-    summary: Ensure the repo-local ACM staged-plan validator exposes help
+  - id: awm-feature-plan-help
+    summary: Ensure the repo-local AWM staged-plan validator exposes help
     command:
-      argv: ["python3", "scripts/acm-feature-plan-validate.py", "--help"]
+      argv: ["python3", "scripts/awm-feature-plan-validate.py", "--help"]
     select:
       phases: ["execute", "review"]
-      changed_paths_any: ["scripts/acm-feature-plan-validate.py"]
+      changed_paths_any: ["scripts/awm-feature-plan-validate.py"]
     expected:
       exit_code: 0
 
-  - id: acm-feature-plan-validate
-    summary: Validate the repo-local ACM staged-plan schema for governed work
+  - id: awm-feature-plan-validate
+    summary: Validate the repo-local AWM staged-plan schema for governed work
     command:
-      argv: ["python3", "scripts/acm-feature-plan-validate.py"]
+      argv: ["python3", "scripts/awm-feature-plan-validate.py"]
     select:
       phases: ["execute", "review"]
       changed_paths_any: ["cmd/**", "internal/**", "go.mod", "go.sum", "spec/**"]

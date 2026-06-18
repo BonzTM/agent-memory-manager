@@ -1,4 +1,4 @@
-version: acm.tags.v1
+version: awm.tags.v1
 canonical_tags:
   amm: [amm, agent-memory-manager, memory-manager]
   api: [api, http, endpoints, rest]

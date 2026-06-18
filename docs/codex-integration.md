@@ -49,7 +49,7 @@ Codex operators should keep the hot path simple:
 - let hooks capture prompts/session metadata/tool history where Codex actually exposes those surfaces
 - keep `amm jobs run <kind>` external to the Codex runtime
 
-If the repo also uses ACM, ACM owns task workflow and AMM owns durable memory.
+If the repo also uses AWM, AWM owns task workflow and AMM owns durable memory.
 
 ## 1. Build and Initialize amm
 
@@ -78,7 +78,7 @@ command = "/usr/local/bin/amm-mcp"
 AMM_DB_PATH = "/home/you/.amm/amm.db"
 
 [features]
-codex_hooks = true
+hooks = true
 ```
 
 That gives Codex direct access to the amm MCP tools while keeping the public amm surface exactly the same as every other runtime: stdio MCP plus the CLI.
@@ -100,7 +100,7 @@ The example files in [`examples/codex/`](../examples/codex/) show one grounded p
 - `session-start.py` logs a lightweight session-start event
 - `user-prompt-submit.py` ingests the user prompt and turns amm recall results into Codex hook `additionalContext`
 - `session-stop.py` imports assistant/tool history from `transcript_path` when possible (assistant messages, tool calls, and tool results), falls back to `last_assistant_message` when not, then records concise session metadata
-- `config.toml` enables `codex_hooks` and registers `amm-mcp`
+- `config.toml` enables `hooks` and registers `amm-mcp`
 - `hooks.json` is the separate Codex hook manifest that wires those scripts into Codex
 
 ### Install the Hook Scripts
