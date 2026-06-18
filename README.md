@@ -1,6 +1,6 @@
 > [!WARNING] 
-# This project was really fun and worked super well, but I have since pivoted to using (and contributing) to [Hindsight](https://github.com/vectorize-io/hindsight/tree/main) for the near future.  
-# This repo will stay archived for the forseeable future
+> This project was really fun and worked super well, but I have since pivoted to using (and contributing) to [Hindsight](https://github.com/vectorize-io/hindsight/tree/main) for the near future.  
+> This repo will stay archived for the forseeable future
 
 # amm — Agent Memory Manager
 
